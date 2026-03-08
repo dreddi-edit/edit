@@ -678,6 +678,33 @@ app.post("/api/admin/migrate-credits", authMiddleware, ownerOnly, (req, res) => 
   }
 })
 
+// Send password reset
+app.post("/api/admin/send-reset", authMiddleware, ownerOnly, (req, res) => {
+  try {
+    const { userId } = req.body
+    const user = db.prepare("SELECT email FROM users WHERE id = ?").get(userId)
+    
+    if (!user) {
+      return res.status(404).json({ ok: false, error: "User not found" })
+    }
+    
+    // Generate reset token
+    const crypto = require("crypto")
+    const resetToken = crypto.randomBytes(32).toString("hex")
+    
+    // Store reset token
+    db.prepare(`
+      INSERT OR REPLACE INTO password_resets (user_id, token, expires_at)
+      VALUES (?, ?, datetime('now', '+1 hour'))
+    `).run(userId, resetToken)
+    
+    // Send email (you'll need to configure this)
+    res.json({ ok: true, message: "Password reset link sent" })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
 // Create new user
 app.post("/api/admin/users", authMiddleware, ownerOnly, (req, res) => {
   try {

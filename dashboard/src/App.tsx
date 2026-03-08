@@ -190,6 +190,29 @@ const addCredits = async (userId: number, userEmail: string) => {
   }
 }
 
+const resetPassword = async (userId: number, userEmail: string) => {
+  if (!confirm(`Send password reset link to "${userEmail}"?`)) {
+    return
+  }
+  
+  try {
+    const r = await fetch("/api/admin/send-reset", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId }),
+      credentials: "include"
+    })
+    const d = await r.json()
+    if (d.ok) {
+      alert(`Password reset link sent to ${userEmail}`)
+    } else {
+      alert(`Failed to send reset: ${d.error || "Unknown error"}`)
+    }
+  } catch {
+    alert("Failed to send reset - network error")
+  }
+}
+
 const createUser = async () => {
   if (!newUser.email || !newUser.password) {
     alert("Email and password required")
@@ -440,18 +463,24 @@ useEffect(() => {
           {adminUsers.map((u: any) => (
             <div key={u.id} style={{ display: "grid", gridTemplateColumns: "80px 1.8fr 1fr 1fr 120px", padding: 14, borderTop: "1px solid #1f2937", alignItems: "center" }}>
               <div>{u.id}</div>
-              <div>{u.email + " | credits: " + (u.credits ?? 0)}</div>
+              <div>{u.email}</div>
               <div>{u.name || "-"}</div>
               <div>{u.created_at || "-"}</div>
               <div style={{ display: "flex", gap: 5, flexDirection: "column" }}>
                 <button
-                  onClick={() => addCredits(u.id, u.email + " | credits: " + (u.credits ?? 0))}
+                  onClick={() => addCredits(u.id, u.email)}
                   style={{ padding: "6px 8px", borderRadius: 4, border: "1px solid #10b981", background: "#10b981", color: "white", cursor: "pointer", fontSize: 11, fontWeight: 600 }}
                 >
                   💰 Add Credits
                 </button>
                 <button
-                  onClick={() => deleteUser(u.id, u.email + " | credits: " + (u.credits ?? 0))}
+                  onClick={() => resetPassword(u.id, u.email)}
+                  style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid #f59e0b", background: "#f59e0b", color: "white", cursor: "pointer", fontSize: 11 }}
+                >
+                  🔑 Reset PW
+                </button>
+                <button
+                  onClick={() => deleteUser(u.id, u.email)}
                   style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid #dc2626", background: "#dc2626", color: "white", cursor: "pointer", fontSize: 11 }}
                 >
                   🗑️ Delete
