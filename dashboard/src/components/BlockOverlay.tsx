@@ -42,146 +42,166 @@ function discoverUniversalBlocks(doc: Document): Map<string, string> {
   const clickables = doc.querySelectorAll('a, button, [onclick], [role="button"], [data-toggle], .dropdown-toggle, .accordion-header, input[type="button"], input[type="submit"]');
   
   clickables.forEach((el) => {
-    const element = el as HTMLElement;
-    const selector = generateSelector(element);
-    
-    // Analyze what this element does WITHOUT triggering it
-    let behavior = 'clickable';
-    let description = '';
-    
-    // Check if it's a link
-    if (element.tagName === 'A') {
-      const href = (element as HTMLAnchorElement).href;
-      if (href && href !== '#') {
-        behavior = 'link';
-        description = `Links to: ${href}`;
-      } else if (href === '#' || !href) {
-        behavior = 'anchor';
-        description = 'Page anchor or action button';
-      }
-    }
-    
-    // Check if it's a button
-    if (element.tagName === 'BUTTON' || element.getAttribute('role') === 'button') {
-      const text = (element.textContent || '').trim();
-      const type = element.getAttribute('type');
+    try {
+      const element = el as HTMLElement;
+      const selector = generateSelector(element);
       
-      if (type === 'submit') {
-        behavior = 'submit';
-        description = 'Submits form';
-      } else if (type === 'reset') {
-        behavior = 'reset';
-        description = 'Resets form';
-      } else if (text.toLowerCase().includes('menu') || element.closest('nav')) {
-        behavior = 'menu';
-        description = 'Menu button';
-      } else if (text.toLowerCase().includes('search')) {
-        behavior = 'search';
-        description = 'Search button';
-      } else if (text.toLowerCase().includes('cart') || text.toLowerCase().includes('basket')) {
-        behavior = 'cart';
-        description = 'Shopping cart';
-      } else if (text.toLowerCase().includes('login') || text.toLowerCase().includes('sign in')) {
-        behavior = 'login';
-        description = 'Login button';
-      } else if (text.toLowerCase().includes('register') || text.toLowerCase().includes('sign up')) {
-        behavior = 'register';
-        description = 'Registration button';
-      } else if (text.toLowerCase().includes('download')) {
-        behavior = 'download';
-        description = 'Download button';
-      } else if (text.toLowerCase().includes('play')) {
-        behavior = 'play';
-        description = 'Play button';
-      } else {
-        behavior = 'button';
-        description = `Button: ${text}`;
+      // Skip if selector generation failed
+      if (selector === 'element-issue') {
+        discoveries.set(selector, 'Issue: Cannot generate valid selector');
+        return;
       }
-    }
-    
-    // Check for dropdown indicators
-    if (element.hasAttribute('data-toggle') || element.classList.contains('dropdown-toggle') || element.closest('.dropdown')) {
-      behavior = 'dropdown';
-      description = 'Dropdown menu';
       
-      // Find dropdown items without triggering
-      const dropdownId = element.getAttribute('data-target') || element.getAttribute('href');
-      if (dropdownId) {
-        const dropdown = doc.querySelector(dropdownId);
-        if (dropdown) {
-          const items = dropdown.querySelectorAll('a, li, button');
-          if (items.length > 0) {
-            const itemTexts = Array.from(items).slice(0, 5).map(item => 
-              (item.textContent || '').trim()
-            ).filter(text => text).join(', ');
-            description += ` containing: ${itemTexts}`;
+      // Analyze what this element does WITHOUT triggering it
+      let behavior = 'clickable';
+      let description = '';
+      
+      // Check if it's a link
+      if (element.tagName === 'A') {
+        const href = (element as HTMLAnchorElement).href;
+        if (href && href !== '#') {
+          behavior = 'link';
+          description = `Links to: ${href}`;
+        } else if (href === '#' || !href) {
+          behavior = 'anchor';
+          description = 'Page anchor or action button';
+        }
+      }
+      
+      // Check if it's a button
+      if (element.tagName === 'BUTTON' || element.getAttribute('role') === 'button') {
+        const text = (element.textContent || '').trim();
+        const type = element.getAttribute('type');
+        
+        if (type === 'submit') {
+          behavior = 'submit';
+          description = 'Submits form';
+        } else if (type === 'reset') {
+          behavior = 'reset';
+          description = 'Resets form';
+        } else if (text.toLowerCase().includes('menu') || element.closest('nav')) {
+          behavior = 'menu';
+          description = 'Menu button';
+        } else if (text.toLowerCase().includes('search')) {
+          behavior = 'search';
+          description = 'Search button';
+        } else if (text.toLowerCase().includes('cart') || text.toLowerCase().includes('basket')) {
+          behavior = 'cart';
+          description = 'Shopping cart';
+        } else if (text.toLowerCase().includes('login') || text.toLowerCase().includes('sign in')) {
+          behavior = 'login';
+          description = 'Login button';
+        } else if (text.toLowerCase().includes('register') || text.toLowerCase().includes('sign up')) {
+          behavior = 'register';
+          description = 'Registration button';
+        } else if (text.toLowerCase().includes('download')) {
+          behavior = 'download';
+          description = 'Download button';
+        } else if (text.toLowerCase().includes('play')) {
+          behavior = 'play';
+          description = 'Play button';
+        } else {
+          behavior = 'button';
+          description = `Button: ${text}`;
+        }
+      }
+      
+      // Check for dropdown indicators
+      if (element.hasAttribute('data-toggle') || element.classList.contains('dropdown-toggle') || element.closest('.dropdown')) {
+        behavior = 'dropdown';
+        description = 'Dropdown menu';
+        
+        // Find dropdown items without triggering
+        const dropdownId = element.getAttribute('data-target') || element.getAttribute('href');
+        if (dropdownId) {
+          try {
+            const dropdown = doc.querySelector(dropdownId);
+            if (dropdown) {
+              const items = dropdown.querySelectorAll('a, li, button');
+              if (items.length > 0) {
+                const itemTexts = Array.from(items).slice(0, 5).map(item => 
+                  (item.textContent || '').trim()
+                ).filter(text => text).join(', ');
+                description += ` containing: ${itemTexts}`;
+              }
+            }
+          } catch (e) {
+            description += ' (cannot analyze items)';
           }
         }
       }
+      
+      // Check for accordion/collapsible
+      if (element.closest('.accordion') || element.closest('.collapse') || element.hasAttribute('data-toggle') && element.getAttribute('data-toggle') === 'collapse') {
+        behavior = 'accordion';
+        description = 'Collapsible section';
+      }
+      
+      // Check for tabs
+      if (element.closest('[role="tablist"]') || element.getAttribute('role') === 'tab') {
+        behavior = 'tab';
+        description = 'Tab navigation';
+      }
+      
+      // Check for modal triggers
+      if (element.hasAttribute('data-target') && element.getAttribute('data-target')?.includes('modal') || element.closest('.modal')) {
+        behavior = 'modal';
+        description = 'Modal popup';
+      }
+      
+      // Check for form inputs
+      if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || element.tagName === 'SELECT') {
+        behavior = 'input';
+        const type = element.getAttribute('type') || element.tagName.toLowerCase();
+        const placeholder = element.getAttribute('placeholder') || '';
+        description = `Input field: ${type}${placeholder ? ` (${placeholder})` : ''}`;
+      }
+      
+      // Store discovery with description
+      discoveries.set(selector, description || behavior);
+    } catch (error) {
+      // Skip problematic elements but continue processing others
+      console.warn('Skipping problematic element:', (error as Error).message);
     }
-    
-    // Check for accordion/collapsible
-    if (element.closest('.accordion') || element.closest('.collapse') || element.hasAttribute('data-toggle') && element.getAttribute('data-toggle') === 'collapse') {
-      behavior = 'accordion';
-      description = 'Collapsible section';
-    }
-    
-    // Check for tabs
-    if (element.closest('[role="tablist"]') || element.getAttribute('role') === 'tab') {
-      behavior = 'tab';
-      description = 'Tab navigation';
-    }
-    
-    // Check for modal triggers
-    if (element.hasAttribute('data-target') && element.getAttribute('data-target')?.includes('modal') || element.closest('.modal')) {
-      behavior = 'modal';
-      description = 'Modal popup';
-    }
-    
-    // Check for form inputs
-    if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || element.tagName === 'SELECT') {
-      behavior = 'input';
-      const type = element.getAttribute('type') || element.tagName.toLowerCase();
-      const placeholder = element.getAttribute('placeholder') || '';
-      description = `Input field: ${type}${placeholder ? ` (${placeholder})` : ''}`;
-    }
-    
-    // Store discovery with description
-    discoveries.set(selector, description || behavior);
   });
   
   return discoveries;
 }
 
-// Generate unique selector for element
+// Generate unique selector for element with error handling
 function generateSelector(el: Element): string {
-  if (el.id) {
-    // Ensure ID is valid (no special chars)
-    const id = el.id.replace(/[^a-zA-Z0-9_-]/g, '');
-    if (id) return `#${id}`;
+  try {
+    if (el.id) {
+      // Ensure ID is valid (no special chars)
+      const id = el.id.replace(/[^a-zA-Z0-9_-]/g, '');
+      if (id) return `#${id}`;
+    }
+    
+    if (el.className) {
+      const classes = el.className.split(' ')
+        .filter(c => c && !c.includes('wp-block') && /^[a-zA-Z][\w-]*$/.test(c))
+        .slice(0, 2); // Limit to 2 classes
+      if (classes.length > 0) return `.${classes.join('.')}`;
+    }
+    
+    // Use tag with data attributes if available
+    if (el.getAttribute('data-block-id')) {
+      return `${el.tagName.toLowerCase()}[data-block-id="${el.getAttribute('data-block-id')}"]`;
+    }
+    
+    // Fallback to tag with nth-child to ensure uniqueness
+    const parent = el.parentElement;
+    if (parent) {
+      const siblings = Array.from(parent.children);
+      const index = siblings.indexOf(el) + 1;
+      return `${el.tagName.toLowerCase()}:nth-child(${index})`;
+    }
+    
+    return el.tagName.toLowerCase();
+  } catch (error) {
+    // If selector generation fails, return safe fallback
+    return 'element-issue';
   }
-  
-  if (el.className) {
-    const classes = el.className.split(' ')
-      .filter(c => c && !c.includes('wp-block') && /^[a-zA-Z][\w-]*$/.test(c))
-      .slice(0, 2); // Limit to 2 classes
-    if (classes.length > 0) return `.${classes.join('.')}`;
-  }
-  
-  // Use tag with data attributes if available
-  if (el.getAttribute('data-block-id')) {
-    return `${el.tagName.toLowerCase()}[data-block-id="${el.getAttribute('data-block-id')}"]`;
-  }
-  
-  // Fallback to tag with nth-child to ensure uniqueness
-  const parent = el.parentElement;
-  if (parent) {
-    const siblings = Array.from(parent.children);
-    const index = siblings.indexOf(el) + 1;
-    return `${el.tagName.toLowerCase()}:nth-child(${index})`;
-  }
-  
-  return el.tagName.toLowerCase();
 }
 
 // Enhanced block detection with universal discovery
