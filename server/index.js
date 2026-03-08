@@ -68,6 +68,12 @@ import { groqRewriteBlock } from "./groq.js"
 import { ollamaRewriteBlock, ollamaHealth } from "./ollama.js"
 import { resolveModel } from "./autoRouter.js"
 import archiver from "archiver"
+import path from "path"
+import { fileURLToPath } from "url"
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const dashboardDist = path.join(__dirname, "..", "dashboard", "dist")
 
 function extractJsonFromText(text) {
   if (!text) return text;
@@ -143,6 +149,12 @@ app.use(cors({
 
 app.use(cookieParser())
 app.use(express.json({ limit: '25mb' }))
+
+app.use(express.static(dashboardDist))
+
+app.get("/", (_req, res) => {
+  res.sendFile(path.join(dashboardDist, "index.html"))
+})
 
 app.get("/proxy", proxy)
 app.get("/asset", asset)
