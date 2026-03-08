@@ -36,18 +36,6 @@ export async function sendWelcome(email, name) {
   `)
 }
 
-export async function sendPasswordReset(email, token) {
-  const link = `${APP_URL}/reset-password?token=${token}`
-  await send(email, "Passwort zurücksetzen – Site Editor", `
-    <div style="font-family:system-ui;max-width:480px;margin:0 auto;padding:32px">
-      <h1 style="color:#6366f1">Passwort zurücksetzen</h1>
-      <p>Klicke auf den Link um ein neues Passwort zu setzen.</p>
-      <a href="${link}" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#6366f1;color:white;border-radius:8px;text-decoration:none;font-weight:700">Passwort zurücksetzen</a>
-      <p style="margin-top:24px;font-size:12px;color:#94a3b8">Gültig für 1 Stunde.</p>
-    </div>
-  `)
-}
-
 export async function sendTeamInvite(email, orgName, inviterName) {
   await send(email, `${inviterName} hat dich zu ${orgName} eingeladen`, `
     <div style="font-family:system-ui;max-width:480px;margin:0 auto;padding:32px">
