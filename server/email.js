@@ -1,12 +1,19 @@
 import { Resend } from 'resend'
 
 const APP_URL = process.env.APP_URL || "https://edit-production-ca78.up.railway.app"
+
+// Check if RESEND_API_KEY is set
+if (!process.env.RESEND_API_KEY) {
+  console.error('❌ RESEND_API_KEY environment variable is not set!')
+  console.error('Please set RESEND_API_KEY in Railway dashboard')
+}
+
 const resend = new Resend(process.env.RESEND_API_KEY)
 
 async function send(to, subject, html) {
   try {
     const { data, error } = await resend.emails.send({
-      from: 'Site Editor <onboarding@resend.dev>',
+      from: 'Site Editor <noreply@edit-production-ca78.up.railway.app>',
       to: [to],
       subject: subject,
       html: html
