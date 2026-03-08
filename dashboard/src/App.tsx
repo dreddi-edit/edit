@@ -71,7 +71,7 @@ export default function App() {
 
   // Auth check beim Start
   useEffect(() => {
-    fetch("http://localhost:8787/api/credits/balance", { credentials: "include" })
+    fetch("/api/credits/balance", { credentials: "include" })
       .then(r => r.json()).then(d => { if (d.ok) setBalance(d.balance_eur) }).catch(() => {})
     apiMe().then(user => {
       if (user) { setAuthUser(user); setView("dashboard") }
@@ -166,7 +166,7 @@ export default function App() {
   const handleExport = async () => {
     if (!currentHtml) { toast.warning("Bitte lade zuerst eine Website"); return; }
     try {
-      const r = await fetch("http://localhost:8787/api/export", {
+      const r = await fetch("/api/export", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ html: currentHtml, url: loadedUrl, mode: exportMode })
       });

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { toast } from "./Toast"
 import { getRequireApproval, setRequireApproval } from "../approval-settings"
 
-const BASE = "http://localhost:8787"
+const BASE = ""
 
 type ApiKey = { id: number; provider: string; label: string; detected_models: { value: string; label: string }[]; active: number }
 type Org = { id: number; name: string; owner_id: number }

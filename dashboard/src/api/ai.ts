@@ -1,6 +1,6 @@
 export async function aiRewrite(html:string,instruction:string){
 
-  const r = await fetch("http://localhost:8787/api/ai/rewrite-block",{
+  const r = await fetch("/api/ai/rewrite-block",{
     method:"POST",
     headers:{ "content-type":"application/json" },
     body:JSON.stringify({ html, instruction })

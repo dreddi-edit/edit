@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { toast } from "./Toast"
 
-const BASE = "http://localhost:8787"
+const BASE = ""
 
 type Package = { id: string; label: string; amount_eur: number; credits_eur: number; description: string }
 type Transaction = { id: number; amount_eur: number; type: string; description: string; created_at: string }

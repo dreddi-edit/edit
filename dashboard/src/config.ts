@@ -1,4 +1,4 @@
-export const API_BASE = 'http://localhost:8787';
+export const API_BASE = '';
 export const ENDPOINTS = {
   analyze: `${API_BASE}/api/ai/analyze-and-rebuild`,
   rewrite: `${API_BASE}/api/ai/rewrite-block`,

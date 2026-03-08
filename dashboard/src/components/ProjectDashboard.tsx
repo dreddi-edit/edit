@@ -6,7 +6,7 @@ import SettingsPanel from "./SettingsPanel"
 import { apiLogout, type User } from "../api/auth"
 import { toast } from "./Toast"
 
-const BASE = "http://localhost:8787"
+const BASE = ""
 
 // Screenshot via proxy
 async function captureThumb(url: string): Promise<string | null> {

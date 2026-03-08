@@ -1,4 +1,4 @@
-const BASE = "http://localhost:8787"
+const BASE = ""
 
 export type User = { id: number; email: string; name: string }
 

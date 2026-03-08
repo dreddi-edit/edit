@@ -1756,7 +1756,7 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
 
 
         // Streaming fetch
-        const streamResp = await fetch("http://localhost:8787/api/ai/rewrite-block-stream", {
+        const streamResp = await fetch("/api/ai/rewrite-block-stream", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -1855,7 +1855,7 @@ const aiRescan = useCallback(async (mode: "block" | "page") => {
         if (mode === "block" && sid) rootEl = doc.querySelector(`[data-block-id="${sid}"]`) as HTMLElement | null;
         const htmlToSend = rootEl ? rootEl.outerHTML : doc.body.innerHTML;
 
-        const resp = await fetch("http://localhost:8787/api/ai/analyze-and-rebuild?ai=1", {
+        const resp = await fetch("/api/ai/analyze-and-rebuild?ai=1", {
           method: "POST", headers: { "content-type": "application/json" },
           body: JSON.stringify({ html: htmlToSend }),
         });
@@ -2155,7 +2155,7 @@ const applyEdit = useCallback(() => {
 
     try {
       console.log("AI Layout: sending", sameLevel.length, "blocks");
-      const res = await fetch("http://localhost:8787/api/ai/rewrite-block", {
+      const res = await fetch("/api/ai/rewrite-block", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
