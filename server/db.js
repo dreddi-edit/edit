@@ -36,6 +36,7 @@ db.exec(`
     anthropic_key TEXT DEFAULT '',
     gemini_key TEXT DEFAULT '',
     groq_key TEXT DEFAULT '',
+    credits INTEGER DEFAULT 0,
     FOREIGN KEY (user_id) REFERENCES users(id)
   );
 

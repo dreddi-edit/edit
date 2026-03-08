@@ -152,7 +152,7 @@ const deleteUser = async (userId: number, userEmail: string) => {
 }
 
 const addCredits = async (userId: number, userEmail: string) => {
-  const credits = prompt(`How many credits to add to "${userEmail}"?`)
+  const credits = prompt(`How many dollars in credits to add to "${userEmail}"?`)
   if (!credits || isNaN(Number(credits)) || Number(credits) <= 0) {
     return
   }
@@ -161,12 +161,12 @@ const addCredits = async (userId: number, userEmail: string) => {
     const r = await fetch(`/api/admin/users/${userId}/add-credits`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ credits: Number(credits) }),
+      body: JSON.stringify({ credits: Number(Number(credits) * 100) }), // Convert dollars to cents
       credentials: "include"
     })
     const d = await r.json()
     if (d.ok) {
-      alert(`Added ${credits} credits to ${userEmail}`)
+      alert(`Added $${credits} credits to ${userEmail}`)
       loadAdminUsers()
     } else {
       alert(d.error || "Add credits failed")
@@ -186,7 +186,7 @@ const createUser = async () => {
     const r = await fetch("/api/admin/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(newUser),
+      body: JSON.stringify({...newUser, credits: Number(newUser.credits * 100)}), // Convert dollars to cents
       credentials: "include"
     })
     const d = await r.json()
@@ -479,7 +479,7 @@ useEffect(() => {
               />
               <input
                 type="number"
-                placeholder="Credits (default 0)"
+                placeholder="Credits in dollars (default 0)"
                 value={newUser.credits}
                 onChange={(e) => setNewUser({...newUser, credits: Number(e.target.value)})}
                 style={{ width: "100%", padding: 8, marginBottom: 16, borderRadius: 4, border: "1px solid #334155", background: "#111827", color: "white" }}

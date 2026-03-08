@@ -1,5 +1,7 @@
 
 
+import bcrypt from "bcryptjs"
+
 // --- Export transforms (mode-aware) ---
 function decodeAssetProxyEverywhere(input){
   let out = String(input || "");
@@ -537,14 +539,32 @@ app.delete("/api/admin/users/:id", authMiddleware, ownerOnly, (req, res) => {
       return res.status(400).json({ ok: false, error: "Invalid user ID" })
     }
     
+    // Get user email before deletion
+    const user = db.prepare("SELECT email FROM users WHERE id = ?").get(userId)
+    if (!user) {
+      return res.status(404).json({ ok: false, error: "User not found" })
+    }
+    
     // Delete user's projects first
     db.prepare("DELETE FROM projects WHERE user_id = ?").run(userId)
     
     // Delete user's settings
     db.prepare("DELETE FROM user_settings WHERE user_id = ?").run(userId)
     
-    // Delete user's team memberships
-    db.prepare("DELETE FROM team_members WHERE owner_id = ? OR member_email = (SELECT email FROM users WHERE id = ?)").run(userId, userId)
+    // Delete user's team memberships (as owner)
+    db.prepare("DELETE FROM team_members WHERE owner_id = ?").run(userId)
+    
+    // Delete user's team memberships (as member)
+    db.prepare("DELETE FROM team_members WHERE member_email = ?").run(user.email)
+    
+    // Delete user's org memberships
+    db.prepare("DELETE FROM org_members WHERE user_id = ?").run(userId)
+    
+    // Delete user's org ownerships
+    db.prepare("DELETE FROM organisations WHERE owner_id = ?").run(userId)
+    
+    // Delete user's API keys
+    db.prepare("DELETE FROM user_api_keys WHERE user_id = ?").run(userId)
     
     // Delete user
     const result = db.prepare("DELETE FROM users WHERE id = ?").run(userId)
@@ -612,7 +632,6 @@ app.post("/api/admin/users", authMiddleware, ownerOnly, (req, res) => {
     }
     
     // Hash password
-    const bcrypt = require("bcryptjs")
     const hash = bcrypt.hashSync(password, 10)
     
     // Create user
