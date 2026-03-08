@@ -527,6 +527,118 @@ app.get("/api/admin/users", authMiddleware, ownerOnly, (_req, res) => {
   }
 })
 
+// Delete user
+app.delete("/api/admin/users/:id", authMiddleware, ownerOnly, (req, res) => {
+  try {
+    const { id } = req.params
+    const userId = parseInt(id)
+    
+    if (isNaN(userId)) {
+      return res.status(400).json({ ok: false, error: "Invalid user ID" })
+    }
+    
+    // Delete user's projects first
+    db.prepare("DELETE FROM projects WHERE user_id = ?").run(userId)
+    
+    // Delete user's settings
+    db.prepare("DELETE FROM user_settings WHERE user_id = ?").run(userId)
+    
+    // Delete user's team memberships
+    db.prepare("DELETE FROM team_members WHERE owner_id = ? OR member_email = (SELECT email FROM users WHERE id = ?)").run(userId, userId)
+    
+    // Delete user
+    const result = db.prepare("DELETE FROM users WHERE id = ?").run(userId)
+    
+    if (result.changes === 0) {
+      return res.status(404).json({ ok: false, error: "User not found" })
+    }
+    
+    res.json({ ok: true, message: "User deleted successfully" })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+// Add credits to user
+app.post("/api/admin/users/:id/add-credits", authMiddleware, ownerOnly, (req, res) => {
+  try {
+    const { id } = req.params
+    const { credits } = req.body
+    const userId = parseInt(id)
+    
+    if (isNaN(userId)) {
+      return res.status(400).json({ ok: false, error: "Invalid user ID" })
+    }
+    
+    if (typeof credits !== "number" || credits <= 0) {
+      return res.status(400).json({ ok: false, error: "Credits must be a positive number" })
+    }
+    
+    // Initialize user settings if not exists
+    db.prepare(`
+      INSERT OR IGNORE INTO user_settings (user_id) VALUES (?)
+    `).run(userId)
+    
+    // Add credits (assuming credits are stored in user_settings)
+    db.prepare(`
+      UPDATE user_settings 
+      SET credits = COALESCE((SELECT credits FROM user_settings WHERE user_id = ?), 0) + ?
+      WHERE user_id = ?
+    `).run(userId, credits, userId)
+    
+    res.json({ ok: true, message: `Added ${credits} credits to user` })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+// Create new user
+app.post("/api/admin/users", authMiddleware, ownerOnly, (req, res) => {
+  try {
+    const { email, password, name, credits = 0 } = req.body
+    
+    if (!email || !password) {
+      return res.status(400).json({ ok: false, error: "Email and password required" })
+    }
+    
+    if (password.length < 6) {
+      return res.status(400).json({ ok: false, error: "Password must be at least 6 characters" })
+    }
+    
+    // Check if user already exists
+    const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(email)
+    if (existing) {
+      return res.status(400).json({ ok: false, error: "Email already registered" })
+    }
+    
+    // Hash password
+    const bcrypt = require("bcryptjs")
+    const hash = bcrypt.hashSync(password, 10)
+    
+    // Create user
+    const result = db.prepare(`
+      INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)
+    `).run(email, hash, name || email.split("@")[0])
+    
+    // Initialize user settings with credits
+    db.prepare(`
+      INSERT INTO user_settings (user_id, credits) VALUES (?, ?)
+    `).run(result.lastInsertRowid, credits)
+    
+    res.json({ 
+      ok: true, 
+      message: "User created successfully",
+      user: {
+        id: result.lastInsertRowid,
+        email,
+        name: name || email.split("@")[0]
+      }
+    })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
 const PORT = process.env.PORT || 8787
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`site-editor-server running on ${PORT}`)
