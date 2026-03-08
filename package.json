@@ -1,0 +1,9 @@
+{
+  "name": "site-editor-root",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build": "npm --prefix server install && npm --prefix dashboard install && npm --prefix dashboard run build",
+    "start": "npm --prefix server run dev"
+  }
+}
