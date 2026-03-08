@@ -521,22 +521,37 @@ app.get("/api/admin/me", authMiddleware, (req, res) => {
 app.get("/api/admin/users", authMiddleware, ownerOnly, (_req, res) => {
   try {
     const rows = db.prepare(`
-      SELECT u.id, u.email, u.name, u.created_at, COALESCE(c.balance_eur, 0) as credits,
-             GROUP_CONCAT(DISTINCT 
-               CASE 
-                 WHEN tm.member_email = u.email THEN 'Team: ' || o.name || ' (' || tm.role || ')'
-                 WHEN om.user_id = u.id THEN 'Org: ' || o.name || ' (' || om.role || ')'
-                 ELSE NULL
-               END, ', ') as affiliations
+      SELECT u.id, u.email, u.name, u.created_at, COALESCE(c.balance_eur, 0) as credits
       FROM users u
       LEFT JOIN credits c ON u.id = c.user_id
-      LEFT JOIN team_members tm ON tm.member_email = u.email
-      LEFT JOIN organisations o ON tm.owner_id = o.id
-      LEFT JOIN org_members om ON om.user_id = u.id
-      GROUP BY u.id, u.email, u.name, u.created_at, c.balance_eur
       ORDER BY u.id DESC
     `).all()
-    res.json({ ok: true, users: rows })
+    
+    // Add affiliations separately to avoid SQL complexity
+    const usersWithAffiliations = rows.map(user => {
+      const teamMembers = db.prepare(`
+        SELECT o.name, tm.role
+        FROM team_members tm
+        JOIN organisations o ON tm.owner_id = o.id
+        WHERE tm.member_email = ?
+      `).all(user.email)
+      
+      const orgMembers = db.prepare(`
+        SELECT o.name, om.role
+        FROM org_members om
+        JOIN organisations o ON om.org_id = o.id
+        WHERE om.user_id = ?
+      `).all(user.id)
+      
+      const affiliations = [
+        ...teamMembers.map(t => `Team: ${t.name} (${t.role})`),
+        ...orgMembers.map(o => `Org: ${o.name} (${o.role})`)
+      ].join(', ')
+      
+      return { ...user, affiliations: affiliations || '-' }
+    })
+    
+    res.json({ ok: true, users: usersWithAffiliations })
 
 app.post("/api/admin/send-reset", authMiddleware, ownerOnly, async (req, res) => {
   try {
