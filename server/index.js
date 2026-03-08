@@ -52,7 +52,7 @@ import 'dotenv/config';
 import { rewriteHtmlAssets, rewriteCssUrls } from './rewriteAssets.js';
 import express from "express"
 import cookieParser from "cookie-parser"
-import { registerAuthRoutes } from "./auth.js"
+import { registerAuthRoutes, authMiddleware } from "./auth.js"
 import { registerCreditRoutes, getBalance, deductCredits } from "./credits.js"
 import { registerSettingsRoutes } from "./settings.js"
 import { registerOrgRoutes } from "./organisations.js"
