@@ -1,25 +1,27 @@
-import nodemailer from "nodemailer"
+import { Resend } from 'resend'
 
 const APP_URL = process.env.APP_URL || "https://edit-production-ca78.up.railway.app"
-
-// Gmail SMTP – App Password nötig (nicht dein normales Passwort)
-// Einrichten: Google Account → Sicherheit → 2FA → App-Passwörter → "Mail" → Code kopieren
-const transporter = nodemailer.createTransport({
-  service: "gmail",
-  auth: {
-    user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_APP_PASSWORD,
-  }
-})
-
-const FROM = `Site Editor <${process.env.GMAIL_USER}>`
+const resend = new Resend(process.env.RESEND_API_KEY)
 
 async function send(to, subject, html) {
   try {
-    await transporter.sendMail({ from: FROM, to, subject, html })
-    console.log(`✅ Mail gesendet an ${to}`)
+    const { data, error } = await resend.emails.send({
+      from: 'Site Editor <onboarding@resend.dev>',
+      to: [to],
+      subject: subject,
+      html: html
+    })
+    
+    if (error) {
+      console.error(`❌ Resend Fehler:`, error)
+      return false
+    }
+    
+    console.log(`✅ Email gesendet an ${to}`)
+    return true
   } catch (e) {
-    console.error(`❌ Mail Fehler:`, e.message)
+    console.error(`❌ Email Fehler:`, e.message)
+    return false
   }
 }
 
@@ -67,6 +69,20 @@ export async function sendPaymentConfirmation(email, name, amountEur, creditsEur
         <div style="font-size:28px;font-weight:900;color:#22c55e">€ ${creditsEur.toFixed(2)}</div>
       </div>
       <a href="${APP_URL}" style="display:inline-block;padding:12px 24px;background:#6366f1;color:white;border-radius:8px;text-decoration:none;font-weight:700">Zum Dashboard</a>
+    </div>
+  `)
+}
+
+export async function sendPasswordReset(email, name, resetToken) {
+  const resetUrl = `${APP_URL}/reset-password?token=${resetToken}`
+  
+  await send(email, "Passwort zurücksetzen – Site Editor", `
+    <div style="font-family:system-ui;max-width:480px;margin:0 auto;padding:32px">
+      <h1 style="color:#6366f1">Passwort zurücksetzen</h1>
+      <p>Hallo ${name || ""},</p>
+      <p>du hast eine Anfrage zum Zurücksetzen deines Passworts erhalten.</p>
+      <a href="${resetUrl}" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#dc2626;color:white;border-radius:8px;text-decoration:none;font-weight:700">Passwort zurücksetzen</a>
+      <p style="margin-top:24px;font-size:13px;color:#64748b">Dieser Link ist 1 Stunde gültig.</p>
     </div>
   `)
 }
