@@ -1,0 +1,26 @@
+{
+  "name": "site-editor-server",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "dev": "node index.js"
+  },
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^12.6.2",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^4.19.2",
+    "jsdom": "^28.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "node-fetch": "^3.3.2",
+    "nodemailer": "^8.0.1",
+    "puppeteer-core": "^24.38.0",
+    "resend": "^6.9.3",
+    "stripe": "^20.4.1"
+  }
+}

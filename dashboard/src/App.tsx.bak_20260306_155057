@@ -1,0 +1,510 @@
+import { useRef, useState, useEffect } from 'react';
+import BlockOverlay from "./components/BlockOverlay";
+import { ENDPOINTS } from './config';
+
+export default function App() {
+  const AI_MODELS = [
+    { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+    { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5" },
+    { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+    { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+    { value: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite" },
+  ]
+
+  const WP_ELEMENTS = [
+    "Paragraph","Heading","List","Quote","Code","Preformatted","Table","Pullquote","Separator","Spacer",
+    "Buttons","Button","Columns","Column","Group","Row","Stack","Cover","Media & Text","Image","Gallery",
+    "Audio","Video","File","Embed","Social Icons","Navigation","Search","Latest Posts","Categories",
+    "Tag Cloud","Archives","Shortcode","Custom HTML","More","Page Break","Query Loop","Comments"
+  ]
+  const HTML_ELEMENTS = [
+    "div","section","article","header","footer","main","aside","nav","h1","h2","h3","p","span","a",
+    "button","ul","ol","li","img","figure","figcaption","video","audio","table","form","input",
+    "textarea","select","label","iframe","hr"
+  ]
+  const LAYOUT_ELEMENTS = [
+    "Section","Container","Wrapper","2 Columns","3 Columns","4 Columns","Hero","Feature Grid",
+    "CTA Section","Testimonials","Pricing","FAQ","Contact Section","Footer Section"
+  ]
+  const MEDIA_ELEMENTS = [
+    "Image","Gallery","Slider","Video","Audio","Icon","Logo Strip","Map","Background Image"
+  ]
+  const FORM_ELEMENTS = [
+    "Contact Form","Name Field","Email Field","Phone Field","Textarea","Checkbox","Radio",
+    "Select","Submit Button","Newsletter Form"
+  ]
+  const ADVANCED_ELEMENTS = [
+    "Accordion","Tabs","Modal","Alert Box","Progress Bar","Countdown","Pricing Table",
+    "Timeline","Stats Counter","FAQ Accordion","Testimonial Card","Team Card"
+  ]
+  const iframeRef = useRef<HTMLIFrameElement | null>(null)
+  const [url, setUrl] = useState("https://chout.com")
+  const [mode, setMode] = useState<"view" | "edit">("view")
+  const [layoutMode, setLayoutMode] = useState<"flow" | "canvas">("flow")
+
+  const [status, setStatus] = useState<"idle" | "blocked" | "ok">("idle")
+  const [currentHtml, setCurrentHtml] = useState<string>("")
+  const [loadedUrl, setLoadedUrl] = useState<string>("")
+  const [aiScanLoading, setAiScanLoading] = useState(false)
+  const [sessionCost, setSessionCost] = useState(0)
+  const [sessionTokens, setSessionTokens] = useState({input: 0, output: 0})
+
+  const trackUsage = (usage: any) => {
+    if (!usage) return;
+    const inp = usage.input_tokens || 0;
+    const out = usage.output_tokens || 0;
+    const cost = (inp / 1_000_000) * 3 + (out / 1_000_000) * 15;
+    setSessionTokens(prev => ({ input: prev.input + inp, output: prev.output + out }));
+    setSessionCost(prev => prev + cost);
+  };
+
+
+  const [isDraggingBlock, setIsDraggingBlock] = useState(false)
+  const [exportMode, setExportMode] = useState<"wp-placeholder" | "html-clean" | "html-raw">("wp-placeholder")
+  const [selectedElementGroup, setSelectedElementGroup] = useState({
+    wordpress: "",
+    html: "",
+    layout: "",
+    media: "",
+    form: "",
+    advanced: "",
+  })
+  const [leftAiPrompt, setLeftAiPrompt] = useState("")
+  const [leftAiModel, setLeftAiModel] = useState("claude-sonnet-4-6")
+  const [leftAiRunning, setLeftAiRunning] = useState(false)
+  const renderToIframe = (html: string) => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+    iframe.srcdoc = html || "<!doctype html><html><head></head><body></body></html>";
+  };
+
+  useEffect(() => { if (currentHtml) renderToIframe(currentHtml); }, [currentHtml]);
+
+  const load = async (forceReload = false) => {
+    const u = url.trim();
+    if (!u) return;
+    if (!forceReload && loadedUrl === u && currentHtml) return;
+    try {
+      setStatus("blocked");
+      const r = await fetch(`${ENDPOINTS.proxy}?url=${encodeURIComponent(u)}`, { credentials: "include" });
+      const html = await r.text();
+      setLoadedUrl(u); setCurrentHtml(html); renderToIframe(html); setStatus("ok");
+    } catch { setStatus("idle"); }
+  };
+
+  const handleModeSwitch = () => {
+    if (mode === "view") { setMode("edit"); if (currentHtml) setStatus("ok"); }
+    else {
+      if (confirm("Änderungen speichern und zum View-Modus wechseln?")) {
+        setMode("view"); if (currentHtml) setStatus("ok");
+      }
+    }
+  };
+
+  const handleExport = async () => {
+    if (!currentHtml) { alert("Bitte lade zuerst eine Website!"); return; }
+    try {
+      const r = await fetch("http://localhost:8787/api/export", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ html: currentHtml, url: loadedUrl, mode: exportMode })
+      });
+      if (!r.ok) throw new Error();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(await r.blob());
+      a.download = exportMode === "wp-placeholder" ? "site_wp_placeholders.zip" : (exportMode === "html-clean" ? "site_html_clean.zip" : "site_html_raw.zip");
+      document.body.appendChild(a); a.click(); a.remove();
+    } catch { alert("Export fehlgeschlagen"); }
+  };
+
+const handleAiRescan = (mode: "block" | "page") => {
+    setAiScanLoading(true);
+    window.dispatchEvent(new CustomEvent("blockoverlay:rescan", { detail: { mode } }));
+    setTimeout(() => setAiScanLoading(false), 4000);
+  };
+
+  useEffect(() => {
+    const handler = (e: any) => trackUsage(e?.detail?.usage)
+    window.addEventListener("bo:ai-usage", handler as any)
+    return () => window.removeEventListener("bo:ai-usage", handler as any)
+  }, [])
+
+  useEffect(() => {
+    const onDone = () => setLeftAiRunning(false)
+    window.addEventListener("bo:left-ai-done", onDone as any)
+    return () => window.removeEventListener("bo:left-ai-done", onDone as any)
+  }, [])
+
+
+  const isEdit = mode === "edit";
+  const isLoading = status === "blocked";
+
+  
+  useEffect(() => {
+    const onSignal = (e: any) => {
+      try {
+        const d = e?.detail || {};
+        if (typeof d.dragging === "boolean") setIsDraggingBlock(d.dragging);
+      } catch {}
+    };
+    const onDragEnd = () => setIsDraggingBlock(false);
+
+    window.addEventListener("bo:dragging", onSignal as any);
+    window.addEventListener("dragend", onDragEnd as any);
+    window.addEventListener("drop", onDragEnd as any);
+    return () => {
+      window.removeEventListener("bo:dragging", onSignal as any);
+      window.removeEventListener("dragend", onDragEnd as any);
+      window.removeEventListener("drop", onDragEnd as any);
+    };
+  }, []);
+
+useEffect(() => {
+    if (isLoading) { const t = setTimeout(() => setStatus("idle"), 30000); return () => clearTimeout(t); }
+  }, [isLoading]);
+
+  return (
+    <div style={{ height: "100vh", background: "#0b1220", fontFamily: "system-ui, sans-serif" }}>
+
+        {/* Drag Grid Overlay */}
+        {isEdit && isDraggingBlock && (
+          <div
+            data-bo-grid-overlay="1"
+            style={{
+              position: "fixed",
+              left: 0,
+              top: 58,
+              right: 0,
+              bottom: 0,
+              zIndex: 99999,
+              pointerEvents: "none",
+              backgroundImage:
+                "linear-gradient(to right, rgba(99,102,241,0.20) 1px, transparent 1px), linear-gradient(to bottom, rgba(99,102,241,0.20) 1px, transparent 1px)",
+              backgroundSize: "40px 40px",
+              boxShadow: "inset 0 0 0 2px rgba(99,102,241,0.25)",
+            }}
+          >
+            <div style={{
+              position: "absolute",
+              left: 14,
+              top: 10,
+              padding: "6px 10px",
+              borderRadius: 10,
+              background: "rgba(15,23,42,0.85)",
+              border: "1px solid rgba(99,102,241,0.35)",
+              color: "white",
+              fontSize: 12,
+              fontWeight: 800,
+            }}>
+              Drop-Grid aktiv
+            </div>
+          </div>
+        )}
+
+      {/* ── Toolbar ── */}
+      <div style={{
+        position: "fixed", top: 0, left: 0, right: 0, height: 58,
+        display: "flex", alignItems: "center", gap: 8, padding: "0 16px",
+        background: isEdit
+          ? "linear-gradient(135deg, rgba(127,29,29,0.97) 0%, rgba(153,27,27,0.97) 100%)"
+          : "linear-gradient(135deg, rgba(15,23,42,0.98) 0%, rgba(23,33,60,0.98) 100%)",
+        borderBottom: isEdit ? "1px solid rgba(239,68,68,0.3)" : "1px solid rgba(99,102,241,0.2)",
+        boxShadow: "0 2px 20px rgba(0,0,0,0.4)",
+        zIndex: 80,
+        transition: "background 0.3s ease",
+      }}>
+
+        {/* Logo */}
+        <div style={{
+          fontSize: 18, fontWeight: 900, color: "white", marginRight: 4,
+          background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+          WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+          flexShrink: 0,
+        }}>⬡ Editor</div>
+
+
+        {/* Cost Tracker */}
+        {sessionCost > 0 && (
+          <div
+            title={`Input: ${sessionTokens.input.toLocaleString()} / Output: ${sessionTokens.output.toLocaleString()} tokens\nKlicken zum Zurücksetzen`}
+            onClick={() => { if(confirm("Session-Kosten zurücksetzen?")) { setSessionCost(0); setSessionTokens({input:0,output:0}); }}}
+            style={{
+              height: 36, padding: "0 12px", borderRadius: 10, flexShrink: 0,
+              display: "flex", alignItems: "center", gap: 5,
+              border: "1px solid rgba(234,179,8,0.35)",
+              background: "rgba(234,179,8,0.1)",
+              fontSize: 12, fontWeight: 800, color: "rgba(234,179,8,0.95)",
+              cursor: "pointer",
+            }}>
+            💰 ${sessionCost.toFixed(4)}
+          </div>
+        )}
+
+        {/* URL Input */}
+        <div style={{ flex: "0 1 400px", minWidth: 180, position: "relative" }}>
+          <div style={{
+            position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)",
+            fontSize: 13, color: "rgba(148,163,184,0.5)",
+          }}>🌐</div>
+          <input
+            value={url} onChange={e => setUrl(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && load(true)}
+            placeholder="https://..."
+            style={{
+              width: "100%", height: 36, borderRadius: 10,
+              border: isEdit ? "1px solid rgba(239,68,68,0.4)" : "1px solid rgba(99,102,241,0.3)",
+              background: "rgba(0,0,0,0.3)", color: "white",
+              padding: "0 12px 0 30px", outline: "none", fontSize: 13,
+              transition: "border 0.2s",
+            }}
+          />
+        </div>
+
+        {/* Load Button */}
+        <button onClick={() => load(true)}
+          onMouseDown={e => (e.currentTarget.style.transform="scale(0.93)")}
+          onMouseUp={e => (e.currentTarget.style.transform="scale(1)")}
+          onMouseLeave={e => (e.currentTarget.style.transform="scale(1)")}
+          style={{
+            height: 36, padding: "0 16px", borderRadius: 10, flexShrink: 0,
+            border: "1px solid rgba(99,102,241,0.4)",
+            background: "linear-gradient(135deg, rgba(99,102,241,0.3), rgba(139,92,246,0.3))",
+            color: "white", cursor: "pointer", fontWeight: 700, fontSize: 13,
+            transition: "transform 0.1s, background 0.2s",
+          }}>{isLoading ? <span style={{display:"inline-block",animation:"spin 0.7s linear infinite"}}>⟳</span> : "↺"} Load</button>
+
+        {/* Status Badge */}
+        <div style={{
+          height: 36, padding: "0 12px", borderRadius: 10, flexShrink: 0,
+          display: "flex", alignItems: "center", gap: 6,
+          border: status === "ok" ? "1px solid rgba(34,197,94,0.4)" : status === "blocked" ? "1px solid rgba(245,158,11,0.4)" : "1px solid rgba(148,163,184,0.2)",
+          background: status === "ok" ? "rgba(34,197,94,0.12)" : status === "blocked" ? "rgba(245,158,11,0.12)" : "rgba(148,163,184,0.08)",
+          fontSize: 12, fontWeight: 700, color: "white",
+        }}>
+          <div style={{
+            width: 7, height: 7, borderRadius: "50%",
+            background: status === "ok" ? "#22c55e" : status === "blocked" ? "#f59e0b" : "#64748b",
+            boxShadow: status === "ok" ? "0 0 6px #22c55e" : status === "blocked" ? "0 0 6px #f59e0b" : "none",
+            animation: status === "blocked" ? "pulse 1s infinite" : "none",
+          }} />
+          {status === "idle" ? "Bereit" : status === "blocked" ? "Lädt…" : "OK"}
+        </div>
+
+        {/* Divider */}
+        <div style={{ width: 1, height: 28, background: "rgba(148,163,184,0.15)", flexShrink: 0 }} />
+
+        {/* Edit/View Toggle */}
+        <button onClick={handleModeSwitch} style={{
+          height: 36, padding: "0 16px", borderRadius: 10, flexShrink: 0,
+          border: isEdit ? "1px solid rgba(239,68,68,0.5)" : "1px solid rgba(34,197,94,0.4)",
+          background: isEdit
+            ? "linear-gradient(135deg, rgba(239,68,68,0.25), rgba(220,38,38,0.25))"
+            : "linear-gradient(135deg, rgba(34,197,94,0.2), rgba(16,185,129,0.2))",
+          color: "white", cursor: "pointer", fontWeight: 700, fontSize: 13,
+        }}>{isEdit ? "💾 Speichern" : "✏️ Bearbeiten"}</button>
+
+        {/* AI Buttons – nur im Edit Mode */}
+        {isEdit && (<>
+          <button onClick={() => handleAiRescan("block")} disabled={aiScanLoading}
+            onMouseDown={e => { if(!aiScanLoading) e.currentTarget.style.transform="scale(0.93)"; }}
+            onMouseUp={e => (e.currentTarget.style.transform="scale(1)")}
+            onMouseLeave={e => (e.currentTarget.style.transform="scale(1)")}
+            title="Ausgewählten Block mit AI neu scannen" style={{
+            height: 36, padding: "0 14px", borderRadius: 10, flexShrink: 0,
+            border: "1px solid rgba(168,85,247,0.4)",
+            background: "linear-gradient(135deg, rgba(168,85,247,0.2), rgba(139,92,246,0.2))",
+            color: "white", cursor: aiScanLoading ? "wait" : "pointer", fontWeight: 700, fontSize: 12,
+            opacity: aiScanLoading ? 0.6 : 1, transition: "transform 0.1s",
+          }}>{aiScanLoading ? <span style={{display:"inline-block",animation:"spin 0.7s linear infinite"}}>⟳</span> : "🤖"} Block</button>
+          <button onClick={() => handleAiRescan("page")} disabled={aiScanLoading}
+            onMouseDown={e => { if(!aiScanLoading) e.currentTarget.style.transform="scale(0.93)"; }}
+            onMouseUp={e => (e.currentTarget.style.transform="scale(1)")}
+            onMouseLeave={e => (e.currentTarget.style.transform="scale(1)")}
+            title="Ganze Seite mit AI neu scannen" style={{
+            height: 36, padding: "0 14px", borderRadius: 10, flexShrink: 0,
+            border: "1px solid rgba(168,85,247,0.3)",
+            background: "linear-gradient(135deg, rgba(168,85,247,0.12), rgba(139,92,246,0.12))",
+            color: "white", cursor: aiScanLoading ? "wait" : "pointer", fontWeight: 700, fontSize: 12,
+            opacity: aiScanLoading ? 0.6 : 1, transition: "transform 0.1s",
+          }}>{aiScanLoading ? <span style={{display:"inline-block",animation:"spin 0.7s linear infinite"}}>⟳</span> : "🤖"} Seite</button>
+        </>)}
+
+        
+          {/* Layout Mode */}
+          {isEdit && (
+            <button onClick={() => setLayoutMode(layoutMode === "flow" ? "canvas" : "flow")} title="Layout: Flow oder Canvas (frei verschieben)" style={{
+              height: 36, padding: "0 14px", borderRadius: 10, flexShrink: 0,
+              border: layoutMode === "canvas" ? "1px solid rgba(59,130,246,0.55)" : "1px solid rgba(148,163,184,0.25)",
+              background: layoutMode === "canvas" ? "linear-gradient(135deg, rgba(59,130,246,0.22), rgba(99,102,241,0.18))" : "rgba(0,0,0,0.18)",
+              color: "white", cursor: "pointer", fontWeight: 800, fontSize: 12,
+            }}>{layoutMode === "canvas" ? "🧲 Canvas" : "↕ Flow"}</button>
+          )}
+{/* Export */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            <select value={exportMode} onChange={e => setExportMode(e.target.value as any)} title="Export-Format wählen" style={{
+              height: 36, padding: "0 10px", borderRadius: 10, flexShrink: 0,
+              border: "1px solid rgba(34,197,94,0.25)",
+              background: "rgba(0,0,0,0.25)", color: "white", cursor: "pointer",
+              fontWeight: 700, fontSize: 12, outline: "none",
+            }}>
+              <option value="wp-placeholder">WP Placeholder</option>
+              <option value="html-clean">HTML Clean</option>
+              <option value="html-raw">HTML Raw</option>
+            </select>
+
+            <button onClick={handleExport} title="Als ZIP exportieren"
+              onMouseDown={e => (e.currentTarget.style.transform="scale(0.93)")}
+              onMouseUp={e => (e.currentTarget.style.transform="scale(1)")}
+              onMouseLeave={e => (e.currentTarget.style.transform="scale(1)")}
+              style={{
+              height: 36, padding: "0 14px", borderRadius: 10, flexShrink: 0,
+              border: "1px solid rgba(34,197,94,0.35)",
+              background: "linear-gradient(135deg, rgba(34,197,94,0.12), rgba(16,185,129,0.12))",
+              color: "white", cursor: "pointer", fontWeight: 700, fontSize: 12,
+              transition: "transform 0.1s",
+            }}>⬇ ZIP</button>
+          </div>
+      </div>
+
+      <style>{`
+        @keyframes spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+        @keyframes loadingbar { 0%{transform:translateX(-120%)} 100%{transform:translateX(420%)} }
+      `}</style>
+
+      {/* Progress Bar */}
+      <div style={{ position:"fixed", left:0, right:0, top:58, height:2, background:"rgba(148,163,184,0.1)", zIndex:90, overflow:"hidden", opacity:isLoading?1:0, transition:"opacity 120ms" }}>
+        <div style={{ height:"100%", width:"40%", background:"linear-gradient(90deg, #6366f1, #8b5cf6)", transform:"translateX(-120%)", animation:isLoading?"loadingbar 800ms ease-in-out infinite":"none" }} />
+      </div>
+
+      {/* Loading Overlay */}
+      {isLoading && (
+        <div style={{ position:"fixed", top:58, left:0, right:0, bottom:0, background:"rgba(11,18,32,0.97)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", zIndex:100 }}>
+          <div style={{ width:64, height:64, border:"3px solid rgba(99,102,241,0.2)", borderTop:"3px solid #6366f1", borderRadius:"50%", animation:"spin 0.8s linear infinite", marginBottom:20 }} />
+          <div style={{ color:"white", fontSize:17, fontWeight:700, marginBottom:8 }}>Website wird geladen…</div>
+          <div style={{ color:"rgba(148,163,184,0.7)", fontSize:13, textAlign:"center", maxWidth:280 }}>Seite wird über den Proxy geladen.</div>
+        </div>
+      )}
+        {isEdit && (
+          <div style={{
+            position: "fixed",
+            left: 10,
+            top: 70,
+            width: 148,
+            zIndex: 96,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}>
+            <select value={selectedElementGroup.wordpress} onChange={e => setSelectedElementGroup(prev => ({ ...prev, wordpress: e.target.value }))} title="WordPress Elemente" style={{ height: 34, padding: "0 8px", borderRadius: 8, border: "1px solid rgba(148,163,184,0.25)", background: "rgba(5,10,25,0.96)", color: "white", fontWeight: 700, fontSize: 12, outline: "none" }}>
+              <option value="">WordPress</option>
+              {WP_ELEMENTS.map(item => <option key={item} value={item}>{item}</option>)}
+            </select>
+
+            <select value={selectedElementGroup.html} onChange={e => setSelectedElementGroup(prev => ({ ...prev, html: e.target.value }))} title="HTML Elemente" style={{ height: 34, padding: "0 8px", borderRadius: 8, border: "1px solid rgba(148,163,184,0.25)", background: "rgba(5,10,25,0.96)", color: "white", fontWeight: 700, fontSize: 12, outline: "none" }}>
+              <option value="">HTML</option>
+              {HTML_ELEMENTS.map(item => <option key={item} value={item}>{item}</option>)}
+            </select>
+
+            <select value={selectedElementGroup.layout} onChange={e => setSelectedElementGroup(prev => ({ ...prev, layout: e.target.value }))} title="Layout Elemente" style={{ height: 34, padding: "0 8px", borderRadius: 8, border: "1px solid rgba(148,163,184,0.25)", background: "rgba(5,10,25,0.96)", color: "white", fontWeight: 700, fontSize: 12, outline: "none" }}>
+              <option value="">Layout</option>
+              {LAYOUT_ELEMENTS.map(item => <option key={item} value={item}>{item}</option>)}
+            </select>
+
+            <select value={selectedElementGroup.media} onChange={e => setSelectedElementGroup(prev => ({ ...prev, media: e.target.value }))} title="Media Elemente" style={{ height: 34, padding: "0 8px", borderRadius: 8, border: "1px solid rgba(148,163,184,0.25)", background: "rgba(5,10,25,0.96)", color: "white", fontWeight: 700, fontSize: 12, outline: "none" }}>
+              <option value="">Media</option>
+              {MEDIA_ELEMENTS.map(item => <option key={item} value={item}>{item}</option>)}
+            </select>
+
+            <select value={selectedElementGroup.form} onChange={e => setSelectedElementGroup(prev => ({ ...prev, form: e.target.value }))} title="Form Elemente" style={{ height: 34, padding: "0 8px", borderRadius: 8, border: "1px solid rgba(148,163,184,0.25)", background: "rgba(5,10,25,0.96)", color: "white", fontWeight: 700, fontSize: 12, outline: "none" }}>
+              <option value="">Form</option>
+              {FORM_ELEMENTS.map(item => <option key={item} value={item}>{item}</option>)}
+            </select>
+
+            <select value={selectedElementGroup.advanced} onChange={e => setSelectedElementGroup(prev => ({ ...prev, advanced: e.target.value }))} title="Advanced Elemente" style={{ height: 34, padding: "0 8px", borderRadius: 8, border: "1px solid rgba(148,163,184,0.25)", background: "rgba(5,10,25,0.96)", color: "white", fontWeight: 700, fontSize: 12, outline: "none" }}>
+              <option value="">Advanced</option>
+              {ADVANCED_ELEMENTS.map(item => <option key={item} value={item}>{item}</option>)}
+            </select>
+
+            <select
+              value={leftAiModel}
+              onChange={e => setLeftAiModel(e.target.value)}
+              title="KI Modell"
+              style={{
+                height: 34,
+                padding: "0 8px",
+                borderRadius: 8,
+                border: "1px solid rgba(148,163,184,0.25)",
+                background: "rgba(5,10,25,0.96)",
+                color: "white",
+                fontWeight: 700,
+                fontSize: 12,
+                outline: "none"
+              }}
+            >
+              {AI_MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+
+            <textarea
+              value={leftAiPrompt}
+              onChange={e => setLeftAiPrompt(e.target.value)}
+              placeholder={`KI Prompt an ${AI_MODELS.find(m => m.value === leftAiModel)?.label || leftAiModel}...`}
+              style={{
+                minHeight: 90,
+                resize: "vertical",
+                padding: "10px 8px",
+                borderRadius: 8,
+                border: "1px solid rgba(148,163,184,0.25)",
+                background: "rgba(5,10,25,0.96)",
+                color: "white",
+                fontSize: 12,
+                outline: "none"
+              }}
+            />
+
+            <button
+              data-left-ai-run="1"
+              onClick={() => {
+                if (!leftAiPrompt.trim()) {
+                  alert("Bitte zuerst einen KI Prompt eingeben.")
+                  return
+                }
+                setLeftAiRunning(true)
+                window.dispatchEvent(new CustomEvent("bo:left-ai-run", {
+                  detail: {
+                    model: leftAiModel,
+                    prompt: leftAiPrompt
+                  }
+                }))
+              }}
+              onMouseDown={e => { if(!leftAiRunning) e.currentTarget.style.transform = "scale(0.96)" }}
+              onMouseUp={e => (e.currentTarget.style.transform = "scale(1)")}
+              onMouseLeave={e => (e.currentTarget.style.transform = "scale(1)")}
+              style={{
+                height: 36,
+                borderRadius: 8,
+                border: "1px solid rgba(59,130,246,0.38)",
+                background: "linear-gradient(135deg, rgba(59,130,246,0.22), rgba(99,102,241,0.18))",
+                color: "white",
+                fontWeight: 800,
+                fontSize: 12,
+                cursor: leftAiRunning ? "wait" : "pointer",
+                opacity: leftAiRunning ? 0.7 : 1,
+                transition: "transform 0.1s"
+              }}
+            >
+              {leftAiRunning ? <span style={{display:"inline-block", animation:"spin 0.7s linear infinite"}}>⟳</span> : "✨"} Run
+            </button>
+          </div>
+        )}
+{/* Main Content */}
+      <div style={{ position:"fixed", left: isEdit ? 240 : 0, top:58, right:0, bottom:0, overflow:"hidden" }}>
+        <iframe ref={iframeRef} title="preview" style={{
+          position:"absolute", left:0, top:0, width:"100%", height:"100%",
+          border:"none", background:"white", display:"block"
+        }} sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation" />
+        <BlockOverlay iframeRef={iframeRef} enabled={isEdit} canvasMode={layoutMode === "canvas"} onStatus={setStatus} onHtmlChange={setCurrentHtml} />
+      </div>
+    </div>
+  );
+}
