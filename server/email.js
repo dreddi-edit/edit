@@ -17,7 +17,7 @@ async function send(to, subject, html) {
   
   try {
     const { data, error } = await resend.emails.send({
-      from: 'Site Editor <edgarbaumann21032006@gmail.com>',
+      from: 'Site Editor <noreply@edit-production-ca78.up.railway.app>',
       to: [to],
       subject: subject,
       html: html
