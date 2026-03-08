@@ -1021,62 +1021,95 @@ const [aiLoading, setAiLoading] = useState(false);
     if (!doc) return;
     const b = blocksRef.current.find(x => x.id === id);
     if (!b) return;
-    setSelectedId(id);
+
+    // 2-LEVEL EDITING:
+    // If user clicks same block again AND it's a container → drill into sub-elements
+    const isSameBlock = selectedId === id;
     const el = doc.querySelector(b.selector) as HTMLElement | null;
     if (!el) return;
 
-    const btnNode = findButtonNode(el);
-        const imgNode = (el.tagName === "IMG" ? el : (el.querySelector("img") as HTMLElement | null)) as HTMLImageElement | null;
-const isBtn = b.isButton || !!btnNode;
+    const isContainer = ["HEADER","NAV","FOOTER","SECTION","MAIN","ARTICLE","DIV"].includes(el.tagName) ||
+      el.classList.contains("wp-block-group") || el.classList.contains("wp-block-columns") ||
+      el.classList.contains("site-header") || el.classList.contains("site-nav");
 
-    // Heading + Liste erkennen
+    // On second click of a container: find and highlight sub-blocks
+    if (isSameBlock && isContainer) {
+      // Scan sub-elements and add them as temporary blocks
+      const subEls = Array.from(el.querySelectorAll(
+        "a[href], button, img, h1, h2, h3, h4, p, input, [class*='btn']"
+      )) as HTMLElement[];
+
+      const subBlocks: BlockEntry[] = [];
+      subEls.forEach((subEl, i) => {
+        const r = subEl.getBoundingClientRect();
+        if (r.width < 8 || r.height < 8) return;
+        const subId = `${id}-sub-${i}`;
+        subEl.setAttribute("data-block-id", subId);
+        subBlocks.push({
+          id: subId,
+          label: pickLabel(subEl),
+          selector: `[data-block-id="${subId}"]`,
+          isButton: isButtonElement(subEl),
+          docTop: r.top + (doc.defaultView?.scrollY || 0),
+        });
+      });
+
+      if (subBlocks.length > 0) {
+        // Replace current blocks with: all non-children blocks + new sub-blocks
+        // win and parentRect not needed here
+        setBlocks(prev => {
+          const others = prev.filter(pb => {
+            const pEl = doc.querySelector(pb.selector) as HTMLElement | null;
+            return pEl && !el.contains(pEl);
+          });
+          return [...others, ...subBlocks].sort((a, b) => a.docTop - b.docTop);
+        });
+        setSelectedId(null);
+        toast.success(`${subBlocks.length} Sub-Elemente gefunden – klicke eins an`);
+        return;
+      }
+    }
+
+    setSelectedId(id);
+
+    const btnNode = findButtonNode(el);
+    const imgNode = (el.tagName === "IMG" ? el : (el.querySelector("img") as HTMLElement | null)) as HTMLImageElement | null;
+    const isBtn = b.isButton || !!btnNode;
+
     const heading = el.querySelector("h1,h2,h3,h4") as HTMLElement | null;
     const list = el.querySelector("ul,ol") as HTMLElement | null;
     const hasHeadingAndList = heading && list;
     const isHeadingEl = ["H1","H2","H3","H4"].includes(el.tagName);
     const isListEl = ["UL","OL"].includes(el.tagName);
 
-
-    // --- NAV + FORM detection (single block, edit inner items) ---
     const linkNodes = Array.from(el.querySelectorAll("a[href]")) as HTMLAnchorElement[];
     const uniqLinks: HTMLAnchorElement[] = [];
     for (const a of linkNodes) {
       const href = (a.getAttribute("href") || "").trim();
       const text = (a.textContent || "").trim();
-      // ignore empty/anchorless
       if (!href && !text) continue;
-      // avoid duplicates by same node reference
       if (!uniqLinks.includes(a)) uniqLinks.push(a);
     }
 
     const inputNodes = Array.from(el.querySelectorAll("input, textarea, select")) as HTMLElement[];
     const isFormLike = el.tagName === "FORM" || inputNodes.length >= 2;
-
-    // NAV-like: nav element OR lots of links close together
     const isNavLike = el.tagName === "NAV" || (uniqLinks.length >= 2 && !!el.closest("header, nav, footer"));
 
     if (isNavLike && uniqLinks.length >= 2) {
       setPanelType("nav-links");
       setIsButtonSelected(false);
-
       const items = uniqLinks.slice(0, 30).map(a => ({
         text: (a.textContent || "").trim(),
-        href: (a.getAttribute("href") || (a as any).href || "").toString(),
+        href: (a.getAttribute("href") || "").toString(),
       }));
       setEditNavLinks(items.length ? items : [{ text: "", href: "" }]);
-
-      setEditValue("");
-      setEditLink("");
-      setEditHeading("");
-      setEditBullets([]);
-      setEditFormFields([]);
+      setEditValue(""); setEditLink(""); setEditHeading(""); setEditBullets([]); setEditFormFields([]);
       return;
     }
 
     if (isFormLike && inputNodes.length >= 1) {
       setPanelType("form-fields");
       setIsButtonSelected(false);
-
       const docx = el.ownerDocument;
       const items = [];
       for (const node of inputNodes.slice(0, 30)) {
@@ -1084,8 +1117,6 @@ const isBtn = b.isButton || !!btnNode;
         const type = tag === "input" ? ((node.getAttribute("type") || "text").toLowerCase()) : tag;
         const name = (node.getAttribute("name") || node.getAttribute("id") || "").trim();
         const placeholder = (node.getAttribute("placeholder") || "").trim();
-
-        // try to find a label
         let labelText = "";
         const idv = (node.getAttribute("id") || "").trim();
         if (idv) {
@@ -1096,14 +1127,8 @@ const isBtn = b.isButton || !!btnNode;
         if (!labelText) labelText = placeholder;
         items.push({ label: labelText, name, placeholder, type });
       }
-
       setEditFormFields(items.length ? items : [{ label: "", name: "", placeholder: "", type: "text" }]);
-
-      setEditValue("");
-      setEditLink("");
-      setEditHeading("");
-      setEditBullets([]);
-      setEditNavLinks([]);
+      setEditValue(""); setEditLink(""); setEditHeading(""); setEditBullets([]); setEditNavLinks([]);
       return;
     }
 
@@ -1112,18 +1137,28 @@ const isBtn = b.isButton || !!btnNode;
       setIsButtonSelected(true);
       const textNode = (btnNode.querySelector("span") as HTMLElement | null) || btnNode;
       setEditValue((textNode.textContent || "").trim());
-      setEditLink((btnNode as HTMLAnchorElement).href || "");
+      // Always show existing link URL
+      const existingHref = (btnNode as HTMLAnchorElement).getAttribute("href") || "";
+      setEditLink(existingHref);
       const computed = el.ownerDocument?.defaultView?.getComputedStyle(btnNode);
       setEditBg(rgbToHex(computed?.backgroundColor || "#3b82f6"));
       setEditColor(rgbToHex(computed?.color || "#ffffff"));
       setEditFontSize(computed?.fontSize || "16px");
+    } else if (el.tagName === "A") {
+      // Standalone link - show as button panel with href
+      setPanelType("button");
+      setIsButtonSelected(true);
+      setEditValue((el.textContent || "").trim());
+      setEditLink((el as HTMLAnchorElement).getAttribute("href") || "");
+      const computed = el.ownerDocument?.defaultView?.getComputedStyle(el);
+      setEditBg(rgbToHex(computed?.backgroundColor || "#transparent"));
+      setEditColor(rgbToHex(computed?.color || "#000000"));
+      setEditFontSize(computed?.fontSize || "16px");
     } else if (hasHeadingAndList || isListEl) {
       setPanelType("heading-list");
       setIsButtonSelected(false);
-      // Überschrift
       const h = isListEl ? null : (heading || (isHeadingEl ? el : null));
       setEditHeading((h?.textContent || "").trim());
-      // Bullet Points
       const listEl = isListEl ? el : list;
       const items = Array.from(listEl?.querySelectorAll("li") || []).map(li => (li.textContent || "").trim());
       setEditBullets(items.length ? items : [""]);
@@ -1144,7 +1179,7 @@ const isBtn = b.isButton || !!btnNode;
       setEditHeading("");
       setEditBullets([]);
     }
-  }, [getDoc]);
+  }, [getDoc, selectedId]);
 
   onClickLabelRef.current = selectBlock;
 
