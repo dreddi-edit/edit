@@ -557,6 +557,7 @@ app.get("/api/admin/users", authMiddleware, ownerOnly, (_req, res) => {
   }
 })
 
+
 app.post("/api/admin/send-reset", authMiddleware, ownerOnly, async (req, res) => {
   try {
     const { userId } = req.body
@@ -564,20 +565,26 @@ app.post("/api/admin/send-reset", authMiddleware, ownerOnly, async (req, res) =>
 
     const user = db.prepare("SELECT id, email, name FROM users WHERE id = ?").get(userId)
     if (!user) return res.status(404).json({ ok: false, error: "User not found" })
-    
-    // Generate reset token
+
+    db.exec(`CREATE TABLE IF NOT EXISTS password_resets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      token TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used INTEGER DEFAULT 0
+    )`)
+
     const resetToken = crypto.randomBytes(32).toString("hex")
-    
-    // Store reset token
-    db.prepare(`
-      INSERT OR REPLACE INTO password_resets (user_id, token, expires_at)
-      VALUES (?, ?, datetime('now', '+1 hour'))
-    `).run(userId, resetToken)
-    
-    // TODO: Send email - currently disabled to prevent crashes
-    console.log(`Password reset token for ${user.email}: ${resetToken}`)
-    
-    res.json({ ok: true, message: "Password reset token generated (email disabled)" })
+    const expires = new Date(Date.now() + 3600000).toISOString()
+
+    db.prepare("INSERT INTO password_resets (user_id, token, expires_at) VALUES (?, ?, ?)").run(user.id, resetToken, expires)
+
+    const sent = await sendPasswordReset(user.email, resetToken, user.name || "")
+    if (!sent) {
+      return res.status(500).json({ ok: false, error: "Reset email failed" })
+    }
+
+    res.json({ ok: true, message: "Password reset email sent", email: user.email })
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message })
   }
@@ -702,30 +709,6 @@ app.post("/api/admin/migrate-credits", authMiddleware, ownerOnly, (req, res) => 
 })
 
 // Send password reset
-app.post("/api/admin/send-reset", authMiddleware, ownerOnly, (req, res) => {
-  try {
-    const { userId } = req.body
-    const user = db.prepare("SELECT email FROM users WHERE id = ?").get(userId)
-    
-    if (!user) {
-      return res.status(404).json({ ok: false, error: "User not found" })
-    }
-    
-    // Generate reset token
-    const resetToken = crypto.randomBytes(32).toString("hex")
-    
-    // Store reset token
-    db.prepare(`
-      INSERT OR REPLACE INTO password_resets (user_id, token, expires_at)
-      VALUES (?, ?, datetime('now', '+1 hour'))
-    `).run(userId, resetToken)
-    
-    // Send email (you'll need to configure this)
-    res.json({ ok: true, message: "Password reset link sent" })
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message })
-  }
-})
 
 // Create new user
 app.post("/api/admin/users", authMiddleware, ownerOnly, (req, res) => {
