@@ -8,6 +8,7 @@ import SettingsPanel from "./components/SettingsPanel"
 import { useRef, useState, useEffect } from 'react';
 import BlockOverlay from "./components/BlockOverlay";
 import { ENDPOINTS } from './config';
+import { COMPONENT_LIBRARY, COMPONENT_CATEGORIES } from './components/ComponentLibrary';
 
 export default function App() {
   const AI_MODELS = [
@@ -93,6 +94,7 @@ export default function App() {
   const [authUser, setAuthUser] = useState<User | null | "loading">("loading")
   const [view, setView] = useState<"auth" | "dashboard" | "editor" | "admin">("auth")
   const [currentProject, setCurrentProject] = useState<Project | null>(null)
+  const [selectedComponent, setSelectedComponent] = useState<string>("")
 
 
 async function sendResetPw(userId:number){
@@ -942,6 +944,79 @@ useEffect(() => {
               {ADVANCED_ELEMENTS.map(item => <option key={item} value={item}>{item}</option>)}
             </select>
 
+            {/* Component Library */}
+            <div style={{
+              marginTop: 10,
+              paddingTop: 10,
+              borderTop: "1px solid rgba(148,163,184,0.18)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8
+            }}>
+              <div style={{
+                fontSize: 11,
+                fontWeight: 900,
+                letterSpacing: 0.3,
+                color: "rgba(255,255,255,0.92)"
+              }}>
+                📦 Components
+              </div>
+              
+              <select
+                value={selectedComponent || ""}
+                onChange={e => setSelectedComponent(e.target.value)}
+                title="Professional Components"
+                style={{
+                  height: 34,
+                  padding: "0 8px",
+                  borderRadius: 8,
+                  border: "1px solid rgba(148,163,184,0.25)",
+                  background: "rgba(5,10,25,0.96)",
+                  color: "white",
+                  fontWeight: 700,
+                  fontSize: 12,
+                  outline: "none"
+                }}
+              >
+                <option value="">Choose Component</option>
+                {Object.entries(COMPONENT_LIBRARY).map(([key, comp]) => (
+                  <option key={key} value={key}>
+                    {COMPONENT_CATEGORIES[comp.category]?.icon} {comp.name}
+                  </option>
+                ))}
+              </select>
+              
+              {selectedComponent && (
+                <button
+                  onClick={() => {
+                    const component = COMPONENT_LIBRARY[selectedComponent as keyof typeof COMPONENT_LIBRARY];
+                    if (component && iframeRef.current?.contentDocument) {
+                      const doc = iframeRef.current.contentDocument;
+                      const tempDiv = doc.createElement('div');
+                      tempDiv.innerHTML = component.template;
+                      const element = tempDiv.firstElementChild;
+                      if (element) {
+                        doc.body.appendChild(element);
+                        setCurrentHtml(doc.documentElement.outerHTML);
+                        toast.success(`${component.name} added successfully!`);
+                      }
+                    }
+                  }}
+                  style={{
+                    height: 34,
+                    borderRadius: 8,
+                    border: "1px solid rgba(34,197,94,0.38)",
+                    background: "linear-gradient(135deg, rgba(34,197,94,0.22), rgba(16,185,129,0.18))",
+                    color: "white",
+                    fontWeight: 800,
+                    fontSize: 12,
+                    cursor: "pointer"
+                  }}
+                >
+                  ➕ Add Component
+                </button>
+              )}
+            </div>
 
             <div style={{
               marginTop: 10,
@@ -995,6 +1070,55 @@ useEffect(() => {
                 outline: "none"
               }}
             />
+            
+            {/* AI Content Generation Templates */}
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", marginBottom: 4 }}>Quick Templates:</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <button
+                  onClick={() => setLeftAiPrompt("Generate a compelling headline for this section")}
+                  style={{
+                    padding: "4px 8px",
+                    borderRadius: 4,
+                    border: "1px solid rgba(148,163,184,0.2)",
+                    background: "rgba(255,255,255,0.05)",
+                    color: "rgba(255,255,255,0.8)",
+                    fontSize: 10,
+                    cursor: "pointer"
+                  }}
+                >
+                  📝 Headline
+                </button>
+                <button
+                  onClick={() => setLeftAiPrompt("Write professional marketing copy for this product/service")}
+                  style={{
+                    padding: "4px 8px",
+                    borderRadius: 4,
+                    border: "1px solid rgba(148,163,184,0.2)",
+                    background: "rgba(255,255,255,0.05)",
+                    color: "rgba(255,255,255,0.8)",
+                    fontSize: 10,
+                    cursor: "pointer"
+                  }}
+                >
+                  🚀 Marketing Copy
+                </button>
+                <button
+                  onClick={() => setLeftAiPrompt("Create a clear call-to-action button text")}
+                  style={{
+                    padding: "4px 8px",
+                    borderRadius: 4,
+                    border: "1px solid rgba(148,163,184,0.2)",
+                    background: "rgba(255,255,255,0.05)",
+                    color: "rgba(255,255,255,0.8)",
+                    fontSize: 10,
+                    cursor: "pointer"
+                  }}
+                >
+                  🎯 Call-to-Action
+                </button>
+              </div>
+            </div>
 
             <button
               data-left-ai-run="1"
