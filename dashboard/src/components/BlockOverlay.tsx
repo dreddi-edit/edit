@@ -34,82 +34,120 @@ type Props = {
   onHtmlChange?: (html: string) => void;
 };
 
-// Interactive Block Discovery - Trigger clickables to reveal behavior
-function discoverInteractiveBlocks(doc: Document): Map<string, string> {
+// Universal Block Discovery - Works on ANY website regardless of broken JS
+function discoverUniversalBlocks(doc: Document): Map<string, string> {
   const discoveries = new Map<string, string>();
   
-  // Find all clickable elements
-  const clickables = doc.querySelectorAll('a, button, [onclick], [role="button"], [data-toggle], .dropdown-toggle, .accordion-header');
+  // Find ALL clickable elements (no dependency on JS working)
+  const clickables = doc.querySelectorAll('a, button, [onclick], [role="button"], [data-toggle], .dropdown-toggle, .accordion-header, input[type="button"], input[type="submit"]');
   
   clickables.forEach((el) => {
     const element = el as HTMLElement;
-    const originalDisplay = element.style.display;
-    const originalVisibility = element.style.visibility;
-    const originalPointerEvents = element.style.pointerEvents;
+    const selector = generateSelector(element);
     
-    try {
-      // Temporarily make element clickable but invisible
-      element.style.display = 'block';
-      element.style.visibility = 'hidden';
-      element.style.pointerEvents = 'auto';
-      
-      // Trigger click
-      element.click();
-      
-      // Wait for DOM changes (dropdowns, modals, accordions)
-      setTimeout(() => {
-        // Check what changed
-        const newHTML = doc.body.innerHTML;
-        
-        // Analyze changes
-        let behavior = 'clickable';
-        
-        // Check for dropdown
-        if (newHTML.includes('dropdown') || newHTML.includes('menu') || element.closest('.dropdown')) {
-          behavior = 'dropdown';
-        }
-        
-        // Check for modal
-        if (doc.querySelector('.modal, .popup, [role="dialog"]')) {
-          behavior = 'modal';
-        }
-        
-        // Check for accordion
-        if (element.closest('.accordion, .collapse') || newHTML.includes('accordion')) {
-          behavior = 'accordion';
-        }
-        
-        // Check for tab
-        if (element.closest('[role="tablist"], .nav-tabs') || element.getAttribute('role') === 'tab') {
-          behavior = 'tab';
-        }
-        
-        // Store discovery
-        const selector = generateSelector(element);
-        discoveries.set(selector, behavior);
-        
-        // Restore element state
-        element.style.display = originalDisplay;
-        element.style.visibility = originalVisibility;
-        element.style.pointerEvents = originalPointerEvents;
-        
-        // Close any opened elements
-        if (behavior === 'dropdown') {
-          element.click(); // Close dropdown
-        }
-        if (behavior === 'modal') {
-          const closeBtn = doc.querySelector('.modal .close, .popup .close, [aria-label="Close"]');
-          if (closeBtn) (closeBtn as HTMLElement).click();
-        }
-      }, 50);
-      
-    } catch (error) {
-      console.warn('Error discovering interactive block:', error);
-      // Restore element state on error
-      element.style.display = originalDisplay;
-      element.style.visibility = originalVisibility;
-      element.style.pointerEvents = originalPointerEvents;
+    // Analyze what this element does WITHOUT triggering it
+    let behavior = 'clickable';
+    let description = '';
+    
+    // Check if it's a link
+    if (element.tagName === 'A') {
+      const href = (element as HTMLAnchorElement).href;
+      if (href && href !== '#') {
+        behavior = 'link';
+        description = `Links to: ${href}`;
+      } else if (href === '#' || !href) {
+        behavior = 'anchor';
+        description = 'Page anchor or action button';
+      }
     }
+    
+    // Check if it's a button
+    if (element.tagName === 'BUTTON' || element.getAttribute('role') === 'button') {
+      const text = (element.textContent || '').trim();
+      const type = element.getAttribute('type');
+      
+      if (type === 'submit') {
+        behavior = 'submit';
+        description = 'Submits form';
+      } else if (type === 'reset') {
+        behavior = 'reset';
+        description = 'Resets form';
+      } else if (text.toLowerCase().includes('menu') || element.closest('nav')) {
+        behavior = 'menu';
+        description = 'Menu button';
+      } else if (text.toLowerCase().includes('search')) {
+        behavior = 'search';
+        description = 'Search button';
+      } else if (text.toLowerCase().includes('cart') || text.toLowerCase().includes('basket')) {
+        behavior = 'cart';
+        description = 'Shopping cart';
+      } else if (text.toLowerCase().includes('login') || text.toLowerCase().includes('sign in')) {
+        behavior = 'login';
+        description = 'Login button';
+      } else if (text.toLowerCase().includes('register') || text.toLowerCase().includes('sign up')) {
+        behavior = 'register';
+        description = 'Registration button';
+      } else if (text.toLowerCase().includes('download')) {
+        behavior = 'download';
+        description = 'Download button';
+      } else if (text.toLowerCase().includes('play')) {
+        behavior = 'play';
+        description = 'Play button';
+      } else {
+        behavior = 'button';
+        description = `Button: ${text}`;
+      }
+    }
+    
+    // Check for dropdown indicators
+    if (element.hasAttribute('data-toggle') || element.classList.contains('dropdown-toggle') || element.closest('.dropdown')) {
+      behavior = 'dropdown';
+      description = 'Dropdown menu';
+      
+      // Find dropdown items without triggering
+      const dropdownId = element.getAttribute('data-target') || element.getAttribute('href');
+      if (dropdownId) {
+        const dropdown = doc.querySelector(dropdownId);
+        if (dropdown) {
+          const items = dropdown.querySelectorAll('a, li, button');
+          if (items.length > 0) {
+            const itemTexts = Array.from(items).slice(0, 5).map(item => 
+              (item.textContent || '').trim()
+            ).filter(text => text).join(', ');
+            description += ` containing: ${itemTexts}`;
+          }
+        }
+      }
+    }
+    
+    // Check for accordion/collapsible
+    if (element.closest('.accordion') || element.closest('.collapse') || element.hasAttribute('data-toggle') && element.getAttribute('data-toggle') === 'collapse') {
+      behavior = 'accordion';
+      description = 'Collapsible section';
+    }
+    
+    // Check for tabs
+    if (element.closest('[role="tablist"]') || element.getAttribute('role') === 'tab') {
+      behavior = 'tab';
+      description = 'Tab navigation';
+    }
+    
+    // Check for modal triggers
+    if (element.hasAttribute('data-target') && element.getAttribute('data-target')?.includes('modal') || element.closest('.modal')) {
+      behavior = 'modal';
+      description = 'Modal popup';
+    }
+    
+    // Check for form inputs
+    if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA' || element.tagName === 'SELECT') {
+      behavior = 'input';
+      const type = element.getAttribute('type') || element.tagName.toLowerCase();
+      const placeholder = element.getAttribute('placeholder') || '';
+      description = `Input field: ${type}${placeholder ? ` (${placeholder})` : ''}`;
+    }
+    
+    // Store discovery with description
+    discoveries.set(selector, description || behavior);
   });
   
   return discoveries;
@@ -125,7 +163,7 @@ function generateSelector(el: Element): string {
   return el.tagName.toLowerCase();
 }
 
-// Enhanced block detection with interactive discovery
+// Enhanced block detection with universal discovery
 function pickLabel(el: Element, discoveries?: Map<string, string>): string {
   const tag = el.tagName.toLowerCase();
   const cls = (el.getAttribute("class") || "").trim();
@@ -1171,9 +1209,9 @@ const isBtn = b.isButton || !!btnNode;
   }, [enabled, getDoc]);
 
   const assignIds = useCallback((els: Element[], win: Window) => {
-    // Run interactive discovery before assigning IDs
+    // Run universal discovery before assigning IDs
     const doc = win.document;
-    const discoveries = discoverInteractiveBlocks(doc);
+    const discoveries = discoverUniversalBlocks(doc);
     
     const withRects = els.map(el => ({ el, top: el.getBoundingClientRect().top + win.scrollY }));
     withRects.sort((a, b) => a.top - b.top);
@@ -1193,8 +1231,8 @@ const isBtn = b.isButton || !!btnNode;
     if (!doc || !win) return;
     onStatus?.("blocked");
 
-    // Run interactive discovery first
-    const discoveries = discoverInteractiveBlocks(doc);
+    // Run universal discovery first
+    const discoveries = discoverUniversalBlocks(doc);
 
     const selectors = [
       // Gutenberg / WP Blocks (broad)

@@ -3,6 +3,24 @@
 import bcrypt from "bcryptjs"
 import crypto from "crypto"
 
+// --- Safe Mode Proxy - Strips broken JS and CSS ---
+function sanitizeHtmlForEditor(html) {
+  // Remove problematic script sources that cause 404s
+  html = html.replace(/<script[^>]*src=["'][^"']*storefront[^"']*["'][^>]*><\/script>/gi, '');
+  html = html.replace(/<script[^>]*src=["'][^"']*\/js\/[^"']*["'][^>]*><\/script>/gi, '');
+  
+  // Remove problematic CSS that causes CSP issues
+  html = html.replace(/<link[^>]*rel=["']stylesheet["'][^>]*href=["'][^"']*storefront[^"']*["'][^>]*>/gi, '');
+  
+  // Remove inline event handlers that might reference missing functions
+  html = html.replace(/\son\w+="[^"]*"/gi, '');
+  
+  // Add safe mode indicator
+  html = html.replace(/<head>/i, '<head><!-- SAFE MODE: Broken JS removed -->');
+  
+  return html;
+}
+
 // --- Export transforms (mode-aware) ---
 function decodeAssetProxyEverywhere(input){
   let out = String(input || "");
@@ -164,7 +182,30 @@ app.get("/", (_req, res) => {
   res.sendFile(path.join(dashboardDist, "index.html"))
 })
 
-app.get("/proxy", proxy)
+app.get("/proxy", async (req, res) => {
+  try {
+    const url = req.query.url
+    if (!url || typeof url !== "string") {
+      return res.status(400).send("Missing url")
+    }
+    const r = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; SiteEditor/1.0)"
+      }
+    })
+    if (!r.ok) {
+      return res.status(r.status).send(`Proxy error: ${r.status}`)
+    }
+    const html = await r.text()
+    
+    // Apply safe mode sanitization
+    const safeHtml = sanitizeHtmlForEditor(html)
+    
+    res.send(safeHtml)
+  } catch (e) {
+    res.status(500).send(`Proxy error: ${e.message}`)
+  }
+})
 app.get("/asset", asset)
 
 app.get("/health", (_req, res) => {
