@@ -154,7 +154,7 @@ const autoSave = async (html: string) => {
 
   const handleOpenProject = async (p: Project) => {
     setCurrentProject(p)
-    setView("editor")
+    if(view !== "admin") setView("editor")
     if (p.url) setUrl(p.url)
     if (p.html) { setCurrentHtml(p.html); setLoadedUrl(p.url || "") }
     else if (p.url) setTimeout(() => load(true), 100)
