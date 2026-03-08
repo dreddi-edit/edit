@@ -13,7 +13,7 @@ const resend = new Resend(process.env.RESEND_API_KEY)
 async function send(to, subject, html) {
   try {
     const { data, error } = await resend.emails.send({
-      from: 'Site Editor <noreply@edit-production-ca78.up.railway.app>',
+      from: 'Site Editor <edgarbaumann21032006@gmail.com>',
       to: [to],
       subject: subject,
       html: html
