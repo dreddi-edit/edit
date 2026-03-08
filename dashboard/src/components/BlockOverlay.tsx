@@ -155,11 +155,32 @@ function discoverUniversalBlocks(doc: Document): Map<string, string> {
 
 // Generate unique selector for element
 function generateSelector(el: Element): string {
-  if (el.id) return `#${el.id}`;
+  if (el.id) {
+    // Ensure ID is valid (no special chars)
+    const id = el.id.replace(/[^a-zA-Z0-9_-]/g, '');
+    if (id) return `#${id}`;
+  }
+  
   if (el.className) {
-    const classes = el.className.split(' ').filter(c => c && !c.includes('wp-block'));
+    const classes = el.className.split(' ')
+      .filter(c => c && !c.includes('wp-block') && /^[a-zA-Z][\w-]*$/.test(c))
+      .slice(0, 2); // Limit to 2 classes
     if (classes.length > 0) return `.${classes.join('.')}`;
   }
+  
+  // Use tag with data attributes if available
+  if (el.getAttribute('data-block-id')) {
+    return `${el.tagName.toLowerCase()}[data-block-id="${el.getAttribute('data-block-id')}"]`;
+  }
+  
+  // Fallback to tag with nth-child to ensure uniqueness
+  const parent = el.parentElement;
+  if (parent) {
+    const siblings = Array.from(parent.children);
+    const index = siblings.indexOf(el) + 1;
+    return `${el.tagName.toLowerCase()}:nth-child(${index})`;
+  }
+  
   return el.tagName.toLowerCase();
 }
 
