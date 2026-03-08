@@ -61,16 +61,16 @@ function pickLabel(el: Element): string {
   if (tag === "section") return "section";
   if (tag === "article") return "article";
   if (tag === "form") return "form";
-  if (tag === "img") return "image";
-  if (tag === "video") return "video";
-  if (tag === "figure" || tag === "img") return "image";
-  if (cls.includes("wp-block-image") || cls.includes("wp-block-cover")) return "image";
   if (tag === "h1" || tag === "h2" || tag === "h3") return "heading";
   if (tag === "p") return "text";
   if (tag === "ul" || tag === "ol") return "list";
   if (tag === "a" && (el as HTMLAnchorElement).href) return "link";
   if (tag === "button") return "button";
   if (tag === "input" || tag === "textarea" || tag === "select") return "input";
+  // Image detection (consolidated)
+  if (tag === "img" || tag === "figure" || 
+      cls.includes("wp-block-image") || cls.includes("wp-block-cover")) return "image";
+  if (tag === "video") return "video";
   return tag;
 }
 
@@ -433,13 +433,17 @@ export default function BlockOverlay({ iframeRef, enabled, canvasMode, onStatus,
     doc.addEventListener("submit", stopSubmit, true)
 
     return () => {
-      doc.removeEventListener("click", stopInteractive, true)
-      doc.removeEventListener("mousedown", stopInteractive, true)
-      doc.removeEventListener("mouseup", stopInteractive, true)
-      doc.removeEventListener("pointerdown", stopInteractive, true)
-      doc.removeEventListener("pointerup", stopInteractive, true)
-      doc.removeEventListener("change", stopInteractive, true)
-      doc.removeEventListener("submit", stopSubmit, true)
+      try {
+        doc.removeEventListener("click", stopInteractive, true)
+        doc.removeEventListener("mousedown", stopInteractive, true)
+        doc.removeEventListener("mouseup", stopInteractive, true)
+        doc.removeEventListener("pointerdown", stopInteractive, true)
+        doc.removeEventListener("pointerup", stopInteractive, true)
+        doc.removeEventListener("change", stopInteractive, true)
+        doc.removeEventListener("submit", stopSubmit, true)
+      } catch (cleanupError) {
+        console.warn("Interactive events cleanup error:", cleanupError)
+      }
     }
   }, [enabled, iframeRef])
 
@@ -524,8 +528,9 @@ useEffect(() => {
       const rectW = Math.abs(endX - startX);
       const rectH = Math.abs(endY - startY);
 
-      // Zu kleines Rechteck → ignorieren
-      if (rectW < 20 || rectH < 20) {
+      // Zu kleines Rechteck → ignorieren (responsive minimum size)
+      const minSize = window.innerWidth < 768 ? 15 : 20; // Smaller on mobile
+      if (rectW < minSize || rectH < minSize) {
         setBoPickArmed(false);
         setBoPickType("");
         setBoGridRect(null);
@@ -534,13 +539,13 @@ useEffect(() => {
 
       const type = (boPickType || "paragraph").toLowerCase();
       const templates: Record<string, string> = {
-        button: '<div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="#">New Button</a></div>',
-        image: '<figure class="wp-block-image size-large" style="margin:0;height:100%;"><img src="https://placehold.co/800x400" alt="New Image" style="width:100%;height:100%;object-fit:cover;display:block;" /></figure>',
-        heading: '<h2 class="wp-block-heading">New Heading</h2>',
-        list: '<ul class="wp-block-list"><li>Item 1</li><li>Item 2</li><li>Item 3</li></ul>',
-        section: '<div class="wp-block-group" style="padding:40px 20px"><h2 class="wp-block-heading">New Section</h2><p>Add your content here.</p></div>',
+        button: '<div class="wp-block-button"><a class="wp-block-button__link wp-element-button" href="#">Click Here</a></div>',
+        image: '<figure class="wp-block-image size-large" style="margin:0;height:100%;"><img src="data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iODAwIiBoZWlnaHQ9IjQwMCIgdmlld0JveD0iMCAwIDgwMCA0MDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHJlY3Qgd2lkdGg9IjgwMCIgaGVpZ2h0PSI0MDAiIGZpbGw9IiNGM0Y0RjYiLz48dGV4dCB4PSI0MDAiIHk9IjIwMCIgZm9udC1mYW1pbHk9IkFyaWFsIiBmb250LXNpemU9IjI0IiBmaWxsPSIjOUNBM0FGIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBkeT0iLjNlbSI+SW1hZ2UgUGxhY2Vob2xkZXI8L3RleHQ+PC9zdmc+" alt="Image placeholder" style="width:100%;height:100%;object-fit:cover;display:block;" /></figure>',
+        heading: '<h2 class="wp-block-heading">Your Heading Here</h2>',
+        list: '<ul class="wp-block-list"><li>First item</li><li>Second item</li><li>Third item</li></ul>',
+        section: '<div class="wp-block-group" style="padding:40px 20px"><h2 class="wp-block-heading">Section Title</h2><p>Add your content here.</p></div>',
         divider: '<hr class="wp-block-separator"/>',
-        paragraph: '<p>New paragraph text…</p>',
+        paragraph: '<p>Your paragraph content goes here.</p>',
       };
 
       const html = templates[type] || templates.paragraph;
@@ -1021,16 +1026,22 @@ const isBtn = b.isButton || !!btnNode;
             // @ts-ignore
             const htmlOut = typeof serializeIframeHtml === "function" ? serializeIframeHtml(doc) : doc.documentElement.outerHTML;
             onHtmlChange(htmlOut);
-          } catch {
+          } catch (serializeError) {
+            console.warn("Serialize error in onDrop:", serializeError);
             onHtmlChange(doc.documentElement.outerHTML);
           }
         }
-      } catch {}
+      } catch (dropError) {
+        console.error("Error in onDrop handler:", dropError);
+        toast.error("Failed to add element");
+      }
 
       // optional: rescan blocks so it becomes selectable
       try {
         window.dispatchEvent(new CustomEvent("blockoverlay:rescan", { detail: {} }));
-      } catch {}
+      } catch (rescanError) {
+        console.warn("Rescan error:", rescanError);
+      }
     };
 
     doc.addEventListener("dragover", onDragOver as any);
@@ -2105,6 +2116,10 @@ return () => { iframe.removeEventListener("load", onLoad); win?.removeEventListe
 const applyEdit = useCallback(() => {
     const doc = getDoc();
     if (!doc || !selectedId) return;
+    
+    // Save history before applying changes
+    pushHistorySnapshot(doc);
+    
     const chosen = blocks.find(b => b.id === selectedId);
     if (!chosen) return;
     const el = doc.querySelector(chosen.selector) as HTMLElement | null;
@@ -2151,6 +2166,40 @@ const applyEdit = useCallback(() => {
           img.setAttribute("data-bo-local-src", "1");
         }
       }
+    } else if (panelType === "nav-links") {
+      const anchors = Array.from(el.querySelectorAll("a[href], a")) as HTMLAnchorElement[];
+      const items = (editNavLinks || [])
+        .map(x => ({
+          text: String(x?.text || "").trim(),
+          href: String(x?.href || "").trim()
+        }))
+        .filter(x => x.text || x.href);
+
+      if (anchors.length > 0) {
+        items.forEach((item, i) => {
+          let a = anchors[i] || null;
+
+          if (!a) {
+            const last = anchors[anchors.length - 1];
+            if (last && last.parentElement) {
+              const clone = last.cloneNode(true) as HTMLAnchorElement;
+              clone.textContent = "";
+              clone.setAttribute("href", "#");
+              last.parentElement.appendChild(clone);
+              anchors.push(clone);
+              a = clone;
+            }
+          }
+
+          if (!a) return;
+          a.textContent = item.text || "Link";
+          a.setAttribute("href", item.href || "#");
+        });
+
+        if (anchors.length > items.length) {
+          anchors.slice(items.length).forEach((a) => a.remove());
+        }
+      }
     } else {
       const text = (editValue || "").trim();
       const tag = el.tagName.toLowerCase();
@@ -2168,7 +2217,7 @@ const applyEdit = useCallback(() => {
 
     try { onHtmlChange?.(serializeIframeHtml(doc)); } catch (e) { console.warn("serialize error:", e); }
   }, [getDoc, selectedId, blocks, editValue, editLink, editBg, editColor, editFontSize,
-      panelType, editHeading, editBullets, editImgSrc, isButtonSelected, onHtmlChange]);
+      panelType, editHeading, editBullets, editImgSrc, editNavLinks, isButtonSelected, onHtmlChange, pushHistorySnapshot]);
 
   const aiLayoutAnalyze = async () => {
     const doc = getDoc();
@@ -2636,20 +2685,12 @@ return (
             </>)}
 
 {panelType === "button" && (<>
-            <label style={{ fontSize: 11, color: "rgba(148,163,184,0.8)", fontWeight: 700 }}>BUTTON TEXT</label>
-            <textarea value={editValue} onChange={e => setEditValue(e.target.value)} style={{
+            <label htmlFor="button-text" style={{ fontSize: 11, color: "rgba(148,163,184,0.8)", fontWeight: 700 }}>BUTTON TEXT</label>
+            <textarea id="button-text" value={editValue} onChange={e => setEditValue(e.target.value)} style={{
               marginTop: 4, width: "100%", height: 60, resize: "vertical",
               borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)", background: "rgba(0,0,0,0.25)",
-              color: "white", padding: 8, outline: "none", fontSize: 13, lineHeight: 1.35, boxSizing: "border-box",
-            }} />
-          </>)}
-
-          {panelType === "button" && (<>
-            <label style={{ fontSize: 11, color: "rgba(148,163,184,0.8)", fontWeight: 700, display: "block", marginTop: 10 }}>LINK (URL)</label>
-            <input value={editLink} onChange={e => setEditLink(e.target.value)} placeholder="https://..." style={{
-              marginTop: 4, width: "100%", height: 34, borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)",
-              background: "rgba(0,0,0,0.25)", color: "white", padding: "0 10px", outline: "none", fontSize: 13, boxSizing: "border-box",
-            }} />
+              color: "white", padding: "8px", outline: "none", fontSize: 13, boxSizing: "border-box",
+            }} aria-label="Button text" />
             <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
               <div style={{ flex: 1 }}>
                 <label style={{ fontSize: 11, color: "rgba(148,163,184,0.8)", fontWeight: 700, display: "block" }}>HINTERGRUND</label>
