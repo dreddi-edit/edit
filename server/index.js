@@ -144,6 +144,7 @@ function localRebuild(html) {
 }
 
 const app = express()
+app.use(express.urlencoded({ extended: true }))
 
 app.use(cors({
   origin: process.env.NODE_ENV === "production"
