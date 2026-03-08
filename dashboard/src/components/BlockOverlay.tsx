@@ -34,9 +34,111 @@ type Props = {
   onHtmlChange?: (html: string) => void;
 };
 
-function pickLabel(el: Element): string {
+// Interactive Block Discovery - Trigger clickables to reveal behavior
+function discoverInteractiveBlocks(doc: Document): Map<string, string> {
+  const discoveries = new Map<string, string>();
+  
+  // Find all clickable elements
+  const clickables = doc.querySelectorAll('a, button, [onclick], [role="button"], [data-toggle], .dropdown-toggle, .accordion-header');
+  
+  clickables.forEach((el) => {
+    const element = el as HTMLElement;
+    const originalDisplay = element.style.display;
+    const originalVisibility = element.style.visibility;
+    const originalPointerEvents = element.style.pointerEvents;
+    
+    try {
+      // Temporarily make element clickable but invisible
+      element.style.display = 'block';
+      element.style.visibility = 'hidden';
+      element.style.pointerEvents = 'auto';
+      
+      // Trigger click
+      element.click();
+      
+      // Wait for DOM changes (dropdowns, modals, accordions)
+      setTimeout(() => {
+        // Check what changed
+        const newHTML = doc.body.innerHTML;
+        
+        // Analyze changes
+        let behavior = 'clickable';
+        
+        // Check for dropdown
+        if (newHTML.includes('dropdown') || newHTML.includes('menu') || element.closest('.dropdown')) {
+          behavior = 'dropdown';
+        }
+        
+        // Check for modal
+        if (doc.querySelector('.modal, .popup, [role="dialog"]')) {
+          behavior = 'modal';
+        }
+        
+        // Check for accordion
+        if (element.closest('.accordion, .collapse') || newHTML.includes('accordion')) {
+          behavior = 'accordion';
+        }
+        
+        // Check for tab
+        if (element.closest('[role="tablist"], .nav-tabs') || element.getAttribute('role') === 'tab') {
+          behavior = 'tab';
+        }
+        
+        // Store discovery
+        const selector = generateSelector(element);
+        discoveries.set(selector, behavior);
+        
+        // Restore element state
+        element.style.display = originalDisplay;
+        element.style.visibility = originalVisibility;
+        element.style.pointerEvents = originalPointerEvents;
+        
+        // Close any opened elements
+        if (behavior === 'dropdown') {
+          element.click(); // Close dropdown
+        }
+        if (behavior === 'modal') {
+          const closeBtn = doc.querySelector('.modal .close, .popup .close, [aria-label="Close"]');
+          if (closeBtn) (closeBtn as HTMLElement).click();
+        }
+      }, 50);
+      
+    } catch (error) {
+      console.warn('Error discovering interactive block:', error);
+      // Restore element state on error
+      element.style.display = originalDisplay;
+      element.style.visibility = originalVisibility;
+      element.style.pointerEvents = originalPointerEvents;
+    }
+  });
+  
+  return discoveries;
+}
+
+// Generate unique selector for element
+function generateSelector(el: Element): string {
+  if (el.id) return `#${el.id}`;
+  if (el.className) {
+    const classes = el.className.split(' ').filter(c => c && !c.includes('wp-block'));
+    if (classes.length > 0) return `.${classes.join('.')}`;
+  }
+  return el.tagName.toLowerCase();
+}
+
+// Enhanced block detection with interactive discovery
+function pickLabel(el: Element, discoveries?: Map<string, string>): string {
   const tag = el.tagName.toLowerCase();
   const cls = (el.getAttribute("class") || "").trim();
+  
+  // Check if element was discovered as interactive
+  if (discoveries) {
+    const selector = generateSelector(el);
+    const discoveredBehavior = discoveries.get(selector);
+    if (discoveredBehavior) {
+      return discoveredBehavior;
+    }
+  }
+  
   // WP Blocks
   if (cls.includes("wp-block-button")) return "button";
   if (cls.includes("wp-block-heading")) return "heading";
@@ -1069,6 +1171,10 @@ const isBtn = b.isButton || !!btnNode;
   }, [enabled, getDoc]);
 
   const assignIds = useCallback((els: Element[], win: Window) => {
+    // Run interactive discovery before assigning IDs
+    const doc = win.document;
+    const discoveries = discoverInteractiveBlocks(doc);
+    
     const withRects = els.map(el => ({ el, top: el.getBoundingClientRect().top + win.scrollY }));
     withRects.sort((a, b) => a.top - b.top);
     let idx = 0;
@@ -1076,7 +1182,8 @@ const isBtn = b.isButton || !!btnNode;
       idx += 1;
       const id = `block-${idx}`;
       (el as HTMLElement).setAttribute("data-block-id", id);
-      return { id, el, docTop: top };
+      const label = pickLabel(el, discoveries);
+      return { id, el, docTop: top, label, selector: generateSelector(el), isButton: isButtonElement(el) };
     });
   }, []);
 
@@ -1085,6 +1192,9 @@ const isBtn = b.isButton || !!btnNode;
     const win = getWin();
     if (!doc || !win) return;
     onStatus?.("blocked");
+
+    // Run interactive discovery first
+    const discoveries = discoverInteractiveBlocks(doc);
 
     const selectors = [
       // Gutenberg / WP Blocks (broad)
@@ -1149,10 +1259,10 @@ const isBtn = b.isButton || !!btnNode;
       const parentIdx = deduped.findIndex(k => k.el.contains(c.el));
       if (parentIdx >= 0) {
         const parent = deduped[parentIdx];
-        const cLabel = pickLabel(c.el);
-        const pLabel = pickLabel(parent.el);
+        const cLabel = pickLabel(c.el, discoveries);
+        const pLabel = pickLabel(parent.el, discoveries);
         // Spezifischere Typen bevorzugen
-        const specific = ["image","button","heading","nav","form","video","gallery","cover"];
+        const specific = ["image","button","heading","nav","form","video","gallery","cover","dropdown","modal","accordion","tab"];
         const cSpecific = specific.includes(cLabel);
         const pSpecific = specific.includes(pLabel);
         if (cSpecific && !pSpecific) {
