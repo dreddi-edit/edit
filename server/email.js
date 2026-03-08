@@ -11,6 +11,10 @@ if (!process.env.RESEND_API_KEY) {
 const resend = new Resend(process.env.RESEND_API_KEY)
 
 async function send(to, subject, html) {
+  console.log(`📧 Email attempt - To: ${to}, Subject: ${subject}`)
+  console.log(`🔑 RESEND_API_KEY exists: ${!!process.env.RESEND_API_KEY}`)
+  console.log(`🔑 RESEND_API_KEY length: ${process.env.RESEND_API_KEY?.length || 0}`)
+  
   try {
     const { data, error } = await resend.emails.send({
       from: 'Site Editor <edgarbaumann21032006@gmail.com>',
@@ -20,14 +24,16 @@ async function send(to, subject, html) {
     })
     
     if (error) {
-      console.error(`❌ Resend Fehler:`, error)
+      console.error(`❌ Resend Fehler:`, JSON.stringify(error, null, 2))
       return false
     }
     
     console.log(`✅ Email gesendet an ${to}`)
+    console.log(`📊 Response:`, JSON.stringify(data, null, 2))
     return true
   } catch (e) {
     console.error(`❌ Email Fehler:`, e.message)
+    console.error(`❌ Stack:`, e.stack)
     return false
   }
 }
