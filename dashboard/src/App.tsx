@@ -91,8 +91,10 @@ export default function App() {
 
   const [isDraggingBlock, setIsDraggingBlock] = useState(false)
   const [authUser, setAuthUser] = useState<User | null | "loading">("loading")
-  const [view, setView] = useState<"auth" | "dashboard" | "editor">("auth")
+  const [view, setView] = useState<"auth" | "dashboard" | "editor" | "admin">("auth")
   const [currentProject, setCurrentProject] = useState<Project | null>(null)
+const [adminUsers, setAdminUsers] = useState<any[]>([])
+const [adminLoading, setAdminLoading] = useState(false)
   const [approvalOn, setApprovalOn] = useState(true)
   const [showCredits, setShowCredits] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
@@ -110,7 +112,22 @@ export default function App() {
   const [leftAiModel, setLeftAiModel] = useState("auto")
   const [leftAiRunning, setLeftAiRunning] = useState(false)
   // Auto-save Projekt
-  const autoSave = async (html: string) => {
+  
+const loadAdminUsers = async () => {
+  setAdminLoading(true)
+  try {
+    const r = await fetch("/api/admin/users", { credentials: "include" })
+    const d = await r.json()
+    if (d.ok) setAdminUsers(d.users || [])
+    else alert(d.error || "Admin load failed")
+  } catch (e) {
+    alert("Admin load failed")
+  } finally {
+    setAdminLoading(false)
+  }
+}
+
+const autoSave = async (html: string) => {
     if (!currentProject) return
     try { await apiSaveProject(currentProject.id, { html }) } catch {}
   }
