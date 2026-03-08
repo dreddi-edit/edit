@@ -1,6 +1,7 @@
 
 
 import bcrypt from "bcryptjs"
+import crypto from "crypto"
 
 // --- Export transforms (mode-aware) ---
 function decodeAssetProxyEverywhere(input){
@@ -520,9 +521,20 @@ app.get("/api/admin/me", authMiddleware, (req, res) => {
 app.get("/api/admin/users", authMiddleware, ownerOnly, (_req, res) => {
   try {
     const rows = db.prepare(`
-      SELECT id, email, name, created_at
-      FROM users
-      ORDER BY id DESC
+      SELECT u.id, u.email, u.name, u.created_at, COALESCE(c.balance_eur, 0) as credits,
+             GROUP_CONCAT(DISTINCT 
+               CASE 
+                 WHEN tm.member_email = u.email THEN 'Team: ' || o.name || ' (' || tm.role || ')'
+                 WHEN om.user_id = u.id THEN 'Org: ' || o.name || ' (' || om.role || ')'
+                 ELSE NULL
+               END, ', ') as affiliations
+      FROM users u
+      LEFT JOIN credits c ON u.id = c.user_id
+      LEFT JOIN team_members tm ON tm.member_email = u.email
+      LEFT JOIN organisations o ON tm.owner_id = o.id
+      LEFT JOIN org_members om ON om.user_id = u.id
+      GROUP BY u.id, u.email, u.name, u.created_at, c.balance_eur
+      ORDER BY u.id DESC
     `).all()
     res.json({ ok: true, users: rows })
 
@@ -689,7 +701,6 @@ app.post("/api/admin/send-reset", authMiddleware, ownerOnly, (req, res) => {
     }
     
     // Generate reset token
-    const crypto = require("crypto")
     const resetToken = crypto.randomBytes(32).toString("hex")
     
     // Store reset token
