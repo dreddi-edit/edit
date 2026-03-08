@@ -545,35 +545,61 @@ app.delete("/api/admin/users/:id", authMiddleware, ownerOnly, (req, res) => {
       return res.status(404).json({ ok: false, error: "User not found" })
     }
     
-    // Delete user's projects first
-    db.prepare("DELETE FROM projects WHERE user_id = ?").run(userId)
+    // Enable foreign key constraints
+    db.exec("PRAGMA foreign_keys = ON")
     
-    // Delete user's settings
-    db.prepare("DELETE FROM user_settings WHERE user_id = ?").run(userId)
-    
-    // Delete user's team memberships (as owner)
-    db.prepare("DELETE FROM team_members WHERE owner_id = ?").run(userId)
-    
-    // Delete user's team memberships (as member)
-    db.prepare("DELETE FROM team_members WHERE member_email = ?").run(user.email)
-    
-    // Delete user's org memberships
-    db.prepare("DELETE FROM org_members WHERE user_id = ?").run(userId)
-    
-    // Delete user's org ownerships
-    db.prepare("DELETE FROM organisations WHERE owner_id = ?").run(userId)
-    
-    // Delete user's API keys
-    db.prepare("DELETE FROM user_api_keys WHERE user_id = ?").run(userId)
-    
-    // Delete user
-    const result = db.prepare("DELETE FROM users WHERE id = ?").run(userId)
-    
-    if (result.changes === 0) {
-      return res.status(404).json({ ok: false, error: "User not found" })
+    // Delete in correct order to avoid foreign key constraints
+    try {
+      // Delete credit transactions first
+      db.prepare("DELETE FROM credit_transactions WHERE user_id = ?").run(userId)
+      
+      // Delete user's credits
+      db.prepare("DELETE FROM credits WHERE user_id = ?").run(userId)
+      
+      // Delete user's projects
+      db.prepare("DELETE FROM projects WHERE user_id = ?").run(userId)
+      
+      // Delete user's settings
+      db.prepare("DELETE FROM user_settings WHERE user_id = ?").run(userId)
+      
+      // Delete user's team memberships (as member)
+      db.prepare("DELETE FROM team_members WHERE member_email = ?").run(user.email)
+      
+      // Delete user's team memberships (as owner)
+      db.prepare("DELETE FROM team_members WHERE owner_id = ?").run(userId)
+      
+      // Delete user's org memberships
+      db.prepare("DELETE FROM org_members WHERE user_id = ?").run(userId)
+      
+      // Delete user's org ownerships (this might fail if others depend on it)
+      try {
+        db.prepare("DELETE FROM organisations WHERE owner_id = ?").run(userId)
+      } catch (e) {
+        // If org deletion fails, update owner to another user or set to NULL
+        db.prepare("UPDATE organisations SET owner_id = NULL WHERE owner_id = ?").run(userId)
+      }
+      
+      // Delete user's API keys
+      db.prepare("DELETE FROM user_api_keys WHERE user_id = ?").run(userId)
+      
+      // Delete user's password resets
+      db.prepare("DELETE FROM password_resets WHERE user_id = ?").run(userId)
+      
+      // Finally delete the user
+      const result = db.prepare("DELETE FROM users WHERE id = ?").run(userId)
+      
+      if (result.changes === 0) {
+        return res.status(404).json({ ok: false, error: "User not found" })
+      }
+      
+      res.json({ ok: true, message: "User deleted successfully" })
+    } catch (fkError) {
+      // If foreign key still fails, provide more specific error
+      res.status(400).json({ 
+        ok: false, 
+        error: "Cannot delete user - they own data that other users depend on. Consider transferring ownership first." 
+      })
     }
-    
-    res.json({ ok: true, message: "User deleted successfully" })
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message })
   }
