@@ -308,6 +308,55 @@ useEffect(() => {
     </>
   )
 
+  if (view === "admin") {
+    return (
+      <div style={{ minHeight: "100vh", background: "#0b1220", color: "white", padding: 24 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: 28, fontWeight: 900 }}>Owner Admin</div>
+            <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>Minimal internal admin console</div>
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button
+              onClick={loadAdminUsers}
+              style={{ height: 40, padding: "0 14px", borderRadius: 10, border: "1px solid #334155", background: "#111827", color: "white", cursor: "pointer", fontWeight: 700 }}
+            >
+              {adminLoading ? "Loading..." : "Reload Users"}
+            </button>
+            <button
+              onClick={() => setView("dashboard")}
+              style={{ height: 40, padding: "0 14px", borderRadius: 10, border: "1px solid #334155", background: "#111827", color: "white", cursor: "pointer", fontWeight: 700 }}
+            >
+              Back
+            </button>
+          </div>
+        </div>
+
+        <div style={{ background: "#111827", border: "1px solid #334155", borderRadius: 16, overflow: "hidden" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "80px 1.8fr 1fr 1fr", padding: 14, background: "#1f2937", fontWeight: 800 }}>
+            <div>ID</div>
+            <div>Email</div>
+            <div>Name</div>
+            <div>Created</div>
+          </div>
+
+          {adminUsers.map((u: any) => (
+            <div key={u.id} style={{ display: "grid", gridTemplateColumns: "80px 1.8fr 1fr 1fr", padding: 14, borderTop: "1px solid #1f2937" }}>
+              <div>{u.id}</div>
+              <div>{u.email}</div>
+              <div>{u.name || "-"}</div>
+              <div>{u.created_at || "-"}</div>
+            </div>
+          ))}
+
+          {!adminLoading && adminUsers.length === 0 && (
+            <div style={{ padding: 20, color: "#94a3b8" }}>No users loaded yet.</div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div style={{ height: "100vh", background: "#0b1220", fontFamily: "system-ui, sans-serif" }}>
 
