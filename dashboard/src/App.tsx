@@ -93,6 +93,19 @@ export default function App() {
   const [authUser, setAuthUser] = useState<User | null | "loading">("loading")
   const [view, setView] = useState<"auth" | "dashboard" | "editor" | "admin">("auth")
   const [currentProject, setCurrentProject] = useState<Project | null>(null)
+
+
+async function sendResetPw(userId:number){
+  await fetch("/api/admin/send-reset",{
+    method:"POST",
+    credentials:"include",
+    headers:{ "content-type":"application/json"},
+    body:JSON.stringify({userId})
+  })
+  alert("Reset email sent")
+}
+
+
 const [adminUsers, setAdminUsers] = useState<any[]>([])
 const [adminLoading, setAdminLoading] = useState(false)
 const [showCreateUser, setShowCreateUser] = useState(false)
@@ -427,18 +440,18 @@ useEffect(() => {
           {adminUsers.map((u: any) => (
             <div key={u.id} style={{ display: "grid", gridTemplateColumns: "80px 1.8fr 1fr 1fr 120px", padding: 14, borderTop: "1px solid #1f2937", alignItems: "center" }}>
               <div>{u.id}</div>
-              <div>{u.email}</div>
+              <div>{u.email + " | credits: " + (u.credits ?? 0)}</div>
               <div>{u.name || "-"}</div>
               <div>{u.created_at || "-"}</div>
               <div style={{ display: "flex", gap: 5, flexDirection: "column" }}>
                 <button
-                  onClick={() => addCredits(u.id, u.email)}
+                  onClick={() => addCredits(u.id, u.email + " | credits: " + (u.credits ?? 0))}
                   style={{ padding: "6px 8px", borderRadius: 4, border: "1px solid #10b981", background: "#10b981", color: "white", cursor: "pointer", fontSize: 11, fontWeight: 600 }}
                 >
                   💰 Add Credits
                 </button>
                 <button
-                  onClick={() => deleteUser(u.id, u.email)}
+                  onClick={() => deleteUser(u.id, u.email + " | credits: " + (u.credits ?? 0))}
                   style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid #dc2626", background: "#dc2626", color: "white", cursor: "pointer", fontSize: 11 }}
                 >
                   🗑️ Delete
