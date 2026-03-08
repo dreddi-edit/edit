@@ -61,6 +61,7 @@ import { registerOrgRoutes } from "./organisations.js"
 import { registerStripeRoutes } from "./stripe.js"
 import { registerScreenshotRoutes } from "./screenshot.js"
 import { registerProjectRoutes } from "./projects.js"
+import { sendPasswordReset } from "./email.js"
 import cors from "cors"
 import { proxy, asset } from "./proxy.js"
 import { claudeRewriteBlock } from "./claude.js"
@@ -524,6 +525,36 @@ app.get("/api/admin/users", authMiddleware, ownerOnly, (_req, res) => {
       ORDER BY id DESC
     `).all()
     res.json({ ok: true, users: rows })
+
+app.post("/api/admin/send-reset", authMiddleware, ownerOnly, async (req, res) => {
+  try {
+    const { userId } = req.body
+    if (!userId) return res.status(400).json({ ok: false, error: "userId required" })
+
+    const user = db.prepare("SELECT id, email FROM users WHERE id = ?").get(userId)
+    if (!user) return res.status(404).json({ ok: false, error: "User not found" })
+
+    db.exec(`CREATE TABLE IF NOT EXISTS password_resets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      token TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used INTEGER DEFAULT 0
+    )`)
+
+    const crypto = await import("crypto")
+    const token = crypto.randomBytes(32).toString("hex")
+    const expires = new Date(Date.now() + 3600000).toISOString()
+
+    db.prepare("INSERT INTO password_resets (user_id, token, expires_at) VALUES (?, ?, ?)").run(user.id, token, expires)
+
+    await sendPasswordReset(user.email, token)
+
+    res.json({ ok: true, email: user.email })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message })
   }
