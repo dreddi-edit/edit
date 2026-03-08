@@ -394,6 +394,56 @@ export default function BlockOverlay({ iframeRef, enabled, canvasMode, onStatus,
     try { onHtmlChange?.(serializeIframeHtml(iframeRef.current?.contentDocument || document)) } catch {}
   }, [enabled, canvasMode])
 
+
+  useEffect(() => {
+    if (!enabled) return
+
+    const iframe = iframeRef.current
+    const doc = iframe?.contentDocument
+    if (!iframe || !doc) return
+
+    const stopInteractive = (e: Event) => {
+      const t = e.target as HTMLElement | null
+      if (!t) return
+
+      const interactive = t.closest("a, button, select, option, input, textarea, label, form, summary, details")
+      if (!interactive) return
+
+      e.preventDefault()
+      e.stopPropagation()
+      try { (e as any).stopImmediatePropagation?.() } catch {}
+
+      if (interactive instanceof HTMLElement) {
+        try { interactive.blur() } catch {}
+      }
+    }
+
+    const stopSubmit = (e: Event) => {
+      e.preventDefault()
+      e.stopPropagation()
+      try { (e as any).stopImmediatePropagation?.() } catch {}
+    }
+
+    doc.addEventListener("click", stopInteractive, true)
+    doc.addEventListener("mousedown", stopInteractive, true)
+    doc.addEventListener("mouseup", stopInteractive, true)
+    doc.addEventListener("pointerdown", stopInteractive, true)
+    doc.addEventListener("pointerup", stopInteractive, true)
+    doc.addEventListener("change", stopInteractive, true)
+    doc.addEventListener("submit", stopSubmit, true)
+
+    return () => {
+      doc.removeEventListener("click", stopInteractive, true)
+      doc.removeEventListener("mousedown", stopInteractive, true)
+      doc.removeEventListener("mouseup", stopInteractive, true)
+      doc.removeEventListener("pointerdown", stopInteractive, true)
+      doc.removeEventListener("pointerup", stopInteractive, true)
+      doc.removeEventListener("change", stopInteractive, true)
+      doc.removeEventListener("submit", stopSubmit, true)
+    }
+  }, [enabled, iframeRef])
+
+
 useEffect(() => {
     const onPick = (ev: Event) => {
       const ce = ev as any;
