@@ -580,7 +580,7 @@ app.delete("/api/admin/users/:id", authMiddleware, ownerOnly, (req, res) => {
 })
 
 // Add credits to user
-app.post("/api/admin/users/:id/add-credits", authMiddleware, ownerOnly, (req, res) => {
+app.post("/api/admin/users/:id/add-credits", authMiddleware, ownerOnly, async (req, res) => {
   try {
     const { id } = req.params
     const { credits } = req.body
@@ -594,19 +594,11 @@ app.post("/api/admin/users/:id/add-credits", authMiddleware, ownerOnly, (req, re
       return res.status(400).json({ ok: false, error: "Credits must be a positive number" })
     }
     
-    // Initialize user settings if not exists
-    db.prepare(`
-      INSERT OR IGNORE INTO user_settings (user_id) VALUES (?)
-    `).run(userId)
+    // Import and use the credits system
+    const { addCredits } = await import("./credits.js")
+    addCredits(userId, credits / 100) // Convert cents to EUR
     
-    // Add credits (assuming credits are stored in user_settings)
-    db.prepare(`
-      UPDATE user_settings 
-      SET credits = COALESCE((SELECT credits FROM user_settings WHERE user_id = ?), 0) + ?
-      WHERE user_id = ?
-    `).run(userId, credits, userId)
-    
-    res.json({ ok: true, message: `Added ${credits} credits to user` })
+    res.json({ ok: true, message: `Added $${(credits / 100).toFixed(2)} credits to user` })
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message })
   }

@@ -152,8 +152,9 @@ const deleteUser = async (userId: number, userEmail: string) => {
 }
 
 const addCredits = async (userId: number, userEmail: string) => {
-  const credits = prompt(`How many dollars in credits to add to "${userEmail}"?`)
+  const credits = prompt(`How many dollars in credits to add to "${userEmail}"?\n\nExample: 25 = $25.00 credits`)
   if (!credits || isNaN(Number(credits)) || Number(credits) <= 0) {
+    if (credits !== null) alert("Please enter a valid positive number")
     return
   }
   
@@ -166,13 +167,13 @@ const addCredits = async (userId: number, userEmail: string) => {
     })
     const d = await r.json()
     if (d.ok) {
-      alert(`Added $${credits} credits to ${userEmail}`)
+      alert(`✅ Successfully added $${Number(credits).toFixed(2)} credits to ${userEmail}`)
       loadAdminUsers()
     } else {
-      alert(d.error || "Add credits failed")
+      alert(`❌ Failed to add credits: ${d.error || "Unknown error"}`)
     }
   } catch {
-    alert("Add credits failed")
+    alert("❌ Failed to add credits - network error")
   }
 }
 
@@ -432,15 +433,15 @@ useEffect(() => {
               <div style={{ display: "flex", gap: 5, flexDirection: "column" }}>
                 <button
                   onClick={() => addCredits(u.id, u.email)}
-                  style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid #334155", background: "#1f2937", color: "white", cursor: "pointer", fontSize: 11 }}
+                  style={{ padding: "6px 8px", borderRadius: 4, border: "1px solid #10b981", background: "#10b981", color: "white", cursor: "pointer", fontSize: 11, fontWeight: 600 }}
                 >
-                  Add Credits
+                  💰 Add Credits
                 </button>
                 <button
                   onClick={() => deleteUser(u.id, u.email)}
                   style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid #dc2626", background: "#dc2626", color: "white", cursor: "pointer", fontSize: 11 }}
                 >
-                  Delete
+                  🗑️ Delete
                 </button>
               </div>
             </div>
