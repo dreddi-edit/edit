@@ -502,6 +502,18 @@ function ownerOnly(req, res, next) {
 registerStripeRoutes(app)
 registerScreenshotRoutes(app)
 
+
+app.get("/api/admin/me", authMiddleware, (req, res) => {
+  const owner = process.env.OWNER_EMAIL
+
+  res.json({
+    ok: true,
+    email: req.user?.email || null,
+    owner: req.user?.email === owner
+  })
+})
+
+
 app.get("/api/admin/users", authMiddleware, ownerOnly, (_req, res) => {
   try {
     const rows = db.prepare(`
