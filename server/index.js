@@ -159,6 +159,10 @@ app.get("/", (_req, res) => {
 app.get("/proxy", proxy)
 app.get("/asset", asset)
 
+app.get("/health", (_req, res) => {
+  res.status(200).json({ ok: true, port: process.env.PORT || 8787 })
+})
+
 app.post("/api/ai/analyze-and-rebuild", async (req, res) => {
   try {
     const { html } = req.body
@@ -481,6 +485,7 @@ registerOrgRoutes(app)
 registerStripeRoutes(app)
 registerScreenshotRoutes(app)
 
-app.listen(process.env.PORT || 8787, () => {
-  console.log("site-editor-server running on 8787")
+const PORT = process.env.PORT || 8787
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`site-editor-server running on ${PORT}`)
 })
