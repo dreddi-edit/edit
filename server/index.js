@@ -484,6 +484,20 @@ registerProjectRoutes(app)
 registerCreditRoutes(app)
 registerSettingsRoutes(app)
 registerOrgRoutes(app)
+
+function ownerOnly(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ ok:false, error:"not authenticated" })
+  }
+
+  const owner = process.env.OWNER_EMAIL
+  if (!owner || req.user.email !== owner) {
+    return res.status(403).json({ ok:false, error:"not owner" })
+  }
+
+  next()
+}
+
 registerStripeRoutes(app)
 registerScreenshotRoutes(app)
 
