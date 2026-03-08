@@ -3,7 +3,8 @@ import { join, dirname } from "path"
 import { fileURLToPath } from "url"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const db = new Database(join(__dirname, "editor.db"))
+const DB_PATH = process.env.DB_PATH || join(__dirname, "editor.db")
+const db = new Database(DB_PATH)
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
