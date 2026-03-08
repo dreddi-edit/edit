@@ -42,8 +42,8 @@ export function registerStripeRoutes(app) {
           quantity: 1,
         }],
         mode: "payment",
-        success_url: `http://localhost:8788?payment=success&package=${pkg.id}`,
-        cancel_url: `http://localhost:8788?payment=cancelled`,
+        success_url: `${req.protocol}://${req.get('host')}?payment=success&package=${pkg.id}`,
+        cancel_url: `${req.protocol}://${req.get('host')}?payment=cancelled`,
         metadata: {
           user_id: String(req.user.id),
           package_id: pkg.id,
