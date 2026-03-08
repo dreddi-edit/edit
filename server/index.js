@@ -773,6 +773,135 @@ app.post("/api/admin/users", authMiddleware, ownerOnly, (req, res) => {
   }
 })
 
+// Password reset page
+app.get("/reset-password", (req, res) => {
+  const { token } = req.query
+  
+  if (!token) {
+    return res.status(400).send(`
+      <div style="font-family:system-ui;max-width:480px;margin:100px auto;padding:32px">
+        <h1 style="color:#dc2626">Invalid Reset Link</h1>
+        <p>No reset token provided.</p>
+        <a href="/" style="color:#6366f1">Return to Login</a>
+      </div>
+    `)
+  }
+  
+  // Check if token exists and is valid
+  const reset = db.prepare(`
+    SELECT pr.user_id, u.email 
+    FROM password_resets pr
+    JOIN users u ON pr.user_id = u.id
+    WHERE pr.token = ? AND pr.expires_at > datetime('now')
+  `).get(token)
+  
+  if (!reset) {
+    return res.status(400).send(`
+      <div style="font-family:system-ui;max-width:480px;margin:100px auto;padding:32px">
+        <h1 style="color:#dc2626">Invalid Reset Link</h1>
+        <p>This reset link is invalid or has expired.</p>
+        <a href="/" style="color:#6366f1">Return to Login</a>
+      </div>
+    `)
+  }
+  
+  // Show reset form
+  res.send(`
+    <div style="font-family:system-ui;max-width:480px;margin:100px auto;padding:32px">
+      <h1 style="color:#6366f1">Reset Password</h1>
+      <p>Enter your new password for <strong>${reset.email}</strong></p>
+      <form method="POST" action="/reset-password" style="margin-top:20px">
+        <input type="hidden" name="token" value="${token}" />
+        <div style="margin-bottom:16px">
+          <label style="display:block;margin-bottom:8px;font-weight:600">New Password</label>
+          <input type="password" name="password" required 
+                 style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:6px;font-size:16px" />
+        </div>
+        <div style="margin-bottom:24px">
+          <label style="display:block;margin-bottom:8px;font-weight:600">Confirm Password</label>
+          <input type="password" name="confirmPassword" required 
+                 style="width:100%;padding:12px;border:1px solid #d1d5db;border-radius:6px;font-size:16px" />
+        </div>
+        <button type="submit" 
+                style="width:100%;padding:12px;background:#6366f1;color:white;border:none;border-radius:6px;font-size:16px;font-weight:600;cursor:pointer">
+          Reset Password
+        </button>
+      </form>
+    </div>
+  `)
+})
+
+// Handle password reset form submission
+app.post("/reset-password", async (req, res) => {
+  const { token, password, confirmPassword } = req.body
+  
+  if (!token || !password || !confirmPassword) {
+    return res.status(400).send(`
+      <div style="font-family:system-ui;max-width:480px;margin:100px auto;padding:32px">
+        <h1 style="color:#dc2626">Error</h1>
+        <p>All fields are required.</p>
+        <a href="/" style="color:#6366f1">Return to Login</a>
+      </div>
+    `)
+  }
+  
+  if (password !== confirmPassword) {
+    return res.status(400).send(`
+      <div style="font-family:system-ui;max-width:480px;margin:100px auto;padding:32px">
+        <h1 style="color:#dc2626">Error</h1>
+        <p>Passwords do not match.</p>
+        <a href="/reset-password?token=${token}" style="color:#6366f1">Try Again</a>
+      </div>
+    `)
+  }
+  
+  if (password.length < 6) {
+    return res.status(400).send(`
+      <div style="font-family:system-ui;max-width:480px;margin:100px auto;padding:32px">
+        <h1 style="color:#dc2626">Error</h1>
+        <p>Password must be at least 6 characters long.</p>
+        <a href="/reset-password?token=${token}" style="color:#6366f1">Try Again</a>
+      </div>
+    `)
+  }
+  
+  // Get user from token
+  const reset = db.prepare(`
+    SELECT pr.user_id 
+    FROM password_resets pr
+    WHERE pr.token = ? AND pr.expires_at > datetime('now')
+  `).get(token)
+  
+  if (!reset) {
+    return res.status(400).send(`
+      <div style="font-family:system-ui;max-width:480px;margin:100px auto;padding:32px">
+        <h1 style="color:#dc2626">Invalid Reset Link</h1>
+        <p>This reset link is invalid or has expired.</p>
+        <a href="/" style="color:#6366f1">Return to Login</a>
+      </div>
+    `)
+  }
+  
+  // Update password
+  const bcrypt = await import('bcryptjs')
+  const passwordHash = bcrypt.hashSync(password, 10)
+  
+  db.prepare("UPDATE users SET password_hash = ? WHERE id = ?")
+    .run(passwordHash, reset.user_id)
+  
+  // Delete used token
+  db.prepare("DELETE FROM password_resets WHERE token = ?").run(token)
+  
+  // Success page
+  res.send(`
+    <div style="font-family:system-ui;max-width:480px;margin:100px auto;padding:32px">
+      <h1 style="color:#22c55e">Password Reset Successful</h1>
+      <p>Your password has been updated successfully.</p>
+      <a href="/" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#6366f1;color:white;border-radius:6px;text-decoration:none;font-weight:600">Login Now</a>
+    </div>
+  `)
+})
+
 const PORT = process.env.PORT || 8787
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`site-editor-server running on ${PORT}`)
