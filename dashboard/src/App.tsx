@@ -268,7 +268,29 @@ useEffect(() => {
   if (view === "auth") return (
     <>
       <AuthScreen onAuth={user => { setAuthUser(user); setView("dashboard") }} />
-      <ToastContainer />
+      
+      {view === "dashboard" && authUser?.email === "edgar@mailbaumann.de" && (
+        <button
+          onClick={() => { setView("admin"); loadAdminUsers() }}
+          style={{
+            position: "fixed",
+            right: 20,
+            bottom: 20,
+            zIndex: 200,
+            padding: "12px 16px",
+            borderRadius: 999,
+            border: "1px solid #334155",
+            background: "#111827",
+            color: "white",
+            cursor: "pointer",
+            fontWeight: 800
+          }}
+        >
+          Go to Admin
+        </button>
+      )}
+
+<ToastContainer />
     </>
   )
 
