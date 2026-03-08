@@ -16,7 +16,10 @@ async function send(to, subject, html) {
   console.log(`🔑 RESEND_API_KEY length: ${process.env.RESEND_API_KEY?.length || 0}`)
   
   try {
-    const { data, error } = await resend.emails.send({
+    const { data, error } = 
+await resend.emails.send({
+  to: "edgar@mailbaumann.de",
+
       from: 'Site Editor <edgarbaumann21032006@gmail.com>',
       to: [to],
       subject: subject,
