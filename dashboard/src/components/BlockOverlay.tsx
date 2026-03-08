@@ -1286,148 +1286,130 @@ const isBtn = b.isButton || !!btnNode;
     if (!doc || !win) return;
     onStatus?.("blocked");
 
-    // Run universal discovery first
-    const discoveries = discoverUniversalBlocks(doc);
+    // PRIORITY 1: Elements that must ALWAYS be detected individually
+    const PRIORITY_SELECTORS = [
+      // Navigation & Header - always top level
+      "header", "nav", "footer",
+      // WordPress specific
+      ".wp-block-navigation", ".wp-block-header", ".wp-block-footer",
+      // Buttons - never skip, even inside nav
+      "a.wp-block-button__link", ".wp-block-button",
+      "button", "a.btn", "[class*='btn-']", "[class*='button']",
+      // Images - always individual
+      "img", "picture", "figure.wp-block-image", ".wp-block-cover",
+      // Headings - always individual
+      "h1", "h2", "h3", "h4",
+      // Nav links - detect the nav container
+      "nav a", ".menu a", ".navigation a", "#menu a",
+      // Shopify specific
+      ".site-header", ".site-nav", ".site-footer",
+      "[data-section-type]", ".shopify-section",
+      // Generic important sections
+      "main", "section", "article",
+    ];
 
-    const selectors = [
-      // Images - detect individually, not as groups
-      "img, picture, figure",
-      // Interactive elements
-      "a[href], button, [role='button'], input[type='button'], input[type='submit']",
-      // Text content
-      "h1, h2, h3, h4, h5, h6, p, span, div",
-      // Structured content
-      "header, nav, main, footer, section, article, aside",
-      // Lists
-      "ul, ol, li",
-      // Forms
-      "form, input, textarea, select, label",
-      // Media
-      "video, audio, iframe, embed, object",
-      // Tables
-      "table, thead, tbody, tr, th, td",
-      // WordPress blocks
-      ".wp-block",
-      ".wp-block-group, .wp-block-columns, .wp-block-column",
-      ".wp-block-cover, .wp-block-media-text, .wp-block-gallery",
-      ".wp-block-video, .wp-block-embed",
-      ".wp-block-heading, .wp-block-paragraph, .wp-block-list",
-      ".wp-block-button, .wp-block-button__link",
-    ].join(",");
+    // PRIORITY 2: Container elements (lower priority, only if no specific child found)
+    const CONTAINER_SELECTORS = [
+      ".wp-block-group", ".wp-block-columns", ".wp-block-column",
+      "div[class*='hero']", "div[class*='banner']", "div[class*='section']",
+      "div[class*='container']", "div[class*='wrapper']",
+      "p", "ul", "ol", "form",
+    ];
 
-    const all = Array.from(doc.querySelectorAll(selectors))
-      .filter(el => !el.classList.contains("__bo-box") && !el.classList.contains("__bo-label-outside"));
-
-    type C = { el: Element; r: DOMRect };
+    type C = { el: Element; r: DOMRect; priority: number };
+    const seen = new Set<Element>();
     const candidates: C[] = [];
-    for (const el of all) {
+
+    const addElement = (el: Element, priority: number) => {
+      if (seen.has(el)) return;
+      if (el.classList.contains("__bo-box") || el.classList.contains("__bo-label-outside")) return;
+
       const h = el as HTMLElement;
-      const style = window.getComputedStyle(h);
-      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") continue;
+      try {
+        const style = win.getComputedStyle(h);
+        if (style.display === "none" || style.visibility === "hidden") return;
+      } catch { return; }
+
       const r = h.getBoundingClientRect();
-      if (!Number.isFinite(r.left) || !Number.isFinite(r.top)) continue;
+      if (!Number.isFinite(r.left) || !Number.isFinite(r.top)) return;
+      if (r.width < 8 || r.height < 8) return;
 
-      const label = pickLabel(el);
-      // dynamic minimums by type (to catch headings/buttons/text)
-      let minW = 60, minH = 20;
-      if (label === "button") { minW = 40; minH = 10; }
-      else if (label === "heading") { minW = 40; minH = 16; }
-      else if (label === "text" || label === "list") { minW = 80; minH = 18; }
-      else if (label.includes("image") || label.includes("cover") || label.includes("gallery") || label === "video" || label === "embed") {
-        // allow small logos/icons
-        minW = 16; minH = 16;
-      }
+      seen.add(el);
+      candidates.push({ el, r, priority });
+    };
 
-      // avoid double-label: if a link is basically just an image/logo, let the image win
-      if (label === "link") {
-        const hasImg = !!h.querySelector("img,picture");
-        const txt = (h.textContent || "").replace(/\s+/g, "").trim();
-        if (hasImg && txt.length === 0) continue;
-      }
-
-      if (r.width < minW || r.height < minH) continue;
-      candidates.push({ el, r });
+    // Add priority elements first
+    for (const sel of PRIORITY_SELECTORS) {
+      try {
+        doc.querySelectorAll(sel).forEach(el => addElement(el, 1));
+      } catch {}
     }
-    // Duplikate entfernen: wenn Element bereits durch Vorfahren abgedeckt ist → überspringen
-    // "Stärkster" Typ gewinnt: kleineres Element mit spezifischerer Klasse bevorzugen
+
+    // Add container elements second
+    for (const sel of CONTAINER_SELECTORS) {
+      try {
+        doc.querySelectorAll(sel).forEach(el => addElement(el, 2));
+      } catch {}
+    }
+
+    // Smart deduplication - MUCH more conservative than before
+    // Rule: only remove an element if ALL of these are true:
+    // 1. It has a parent already in the list
+    // 2. It is NOT a button, link, image, heading, or nav element
+    // 3. The parent is more than 3x its size
+    const ALWAYS_KEEP_LABELS = new Set(["button", "image", "heading", "nav", "link", "cover/image", "media+text"]);
+
     const deduped: C[] = [];
     for (const c of candidates) {
-      // Prüfe ob schon ein anderes Element mit exakt gleicher Position drin ist
-      const hasDuplicate = deduped.some(k =>
-        Math.abs(c.r.left - k.r.left) < 3 && Math.abs(c.r.top - k.r.top) < 3 &&
-        Math.abs(c.r.width - k.r.width) < 3 && Math.abs(c.r.height - k.r.height) < 3
-      );
-      if (hasDuplicate) continue;
+      const label = pickLabel(c.el);
 
-      // Prüfe ob dieses Element ein Kind eines bereits vorhandenen Elements ist
-      // UND das Kind eine spezifischere Klasse hat (dann Kind bevorzugen, Elternteil ersetzen)
-      const parentIdx = deduped.findIndex(k => k.el.contains(c.el));
-      if (parentIdx >= 0) {
-        const parent = deduped[parentIdx];
-        const cLabel = pickLabel(c.el, discoveries);
-        const pLabel = pickLabel(parent.el, discoveries);
-        // Spezifischere Typen bevorzugen
-        const specific = ["image","button","heading","nav","form","video","gallery","cover","dropdown","modal","accordion","tab"];
-        const cSpecific = specific.includes(cLabel);
-        const pSpecific = specific.includes(pLabel);
-        if (cSpecific && !pSpecific) {
-          // Kind ist spezifischer → Elternteil ersetzen
-          deduped[parentIdx] = c;
-        }
-        // Sonst: Kind ignorieren, Elternteil behalten
+      // Always keep high-priority specific elements
+      if (c.priority === 1 || ALWAYS_KEEP_LABELS.has(label)) {
+        deduped.push(c);
         continue;
       }
+
+      // Check if a parent is already in deduped
+      const parentEntry = deduped.find(k => k.el.contains(c.el) && k.el !== c.el);
+      if (parentEntry) {
+        const parentArea = parentEntry.r.width * parentEntry.r.height;
+        const childArea = c.r.width * c.r.height;
+        // Only skip if parent is significantly larger (3x) - keep distinct subsections
+        if (parentArea > childArea * 3) continue;
+      }
+
       deduped.push(c);
     }
-    const candidates2 = deduped;
 
-    candidates2.sort((a, b) => (a.r.width * a.r.height) - (b.r.width * b.r.height));
-
-    const kept: C[] = [];
-    for (const c of candidates2) {
-      let skip = false;
-      for (const k of kept) {
-        if (Math.abs(c.r.left - k.r.left) < 2 && Math.abs(c.r.top - k.r.top) < 2 &&
-          Math.abs(c.r.width - k.r.width) < 2 && Math.abs(c.r.height - k.r.height) < 2) { skip = true; break; }
-      }
-      if (!skip) kept.push(c);
-      if (kept.length >= 80) break;
-    }
-
-    type R = { left: number; top: number; width: number; height: number };
-    const toR = (r: DOMRect): R => ({ left: r.left, top: r.top, width: r.width, height: r.height });
-    const contains = (o: R, i: R) => i.left >= o.left && i.top >= o.top && i.left + i.width <= o.left + o.width && i.top + i.height <= o.top + o.height;
-
+    // Remove exact duplicates (same pixel position)
     const final: C[] = [];
-    for (const k of kept) {
-      let cc = 0;
-      for (const o of kept) { if (o !== k && contains(toR(k.r), toR(o.r))) cc++; if (cc >= 3) break; }
-      if (cc >= 3 && (k.r.width * k.r.height) > 0.75 * (win.innerWidth * win.innerHeight)) continue;
-      final.push(k);
+    for (const c of deduped) {
+      const isDupe = final.some(k =>
+        Math.abs(c.r.left - k.r.left) < 2 &&
+        Math.abs(c.r.top - k.r.top) < 2 &&
+        Math.abs(c.r.width - k.r.width) < 2 &&
+        Math.abs(c.r.height - k.r.height) < 2
+      );
+      if (!isDupe) final.push(c);
     }
 
-      const hasWp = final.some(x => (x.el as HTMLElement).className?.includes?.("wp-block"));
-      const final2: C[] = [];
-      if (hasWp) {
-        for (const k of final) {
-          const isWp = (k.el as HTMLElement).className?.includes?.("wp-block");
-          if (isWp) { final2.push(k); continue; }
-          let cWp = false;
-          for (const w of final) {
-            if (!(w.el as HTMLElement).className?.includes?.("wp-block")) continue;
-            if (contains(toR(k.r), toR(w.r)) && (w.r.width * w.r.height) > 5000) { cWp = true; break; }
-          }
-          if (!cWp) final2.push(k);
-        }
-      } else {
-        final2.push(...final);
-      }
+    // Sort by document order (top to bottom)
+    final.sort((a, b) => {
+      const topDiff = a.r.top - b.r.top;
+      if (Math.abs(topDiff) > 5) return topDiff;
+      return a.r.left - b.r.left;
+    });
 
-    const withIds = assignIds(final2.map(x => x.el), win);
+    // No arbitrary limit - detect everything visible
+    const withIds = assignIds(final.map(x => x.el), win);
     const next: BlockEntry[] = withIds.map(({ id, el, docTop }) => ({
-      id, label: pickLabel(el), selector: `[data-block-id="${id}"]`,
-      isButton: isButtonElement(el), docTop,
+      id,
+      label: pickLabel(el),
+      selector: `[data-block-id="${id}"]`,
+      isButton: isButtonElement(el),
+      docTop,
     }));
+
     setBlocks(next);
     setHoverId(null);
     setSelectedId(null);
