@@ -1,6 +1,8 @@
+const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434"
+
 export async function ollamaHealth() {
   try {
-    const resp = await fetch("http://localhost:11434/api/tags", {
+    const resp = await fetch(`${OLLAMA_URL}/api/tags`, {
       method: "GET",
       headers: { "content-type": "application/json" }
     })
@@ -32,7 +34,7 @@ export async function ollamaRewriteBlock({ html, instruction, systemHint = "", m
     html || ""
   ].join("\n")
 
-  const resp = await fetch("http://localhost:11434/api/generate", {
+  const resp = await fetch(`${OLLAMA_URL}/api/generate`, {
     method: "POST",
     headers: {
       "content-type": "application/json"

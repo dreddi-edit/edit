@@ -1,5 +1,7 @@
 import nodemailer from "nodemailer"
 
+const APP_URL = process.env.APP_URL || "https://edit-production-ca78.up.railway.app"
+
 // Gmail SMTP – App Password nötig (nicht dein normales Passwort)
 // Einrichten: Google Account → Sicherheit → 2FA → App-Passwörter → "Mail" → Code kopieren
 const transporter = nodemailer.createTransport({
@@ -27,13 +29,13 @@ export async function sendWelcome(email, name) {
       <h1 style="color:#6366f1">Site Editor</h1>
       <p>Hallo ${name || ""},</p>
       <p>willkommen! Dein Account ist bereit.</p>
-      <a href="http://localhost:8788" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#6366f1;color:white;border-radius:8px;text-decoration:none;font-weight:700">Jetzt starten</a>
+      <a href="${APP_URL}" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#6366f1;color:white;border-radius:8px;text-decoration:none;font-weight:700">Jetzt starten</a>
     </div>
   `)
 }
 
 export async function sendPasswordReset(email, token) {
-  const link = `http://localhost:8788/reset-password?token=${token}`
+  const link = `${APP_URL}/reset-password?token=${token}`
   await send(email, "Passwort zurücksetzen – Site Editor", `
     <div style="font-family:system-ui;max-width:480px;margin:0 auto;padding:32px">
       <h1 style="color:#6366f1">Passwort zurücksetzen</h1>
@@ -49,7 +51,7 @@ export async function sendTeamInvite(email, orgName, inviterName) {
     <div style="font-family:system-ui;max-width:480px;margin:0 auto;padding:32px">
       <h1 style="color:#6366f1">Einladung</h1>
       <p><strong>${inviterName}</strong> hat dich zur Organisation <strong>${orgName}</strong> eingeladen.</p>
-      <a href="http://localhost:8788" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#6366f1;color:white;border-radius:8px;text-decoration:none;font-weight:700">Einladung annehmen</a>
+      <a href="${APP_URL}" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#6366f1;color:white;border-radius:8px;text-decoration:none;font-weight:700">Einladung annehmen</a>
     </div>
   `)
 }
@@ -64,7 +66,7 @@ export async function sendPaymentConfirmation(email, name, amountEur, creditsEur
         <div style="font-size:13px;color:#64748b">Guthaben aufgeladen</div>
         <div style="font-size:28px;font-weight:900;color:#22c55e">€ ${creditsEur.toFixed(2)}</div>
       </div>
-      <a href="http://localhost:8788" style="display:inline-block;padding:12px 24px;background:#6366f1;color:white;border-radius:8px;text-decoration:none;font-weight:700">Zum Dashboard</a>
+      <a href="${APP_URL}" style="display:inline-block;padding:12px 24px;background:#6366f1;color:white;border-radius:8px;text-decoration:none;font-weight:700">Zum Dashboard</a>
     </div>
   `)
 }
