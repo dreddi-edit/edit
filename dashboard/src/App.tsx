@@ -95,6 +95,34 @@ export default function App() {
   const [view, setView] = useState<"auth" | "dashboard" | "editor" | "admin">("auth")
   const [currentProject, setCurrentProject] = useState<Project | null>(null)
   const [selectedComponent, setSelectedComponent] = useState<string>("")
+  
+  // Simple undo history
+  const [undoHistory, setUndoHistory] = useState<string[]>([])
+  
+  const undoPush = (html: string) => {
+    setUndoHistory(prev => [...prev.slice(-9), html]) // Keep last 10
+  }
+  
+  const undoPop = () => {
+    setUndoHistory(prev => {
+      if (prev.length <= 1) return prev
+      const newList = prev.slice(0, -1)
+      return newList
+    })
+    return undoHistory[undoHistory.length - 2] || null
+  }
+  
+  // AI approval queue
+  const [aiApprovalQueue, setAiApprovalQueue] = useState<any[]>([])
+  
+  const enqueue = (item: any) => {
+    setAiApprovalQueue((prev: any[]) => [...prev, item])
+  }
+  
+  const dequeue = () => {
+    setAiApprovalQueue((prev: any[]) => prev.slice(1))
+    return aiApprovalQueue[0] || null
+  }
 
 
 async function sendResetPw(userId:number){
