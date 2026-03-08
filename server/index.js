@@ -68,6 +68,7 @@ import { groqRewriteBlock } from "./groq.js"
 import { ollamaRewriteBlock, ollamaHealth } from "./ollama.js"
 import { resolveModel } from "./autoRouter.js"
 import archiver from "archiver"
+import db from "./db.js"
 import path from "path"
 import { fileURLToPath } from "url"
 
@@ -500,6 +501,19 @@ function ownerOnly(req, res, next) {
 
 registerStripeRoutes(app)
 registerScreenshotRoutes(app)
+
+app.get("/api/admin/users", authMiddleware, ownerOnly, (_req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT id, email, name, created_at
+      FROM users
+      ORDER BY id DESC
+    `).all()
+    res.json({ ok: true, users: rows })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
 
 const PORT = process.env.PORT || 8787
 app.listen(PORT, "0.0.0.0", () => {
