@@ -452,8 +452,8 @@ function renderBoxesInIframe(
     doc.body.appendChild(box);
 
     // Label
-    const labelText = `${b.id} · ${b.label}`;
-    const estimatedWidth = labelText.length * 7 + 20;
+    const labelText = b.label;
+    const estimatedWidth = labelText.length * 8 + 16;
     const labelH = 22;
     const labelPos = findFreeLabelPos(docLeft, estimatedWidth, labelH, docTop);
 
@@ -1321,36 +1321,6 @@ const [aiLoading, setAiLoading] = useState(false);
     if (!doc || !win) return;
     onStatus?.("blocked");
 
-    // PRIORITY 1: Elements that must ALWAYS be detected individually
-    const PRIORITY_SELECTORS = [
-      // Navigation & Header - always top level
-      "header", "nav", "footer",
-      // WordPress specific
-      ".wp-block-navigation", ".wp-block-header", ".wp-block-footer",
-      // Buttons - never skip, even inside nav
-      "a.wp-block-button__link", ".wp-block-button",
-      "button", "a.btn", "[class*='btn-']", "[class*='button']",
-      // Images - always individual
-      "img", "picture", "figure.wp-block-image", ".wp-block-cover",
-      // Headings - always individual
-      "h1", "h2", "h3", "h4",
-      // Nav links - detect the nav container
-      "nav a", ".menu a", ".navigation a", "#menu a",
-      // Shopify specific
-      ".site-header", ".site-nav", ".site-footer",
-      "[data-section-type]", ".shopify-section",
-      // Generic important sections
-      "main", "section", "article",
-    ];
-
-    // PRIORITY 2: Container elements (lower priority, only if no specific child found)
-    const CONTAINER_SELECTORS = [
-      ".wp-block-group", ".wp-block-columns", ".wp-block-column",
-      "div[class*='hero']", "div[class*='banner']", "div[class*='section']",
-      "div[class*='container']", "div[class*='wrapper']",
-      "p", "ul", "ol", "form",
-    ];
-
     type C = { el: Element; r: DOMRect; priority: number };
     const seen = new Set<Element>();
     const candidates: C[] = [];
@@ -1358,85 +1328,95 @@ const [aiLoading, setAiLoading] = useState(false);
     const addElement = (el: Element, priority: number) => {
       if (seen.has(el)) return;
       if (el.classList.contains("__bo-box") || el.classList.contains("__bo-label-outside")) return;
-
       const h = el as HTMLElement;
       try {
         const style = win.getComputedStyle(h);
         if (style.display === "none" || style.visibility === "hidden") return;
       } catch { return; }
-
       const r = h.getBoundingClientRect();
       if (!Number.isFinite(r.left) || !Number.isFinite(r.top)) return;
       if (r.width < 8 || r.height < 8) return;
-
       seen.add(el);
       candidates.push({ el, r, priority });
     };
 
-    // Add priority elements first
-    for (const sel of PRIORITY_SELECTORS) {
-      try {
-        doc.querySelectorAll(sel).forEach(el => addElement(el, 1));
-      } catch {}
-    }
+    // LEVEL 1: Top-level containers (these are the main blocks shown by default)
+    const CONTAINER_SELECTORS = [
+      "header", "footer", "main", "nav",
+      ".site-header", ".site-footer", ".site-nav", ".site-main",
+      // WordPress top-level
+      ".wp-block-group", ".wp-block-cover", ".wp-block-media-text",
+      ".wp-block-columns", ".wp-block-image", ".wp-block-video",
+      "[data-section-type]", ".shopify-section",
+      // Generic sections
+      "section", "article",
+      // Hero/Banner patterns
+      "div[class*='hero']", "div[class*='banner']", "div[class*='slider']",
+      "div[class*='carousel']", "div[class*='featured']",
+    ];
 
-    // Add container elements second
+    // LEVEL 2: Specific elements that are important standalone
+    const SPECIFIC_SELECTORS = [
+      // Headings
+      "h1", "h2", "h3",
+      // Images outside containers
+      "figure.wp-block-image", ".wp-block-button",
+      // Standalone buttons NOT inside nav
+      "a.wp-block-button__link",
+    ];
+
     for (const sel of CONTAINER_SELECTORS) {
-      try {
-        doc.querySelectorAll(sel).forEach(el => addElement(el, 2));
-      } catch {}
+      try { doc.querySelectorAll(sel).forEach(el => addElement(el, 1)); } catch {}
+    }
+    for (const sel of SPECIFIC_SELECTORS) {
+      try { doc.querySelectorAll(sel).forEach(el => addElement(el, 2)); } catch {}
     }
 
-    // Smart deduplication - MUCH more conservative than before
-    // Rule: only remove an element if ALL of these are true:
-    // 1. It has a parent already in the list
-    // 2. It is NOT a button, link, image, heading, or nav element
-    // 3. The parent is more than 3x its size
-    const ALWAYS_KEEP_LABELS = new Set(["button", "image", "heading", "nav", "link", "cover/image", "media+text"]);
+    // Smart dedup: keep containers, remove children that are inside a container
+    // EXCEPTION: always keep specific important child elements
+    const ALWAYS_KEEP = new Set(["h1", "h2", "h3", "figure", "img"]);
 
     const deduped: C[] = [];
     for (const c of candidates) {
+      const tag = c.el.tagName.toLowerCase();
       const label = pickLabel(c.el);
 
-      // Always keep high-priority specific elements
-      if (c.priority === 1 || ALWAYS_KEEP_LABELS.has(label)) {
-        deduped.push(c);
-        continue;
-      }
+      // Find if a parent container already exists in deduped
+      const parentEntry = deduped.find(k => k.el !== c.el && k.el.contains(c.el));
 
-      // Check if a parent is already in deduped
-      const parentEntry = deduped.find(k => k.el.contains(c.el) && k.el !== c.el);
       if (parentEntry) {
+        // Keep if it's a significantly distinct section (more than 30% of parent)
         const parentArea = parentEntry.r.width * parentEntry.r.height;
         const childArea = c.r.width * c.r.height;
-        // Only skip if parent is significantly larger (3x) - keep distinct subsections
-        if (parentArea > childArea * 3) continue;
+        const isDistinct = childArea < parentArea * 0.7;
+
+        // Skip generic children that are inside containers
+        if (isDistinct && !ALWAYS_KEEP.has(tag) && c.priority !== 1) continue;
+        
+        // Skip nav links - nav itself is the block
+        if (parentEntry.el.tagName === "NAV" || parentEntry.el.tagName === "HEADER") {
+          if (tag === "a" || tag === "button" || tag === "li") continue;
+        }
       }
 
-      deduped.push(c);
-    }
-
-    // Remove exact duplicates (same pixel position)
-    const final: C[] = [];
-    for (const c of deduped) {
-      const isDupe = final.some(k =>
+      // Remove exact duplicates
+      const isDupe = deduped.some(k =>
         Math.abs(c.r.left - k.r.left) < 2 &&
         Math.abs(c.r.top - k.r.top) < 2 &&
         Math.abs(c.r.width - k.r.width) < 2 &&
         Math.abs(c.r.height - k.r.height) < 2
       );
-      if (!isDupe) final.push(c);
+      if (!isDupe) deduped.push(c);
     }
 
-    // Sort by document order (top to bottom)
-    final.sort((a, b) => {
+    // Sort by document order
+    deduped.sort((a, b) => {
       const topDiff = a.r.top - b.r.top;
       if (Math.abs(topDiff) > 5) return topDiff;
       return a.r.left - b.r.left;
     });
 
-    // No arbitrary limit - detect everything visible
-    const withIds = assignIds(final.map(x => x.el), win);
+    const withIds = assignIds(deduped.map(x => x.el), win);
     const next: BlockEntry[] = withIds.map(({ id, el, docTop }) => ({
       id,
       label: pickLabel(el),
@@ -2923,6 +2903,17 @@ return (
               borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)", background: "rgba(0,0,0,0.25)",
               color: "white", padding: "8px", outline: "none", fontSize: 13, boxSizing: "border-box",
             }} aria-label="Button text" />
+            <label style={{ fontSize: 11, color: "rgba(148,163,184,0.8)", fontWeight: 700, display: "block", marginTop: 10 }}>LINK URL</label>
+            <input
+              value={editLink}
+              onChange={e => setEditLink(e.target.value)}
+              placeholder="https://... oder /seite"
+              style={{
+                marginTop: 4, width: "100%", height: 34, borderRadius: 10,
+                border: "1px solid rgba(148,163,184,0.25)", background: "rgba(0,0,0,0.25)",
+                color: "white", padding: "0 10px", outline: "none", fontSize: 13, boxSizing: "border-box",
+              }}
+            />
             <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
               <div style={{ flex: 1 }}>
                 <label style={{ fontSize: 11, color: "rgba(148,163,184,0.8)", fontWeight: 700, display: "block" }}>HINTERGRUND</label>
