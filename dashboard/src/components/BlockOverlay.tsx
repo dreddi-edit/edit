@@ -119,10 +119,16 @@ function discoverUniversalBlocks(doc: Document): Map<string, string> {
             if (dropdown) {
               const items = dropdown.querySelectorAll('a, li, button');
               if (items.length > 0) {
-                const itemTexts = Array.from(items).slice(0, 5).map(item => 
+                const itemCount = items.length;
+                const itemTexts = Array.from(items).slice(0, 3).map(item => 
                   (item.textContent || '').trim()
-                ).filter(text => text).join(', ');
-                description += ` containing: ${itemTexts}`;
+                ).filter(text => text);
+                
+                if (itemCount > 3) {
+                  description += ` containing: ${itemTexts.join(', ')} +${itemCount - 3} more`;
+                } else {
+                  description += ` containing: ${itemTexts.join(', ')}`;
+                }
               }
             }
           } catch (e) {
@@ -586,6 +592,14 @@ export default function BlockOverlay({ iframeRef, enabled, canvasMode, onStatus,
     const stopInteractive = (e: Event) => {
       const t = e.target as HTMLElement | null
       if (!t) return
+
+      // Always stop images from triggering navigation
+      if (t.tagName === 'IMG' || t.closest('img')) {
+        e.preventDefault()
+        e.stopPropagation()
+        try { (e as any).stopImmediatePropagation?.() } catch {}
+        return
+      }
 
       const interactive = t.closest("a, button, select, option, input, textarea, label, form, summary, details")
       if (!interactive) return
@@ -1276,17 +1290,29 @@ const isBtn = b.isButton || !!btnNode;
     const discoveries = discoverUniversalBlocks(doc);
 
     const selectors = [
-      // Gutenberg / WP Blocks (broad)
+      // Images - detect individually, not as groups
+      "img, picture, figure",
+      // Interactive elements
+      "a[href], button, [role='button'], input[type='button'], input[type='submit']",
+      // Text content
+      "h1, h2, h3, h4, h5, h6, p, span, div",
+      // Structured content
+      "header, nav, main, footer, section, article, aside",
+      // Lists
+      "ul, ol, li",
+      // Forms
+      "form, input, textarea, select, label",
+      // Media
+      "video, audio, iframe, embed, object",
+      // Tables
+      "table, thead, tbody, tr, th, td",
+      // WordPress blocks
       ".wp-block",
       ".wp-block-group, .wp-block-columns, .wp-block-column",
-      ".wp-block-image, .wp-block-cover, .wp-block-media-text, .wp-block-gallery, figure, img, picture",
+      ".wp-block-cover, .wp-block-media-text, .wp-block-gallery",
       ".wp-block-video, .wp-block-embed",
-      ".wp-block-heading, h1, h2, h3, [role='heading']",
-      ".wp-block-paragraph, p",
-      ".wp-block-list, ul, ol, li",
-      "a.wp-block-button__link, .wp-block-button, button, [role='button'], a[href]",
-      "header, nav, main, footer, section, article, aside",
-      "form, .jetpack-contact-form-container, input, textarea, select",
+      ".wp-block-heading, .wp-block-paragraph, .wp-block-list",
+      ".wp-block-button, .wp-block-button__link",
     ].join(",");
 
     const all = Array.from(doc.querySelectorAll(selectors))
