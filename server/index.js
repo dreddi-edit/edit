@@ -612,6 +612,23 @@ app.post("/api/admin/users/:id/add-credits", authMiddleware, ownerOnly, (req, re
   }
 })
 
+// Database migration for credits
+app.post("/api/admin/migrate-credits", authMiddleware, ownerOnly, (req, res) => {
+  try {
+    // Add credits column if it doesn't exist
+    db.exec(`
+      ALTER TABLE user_settings ADD COLUMN credits INTEGER DEFAULT 0
+    `)
+    res.json({ ok: true, message: "Credits column added successfully" })
+  } catch (e) {
+    if (e.message.includes("duplicate column name")) {
+      res.json({ ok: true, message: "Credits column already exists" })
+    } else {
+      res.status(500).json({ ok: false, error: e.message })
+    }
+  }
+})
+
 // Create new user
 app.post("/api/admin/users", authMiddleware, ownerOnly, (req, res) => {
   try {
