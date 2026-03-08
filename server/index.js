@@ -574,18 +574,10 @@ app.post("/api/admin/send-reset", authMiddleware, ownerOnly, async (req, res) =>
       VALUES (?, ?, datetime('now', '+1 hour'))
     `).run(userId, resetToken)
     
-    // Send email using Resend
-    const { sendPasswordReset } = await import('./email.js')
-    console.log(`Attempting to send password reset to: ${user.email}`)
-    const emailSent = await sendPasswordReset(user.email, user.name, resetToken)
+    // TODO: Send email - currently disabled to prevent crashes
+    console.log(`Password reset token for ${user.email}: ${resetToken}`)
     
-    if (emailSent) {
-      console.log(`✅ Password reset email sent to ${user.email}`)
-      res.json({ ok: true, message: "Password reset link sent" })
-    } else {
-      console.error(`❌ Failed to send password reset email to ${user.email}`)
-      res.status(500).json({ ok: false, error: "Failed to send email" })
-    }
+    res.json({ ok: true, message: "Password reset token generated (email disabled)" })
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message })
   }
