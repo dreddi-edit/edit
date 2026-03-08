@@ -1,0 +1,8 @@
+node_modules
+dashboard/node_modules
+server/node_modules
+dashboard/dist
+exports
+server/editor.db
+.env
+.DS_Store
