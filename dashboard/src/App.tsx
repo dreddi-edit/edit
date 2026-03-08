@@ -284,7 +284,7 @@ useEffect(() => {
 
       {view === "dashboard" && authUser?.email === "edgar@mailbaumann.de" && (
         <button
-          onClick={() => { setView("admin"); loadAdminUsers() }}
+          onClick={() => setView("admin")}
           style={{
             position: "fixed",
             right: 20,
