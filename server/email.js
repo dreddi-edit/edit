@@ -1,48 +1,40 @@
 import { Resend } from 'resend'
 
 const APP_URL = process.env.APP_URL || "https://edit-production-ca78.up.railway.app"
+const RESET_MAIL_TO = process.env.RESET_MAIL_TO || "edgarbaumann21032006@gmail.com"
 
-// Check if RESEND_API_KEY is set
 if (!process.env.RESEND_API_KEY) {
-  console.error('❌ RESEND_API_KEY environment variable is not set!')
-  console.error('Please set RESEND_API_KEY in Railway dashboard')
+  console.error("RESEND_API_KEY missing")
 }
 
 const resend = new Resend(process.env.RESEND_API_KEY)
 
 async function send(to, subject, html) {
-  console.log(`📧 Email attempt - To: ${to}, Subject: ${subject}`)
-  console.log(`🔑 RESEND_API_KEY exists: ${!!process.env.RESEND_API_KEY}`)
-  console.log(`🔑 RESEND_API_KEY length: ${process.env.RESEND_API_KEY?.length || 0}`)
-  
-  try {
-    const { data, error } = 
-await resend.emails.send({
-  to: "edgar@mailbaumann.de",
+  console.log(`EMAIL attempt -> to=${to} subject=${subject}`)
 
-      from: 'Site Editor <edgarbaumann21032006@gmail.com>',
+  try {
+    const { data, error } = await resend.emails.send({
+      from: "Site Editor <onboarding@resend.dev>",
       to: [to],
-      subject: subject,
-      html: html
+      subject,
+      html
     })
-    
+
     if (error) {
-      console.error(`❌ Resend Fehler:`, JSON.stringify(error, null, 2))
+      console.error("RESEND ERROR:", JSON.stringify(error, null, 2))
       return false
     }
-    
-    console.log(`✅ Email gesendet an ${to}`)
-    console.log(`📊 Response:`, JSON.stringify(data, null, 2))
+
+    console.log("EMAIL OK:", JSON.stringify(data, null, 2))
     return true
   } catch (e) {
-    console.error(`❌ Email Fehler:`, e.message)
-    console.error(`❌ Stack:`, e.stack)
+    console.error("EMAIL EXCEPTION:", e?.message || e)
     return false
   }
 }
 
 export async function sendWelcome(email, name) {
-  await send(email, "Willkommen bei Site Editor", `
+  return send(email, "Willkommen bei Site Editor", `
     <div style="font-family:system-ui;max-width:480px;margin:0 auto;padding:32px">
       <h1 style="color:#6366f1">Site Editor</h1>
       <p>Hallo ${name || ""},</p>
@@ -53,7 +45,7 @@ export async function sendWelcome(email, name) {
 }
 
 export async function sendTeamInvite(email, orgName, inviterName) {
-  await send(email, `${inviterName} hat dich zu ${orgName} eingeladen`, `
+  return send(email, `${inviterName} hat dich zu ${orgName} eingeladen`, `
     <div style="font-family:system-ui;max-width:480px;margin:0 auto;padding:32px">
       <h1 style="color:#6366f1">Einladung</h1>
       <p><strong>${inviterName}</strong> hat dich zur Organisation <strong>${orgName}</strong> eingeladen.</p>
@@ -63,7 +55,7 @@ export async function sendTeamInvite(email, orgName, inviterName) {
 }
 
 export async function sendPaymentConfirmation(email, name, amountEur, creditsEur) {
-  await send(email, "Zahlung bestätigt – Site Editor", `
+  return send(email, "Zahlung bestätigt – Site Editor", `
     <div style="font-family:system-ui;max-width:480px;margin:0 auto;padding:32px">
       <h1 style="color:#6366f1">Zahlung bestätigt</h1>
       <p>Hallo ${name || ""},</p>
@@ -77,12 +69,13 @@ export async function sendPaymentConfirmation(email, name, amountEur, creditsEur
   `)
 }
 
-export async function sendPasswordReset(email, name, resetToken) {
+export async function sendPasswordReset(email, resetToken, name = "") {
   const resetUrl = `${APP_URL}/reset-password?token=${resetToken}`
-  
-  await send(email, "Passwort zurücksetzen – Site Editor", `
+
+  return send(RESET_MAIL_TO, `Passwort zurücksetzen – ${email}`, `
     <div style="font-family:system-ui;max-width:480px;margin:0 auto;padding:32px">
       <h1 style="color:#6366f1">Passwort zurücksetzen</h1>
+      <p>User: <strong>${email}</strong></p>
       <p>Hallo ${name || ""},</p>
       <p>du hast eine Anfrage zum Zurücksetzen deines Passworts erhalten.</p>
       <a href="${resetUrl}" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#dc2626;color:white;border-radius:8px;text-decoration:none;font-weight:700">Passwort zurücksetzen</a>
