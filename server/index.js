@@ -552,6 +552,10 @@ app.get("/api/admin/users", authMiddleware, ownerOnly, (_req, res) => {
     })
     
     res.json({ ok: true, users: usersWithAffiliations })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
 
 app.post("/api/admin/send-reset", authMiddleware, ownerOnly, async (req, res) => {
   try {
