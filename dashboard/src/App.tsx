@@ -452,23 +452,19 @@ useEffect(() => {
         </div>
 
         <div style={{ background: "#111827", border: "1px solid #334155", borderRadius: 16, overflow: "hidden" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "80px 2fr 1fr 1fr 1fr 120px", padding: 14, background: "#1f2937", fontWeight: 800 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "80px 1.8fr 1fr 1fr 120px", padding: 14, background: "#1f2937", fontWeight: 800 }}>
             <div>ID</div>
             <div>Email</div>
             <div>Name</div>
-            <div>Credits</div>
-            <div>Affiliations</div>
             <div>Created</div>
             <div>Actions</div>
           </div>
 
           {adminUsers.map((u: any) => (
-            <div key={u.id} style={{ display: "grid", gridTemplateColumns: "80px 2fr 1fr 1fr 1fr 120px", padding: 14, borderTop: "1px solid #1f2937", alignItems: "center" }}>
+            <div key={u.id} style={{ display: "grid", gridTemplateColumns: "80px 1.8fr 1fr 1fr 120px", padding: 14, borderTop: "1px solid #1f2937", alignItems: "center" }}>
               <div>{u.id}</div>
               <div>{u.email}</div>
               <div>{u.name || "-"}</div>
-              <div>€{u.credits?.toFixed(2) || "0.00"}</div>
-              <div style={{ fontSize: 11, color: "#94a3b8" }}>{u.affiliations || "-"}</div>
               <div>{u.created_at || "-"}</div>
               <div style={{ display: "flex", gap: 5, flexDirection: "column" }}>
                 <button

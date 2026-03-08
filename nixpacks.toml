@@ -3,7 +3,6 @@ nixPkgs = ["nodejs_20"]
 
 [phases.install]
 cmds = [
-  "npm install",
   "cd server && npm install",
   "cd dashboard && npm install"
 ]
@@ -14,11 +13,4 @@ cmds = [
 ]
 
 [start]
-cmd = "cd server && node index.js"
-
-[variables]
-NODE_ENV = "production"
-PORT = "8787"
-
-[deploy]
-volumes = ["/app/server"]
+cmd = "node server/index.js"
