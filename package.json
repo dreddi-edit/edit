@@ -4,7 +4,6 @@
   "version": "1.0.0",
   "scripts": {
     "build": "npm --prefix server install && npm --prefix dashboard install && npm --prefix dashboard run build",
-    "start": "cd server && node index.js",
-    "dev": "npm --prefix server run dev"
+    "start": "cd server && node index.js"
   }
 }
