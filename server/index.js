@@ -469,6 +469,6 @@ registerOrgRoutes(app)
 registerStripeRoutes(app)
 registerScreenshotRoutes(app)
 
-app.listen(8787, () => {
+app.listen(process.env.PORT || 8787, () => {
   console.log("site-editor-server running on 8787")
 })
