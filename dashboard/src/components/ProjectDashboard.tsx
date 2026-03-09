@@ -1182,3 +1182,4 @@ const inputStyle: React.CSSProperties = {
   color: "white", padding: "0 12px",
   outline: "none", fontSize: 13, boxSizing: "border-box",
 }
+/* loader fix */
