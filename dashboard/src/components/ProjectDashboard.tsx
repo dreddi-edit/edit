@@ -151,28 +151,28 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
 
   const planMeta: Record<"basis"|"starter"|"pro"|"scale", { label: string; price: string; border: string; bg: string; accent: string }> = {
     basis: {
-      label: "Basis",
+      label: t("Basic"),
       price: "€9/mo",
       border: "rgba(99,102,241,0.35)",
       bg: "rgba(99,102,241,0.12)",
       accent: "rgba(99,102,241,0.95)",
     },
     starter: {
-      label: "Starter",
+      label: t("Starter"),
       price: "€29/mo",
       border: "rgba(34,197,94,0.35)",
       bg: "rgba(34,197,94,0.12)",
       accent: "rgba(34,197,94,0.95)",
     },
     pro: {
-      label: "Pro",
+      label: t("Pro"),
       price: "€79/mo",
       border: "rgba(168,85,247,0.35)",
       bg: "rgba(168,85,247,0.12)",
       accent: "rgba(168,85,247,0.95)",
     },
     scale: {
-      label: "Scale",
+      label: t("Scale"),
       price: "€149/mo",
       border: "rgba(245,158,11,0.35)",
       bg: "rgba(245,158,11,0.12)",
@@ -226,11 +226,11 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   }
 
   const create = async () => {
-    if (!newName.trim()) { toast.warning("Projektname erforderlich"); return }
+    if (!newName.trim()) { toast.warning(t("Project name required")); return }
     setCreating(true)
     try {
       const id = await apiCreateProject(newName.trim(), newUrl.trim(), "")
-      toast.success("Projekt erstellt")
+      toast.success(t("Project created"))
       setShowNew(false)
       setNewName(""); setNewUrl("")
       await load()
@@ -246,12 +246,12 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
     try {
       await apiDeleteProject(id)
       setProjects(prev => prev.filter(p => p.id !== id))
-      toast.success("Projekt gelöscht")
+      toast.success(t("Project deleted"))
     } catch (e: any) { toast.error(e.message) }
   }
 
   const extractTemplate = async () => {
-    if (!templateUrl.trim()) { toast.warning("URL erforderlich"); return }
+    if (!templateUrl.trim()) { toast.warning(t("URL required")); return }
     setTemplateExtracting(true)
     try {
       const r = await fetch("/api/templates/extract", {
@@ -261,8 +261,8 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
         body: JSON.stringify({ url: templateUrl.trim(), name: templateName.trim() || new URL(templateUrl).hostname })
       })
       const d = await r.json()
-      if (!d.ok) throw new Error(d.error || "Fehler beim Extrahieren")
-      toast.success("Template gespeichert!")
+      if (!d.ok) throw new Error(d.error || t("Error extracting"))
+      toast.success(t("Template saved!"))
       setShowTemplateExtract(false)
       setTemplateUrl("")
       setTemplateName("")
@@ -293,8 +293,8 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
         body: JSON.stringify({ template_id: templateId, name })
       })
       const d = await r.json()
-      if (!d.ok) throw new Error(d.error || "Fehler")
-      toast.success("Projekt aus Template erstellt!")
+      if (!d.ok) throw new Error(d.error || t("Error"))
+      toast.success(t("Project created from template!"))
       await load()
     } catch (e: any) {
       toast.error(e.message)
@@ -316,7 +316,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
         if (models.length > 0) {
           toast.success(`Ollama läuft ✓ · ${models.slice(0,3).join(", ")}`)
         } else {
-          toast.warning("Ollama läuft aber keine Modelle gefunden. Führe: ollama pull qwen2.5-coder:7b aus")
+          toast.warning(t("Ollama running but no models found. Run: ollama pull qwen2.5-coder:7b"))
         }
         return
       }
@@ -358,7 +358,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   }
 
   const generateLandingPageTest = async () => {
-    if (!landingName.trim()) { toast.warning("Produktname erforderlich"); return }
+    if (!landingName.trim()) { toast.warning(t("Product name required")); return }
     setLandingGenerating(true)
 
     try {
@@ -394,7 +394,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
       }
 
       if (!data?.ok || !data?.html) {
-        throw new Error(data?.error || "Landing Page konnte nicht generiert werden")
+        throw new Error(data?.error || t("Landing Page could not be generated"))
       }
 
       const html = String(data.html || "")
@@ -419,7 +419,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
         ...prev.filter((p: any) => p.id !== id)
       ])
 
-      toast.success("Landing Page erstellt")
+      toast.success(t("Landing Page created"))
       setShowLandingGen(false)
       setLandingName("")
       setLandingDesc("")
@@ -428,14 +428,14 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
       onOpen(project)
       load()
     } catch (e: any) {
-      toast.error(e.message || "Landing Page konnte nicht erstellt werden")
+      toast.error(e.message || t("Landing Page could not be created"))
     } finally {
       setLandingGenerating(false)
     }
   }
 
   const deleteTemplate = async (id: number) => {
-    if (!confirm("Template löschen?")) return
+    if (!confirm(t("Delete template?"))) return
     await fetch(`/api/templates/${id}`, { method: "DELETE", credentials: "include" })
     loadTemplates()
   }
@@ -443,33 +443,33 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   const QUICK_ACTIONS = [
     {
       icon: "+",
-      title: "Neues Projekt",
-      desc: "Projekt anlegen und URL laden",
+      title: t("Quick Start"),
+      desc: t("Platform access with manual credit loading."),
       action: () => setShowNew(true),
     },
     {
       icon: "✨",
-      title: "Landing Page Generator",
-      desc: "Neue AI Landing Page erzeugen",
+      title: t("Landing Page Generator"),
+      desc: t("Generate new AI landing page"),
       action: () => setShowLandingGen(true),
     },
     {
       icon: "SEO",
-      title: "SEO Optimizing",
-      desc: "Beta · SEO Analyse und Optimierung",
-      action: () => toast.warning("SEO Optimizing ist aktuell noch Beta"),
+      title: t("SEO Optimizing"),
+      desc: t("Beta · SEO analysis and optimization"),
+      action: () => toast.warning(t("SEO Optimizing is currently in beta")),
     },
     {
       icon: "🌍",
-      title: "Language Optimizing",
-      desc: "Beta · Sprache und Lokalisierung optimieren",
-      action: () => toast.warning("Language Optimizing ist aktuell noch Beta"),
+      title: t("Language Optimizing"),
+      desc: t("Beta · Language and localization optimization"),
+      action: () => toast.warning(t("Language Optimizing is currently in beta")),
     },
     {
       icon: "☁",
-      title: "Hosting",
-      desc: "Beta · Deployment und Hosting Flow",
-      action: () => toast.warning("Hosting ist aktuell noch Beta"),
+      title: t("Hosting"),
+      desc: t("Beta · Deployment and hosting flow"),
+      action: () => toast.warning(t("Hosting is currently in beta")),
     },
     {
       icon: "⬚",
@@ -722,7 +722,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
 
           {/* KI Status */}
           <div style={{ marginBottom: 36 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: theme === "light" ? "#94a3b8" : "rgba(148,163,184,0.4)", marginBottom: 16, textTransform: "uppercase" }}>KI-Modelle</div>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: theme === "light" ? "#94a3b8" : "rgba(148,163,184,0.4)", marginBottom: 16, textTransform: "uppercase" }}>{t("AI Models")}</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {/* Ollama - dynamic status */}
               <div style={{
@@ -734,7 +734,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
                 <div onClick={() => { if (ollamaStatus === "offline") { const next = !ollamaCollapsed; setOllamaCollapsed(next); localStorage.setItem("ollama-card-collapsed", String(next)) } }} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: ollamaStatus === "offline" ? "pointer" : "default" }}>
                   <div>
                     <span style={{ fontWeight: 700, color: "rgba(255,255,255,0.85)" }}>Ollama (lokal)</span>
-                    <span style={{ color: "rgba(148,163,184,0.4)", marginLeft: 10 }}>kostenlos · läuft auf deinem PC</span>
+                    <span style={{ color: "rgba(148,163,184,0.4)", marginLeft: 10 }}>{t("free · runs on your PC")}</span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <div style={{
@@ -841,7 +841,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
                 })()}
                 {ollamaStatus === "running" && (
                   <div style={{ marginTop: 6, fontSize: 11, color: "rgba(34,197,94,0.6)" }}>
-                    Ollama läuft lokal – KI-Anfragen sind kostenlos
+                    {t("Ollama running locally – AI requests are free")}
                   </div>
                 )}
               </div>
