@@ -409,10 +409,26 @@ const autoSave = async (html: string) => {
 
   const handleOpenProject = async (p: Project) => {
     setCurrentProject(p)
-    if(view !== "admin") setView("editor")
+    if (view !== "admin") setView("editor")
+
+    const inlineHtml = String((p as any)?.html || "").trim()
+
+    if (inlineHtml) {
+      setUrl("")
+      setLoadedUrl("")
+      setCurrentHtml(inlineHtml)
+      setStatus("ok")
+      return
+    }
+
     if (p.url) setUrl(p.url)
-    if (p.html) { setCurrentHtml(p.html); setLoadedUrl(p.url || "") }
-    else if (p.url) setTimeout(() => load(true), 100)
+    if (p.html) {
+      setCurrentHtml(p.html)
+      setLoadedUrl(p.url || "")
+      setStatus("ok")
+    } else if (p.url) {
+      setTimeout(() => load(true), 100)
+    }
   }
 
   const handleNewProject = async () => {
