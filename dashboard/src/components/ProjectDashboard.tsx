@@ -1000,7 +1000,25 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
               border: "1px solid rgba(99,102,241,0.25)",
               boxShadow: "0 24px 60px rgba(0,0,0,0.45)",
             }}
-            {landingGenerating && (
+              {landingGenerating && (
+                <div style={{
+                  position: "absolute", inset: 0,
+                  display: "flex", flexDirection: "column",
+                  alignItems: "center", justifyContent: "center",
+                  background: "rgba(15,23,42,0.98)", borderRadius: 18,
+                  gap: 16, color: "white",
+                }}>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: "50%",
+                    border: "3px solid rgba(99,102,241,0.3)",
+                    borderTop: "3px solid #6366f1",
+                    animation: "spin 1s linear infinite",
+                  }} />
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>Generiere Landing Page...</div>
+                  <div style={{ fontSize: 11, opacity: 0.7 }}>Das dauert ca. 4-8 Sekunden</div>
+                </div>
+              )}
+
               <div style={{
                 position: "absolute", inset: 0,
                 display: "flex", flexDirection: "column",
