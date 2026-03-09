@@ -302,6 +302,31 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   const checkOllama = async () => {
     setOllamaStatus("checking")
     
+    // Browser detection - only Chrome/Edge support localhost from HTTPS
+    const isChrome = /Chrome/.test(navigator.userAgent) && !/Edg/.test(navigator.userAgent)
+    const isEdge = /Edg/.test(navigator.userAgent)
+    const supportsLocalhost = isChrome || isEdge
+    
+    if (!supportsLocalhost) {
+      // Skip localhost attempts for Firefox/Safari - go straight to server proxy
+      try {
+        const r = await fetch("/api/ai/ollama-health", {
+          credentials: "include",
+          signal: AbortSignal.timeout(5000),
+        })
+        const d = await r.json()
+        if (d?.ok) {
+          setOllamaStatus("running")
+          if (d.models?.length > 0) toast.success(`Ollama ✓ · ${d.models.slice(0,3).join(", ")}`)
+        } else {
+          setOllamaStatus("offline")
+        }
+      } catch {
+        setOllamaStatus("offline")
+      }
+      return
+    }
+    
     // Try direct localhost first (browser → Ollama, no server needed)
     try {
       const r = await fetch("http://localhost:11434/api/tags", {
@@ -744,32 +769,54 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
                   </div>
                 </div>
                 {ollamaStatus === "offline" && (() => {
+                  // Browser detection for warning
+                  const isChrome = /Chrome/.test(navigator.userAgent) && !/Edg/.test(navigator.userAgent)
+                  const isEdge = /Edg/.test(navigator.userAgent)
+                  const isFirefox = /Firefox/.test(navigator.userAgent)
+                  const isSafari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent)
+                  const supportsLocalhost = isChrome || isEdge
+                  
                   const os = ollamaOs;
                   const steps: Record<"mac"|"windows"|"linux", {title: string, cmd?: string, link?: string, linkLabel?: string}[]> = {
                     mac: [
-                      { title: "Installieren", link: "https://ollama.com/download/mac", linkLabel: "↓ ollama.com/download" },
-                      { title: "Terminal öffnen & starten", cmd: "OLLAMA_ORIGINS=\"*\" ollama serve" },
-                      { title: "Modell laden", cmd: "ollama pull qwen2.5-coder:7b" },
+                      { title: "Download Ollama", link: "https://ollama.com/download/mac", linkLabel: "↓ ollama.com/download" },
+                      { title: "Start Ollama", cmd: "OLLAMA_ORIGINS=\"*\" ollama serve" },
+                      { title: "Load AI model", cmd: "ollama pull qwen2.5-coder:7b" },
                     ],
                     windows: [
-                      { title: "Installieren", link: "https://ollama.com/download/windows", linkLabel: "↓ ollama.com/download" },
-                      { title: "Nach Installation startet Ollama automatisch" },
-                      { title: "Modell laden (CMD/PowerShell)", cmd: "ollama pull qwen2.5-coder:7b" },
+                      { title: "Download Ollama", link: "https://ollama.com/download/windows", linkLabel: "↓ ollama.com/download" },
+                      { title: "Start Ollama", cmd: "set OLLAMA_ORIGINS=* && ollama serve" },
+                      { title: "Load AI model", cmd: "ollama pull qwen2.5-coder:7b" },
                     ],
                     linux: [
-                      { title: "Installieren (Terminal)", cmd: "curl -fsSL https://ollama.com/install.sh | sh" },
-                      { title: "Starten", cmd: "ollama serve" },
-                      { title: "Modell laden", cmd: "ollama pull qwen2.5-coder:7b" },
+                      { title: "Download Ollama", link: "https://ollama.com/download/linux", linkLabel: "↓ ollama.com/download" },
+                      { title: "Start Ollama", cmd: "OLLAMA_ORIGINS=\"*\" ollama serve" },
+                      { title: "Load AI model", cmd: "ollama pull qwen2.5-coder:7b" },
                     ],
                   };
                   return (
                     <div style={{ marginTop: 10, padding: "16px 20px", borderRadius: 8, background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.12)" }}>
+                      
+                      {/* Browser compatibility warning */}
+                      {!supportsLocalhost && (
+                        <div style={{ marginBottom: 16, padding: "12px 16px", borderRadius: 6, background: "rgba(255,193,7,0.1)", border: "1px solid rgba(255,193,7,0.3)" }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,193,7,0.9)", marginBottom: 4 }}>
+                            ⚠️ Browser Compatibility Issue
+                          </div>
+                          <div style={{ fontSize: 11, color: "rgba(255,193,7,0.7)", lineHeight: 1.4 }}>
+                            Local Ollama doesn't work in {isFirefox ? "Firefox" : "Safari"} due to browser security restrictions. 
+                            Please open this app in Chrome or Edge to use Ollama.
+                          </div>
+                        </div>
+                      )}
+                      
                       <div style={{ fontSize: 14, fontWeight: 700, color: "rgba(239,68,68,0.9)", marginBottom: 8 }}>
                         Use free AI on your computer
                       </div>
                       <div style={{ fontSize: 13, color: "rgba(239,68,68,0.7)", marginBottom: 16 }}>
                         Ollama runs AI models locally – 100% free, no API key needed.
                       </div>
+                      
                       {/* OS Tabs */}
                       <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
                         {(["mac","windows","linux"] as const).map(o => (
@@ -824,13 +871,16 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
                         ))}
                       </div>
                       
-                      <button onClick={checkOllama} style={{
-                        marginTop: 12, height: 36, padding: "0 16px", borderRadius: 6, width: "100%",
-                        border: "1px solid rgba(148,163,184,0.2)", 
-                        background: "rgba(148,163,184,0.06)", 
-                        color: "rgba(148,163,184,0.7)",
-                        fontSize: 12, cursor: "pointer", fontWeight: 600,
-                      }}>↺ Erneut prüfen</button>
+                      {/* Retry button - only show for Chrome/Edge users */}
+                      {supportsLocalhost && (
+                        <button onClick={checkOllama} style={{
+                          marginTop: 12, height: 36, padding: "0 16px", borderRadius: 6, width: "100%",
+                          border: "1px solid rgba(148,163,184,0.2)", 
+                          background: "rgba(148,163,184,0.06)", 
+                          color: "rgba(148,163,184,0.7)",
+                          fontSize: 12, cursor: "pointer", fontWeight: 600,
+                        }}>↺ Erneut prüfen</button>
+                      )}
                     </div>
                   );
                 })()}
