@@ -1360,6 +1360,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
     </div>
     </div>
     </div>
+    </div>
   )
 }
 
