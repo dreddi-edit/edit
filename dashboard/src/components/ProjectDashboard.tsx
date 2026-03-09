@@ -129,7 +129,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   const [templates, setTemplates] = useState<any[]>([])
   const [ollamaStatus, setOllamaStatus] = useState<"checking"|"running"|"offline">("checking")
   const [ollamaOs, setOllamaOs] = useState<"mac"|"windows"|"linux">("mac")
-
+  const [ollamaCollapsed, setOllamaCollapsed] = useState(() => localStorage.getItem("ollama-card-collapsed") === "true")
   const [showOnboarding, setShowOnboarding] = useState(
     !localStorage.getItem("se_onboarding_done")
   )
@@ -729,21 +729,24 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
                 background: theme === "light" ? "#ffffff" : "rgba(15,20,35,0.9)",
                 fontSize: 12,
               }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div onClick={() => { if (ollamaStatus === "offline") { const next = !ollamaCollapsed; setOllamaCollapsed(next); localStorage.setItem("ollama-card-collapsed", String(next)) } }} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: ollamaStatus === "offline" ? "pointer" : "default" }}>
                   <div>
                     <span style={{ fontWeight: 700, color: "rgba(255,255,255,0.85)" }}>Ollama (lokal)</span>
                     <span style={{ color: "rgba(148,163,184,0.4)", marginLeft: 10 }}>kostenlos · läuft auf deinem PC</span>
                   </div>
-                  <div style={{
-                    fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 6,
-                    background: ollamaStatus === "running" ? "rgba(34,197,94,0.12)" : ollamaStatus === "offline" ? "rgba(239,68,68,0.12)" : "rgba(148,163,184,0.08)",
-                    color: ollamaStatus === "running" ? "rgba(34,197,94,0.8)" : ollamaStatus === "offline" ? "rgba(239,68,68,0.7)" : "rgba(148,163,184,0.5)",
-                    border: ollamaStatus === "running" ? "1px solid rgba(34,197,94,0.2)" : ollamaStatus === "offline" ? "1px solid rgba(239,68,68,0.2)" : "1px solid rgba(148,163,184,0.15)",
-                  }}>
-                    {ollamaStatus === "checking" ? "PRÜFE..." : ollamaStatus === "running" ? "✓ LÄUFT" : "✕ OFFLINE"}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{
+                      fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 6,
+                      background: ollamaStatus === "running" ? "rgba(34,197,94,0.12)" : ollamaStatus === "offline" ? "rgba(239,68,68,0.12)" : "rgba(148,163,184,0.08)",
+                      color: ollamaStatus === "running" ? "rgba(34,197,94,0.8)" : ollamaStatus === "offline" ? "rgba(239,68,68,0.7)" : "rgba(148,163,184,0.5)",
+                      border: ollamaStatus === "running" ? "1px solid rgba(34,197,94,0.2)" : ollamaStatus === "offline" ? "1px solid rgba(239,68,68,0.2)" : "1px solid rgba(148,163,184,0.15)",
+                    }}>
+                      {ollamaStatus === "checking" ? "PRÜFE..." : ollamaStatus === "running" ? "✓ LÄUFT" : "✕ OFFLINE"}
+                    </div>
+                    {ollamaStatus === "offline" && <span style={{ fontSize: 10, color: "rgba(148,163,184,0.4)" }}>{ollamaCollapsed ? "▶" : "▼"}</span>}
                   </div>
                 </div>
-                {ollamaStatus === "offline" && (() => {
+                {ollamaStatus === "offline" && !ollamaCollapsed && (() => {
                   const os = ollamaOs;
                   const steps: Record<"mac"|"windows"|"linux", {title: string, cmd?: string, link?: string, linkLabel?: string}[]> = {
                     mac: [
