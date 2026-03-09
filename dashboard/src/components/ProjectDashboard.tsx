@@ -120,6 +120,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   const [landingName, setLandingName] = useState("")
   const [landingDesc, setLandingDesc] = useState("")
   const [landingAudience, setLandingAudience] = useState("")
+  const [landingLang, setLandingLang] = useState<"english" | "german">("english")
   const [landingGenerating, setLandingGenerating] = useState(false)
   const [templates, setTemplates] = useState<any[]>([])
   const [ollamaStatus, setOllamaStatus] = useState<"checking"|"running"|"offline">("checking")
@@ -342,14 +343,137 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
     setLandingGenerating(true)
     try {
       const name = landingName.trim()
-      const desc = landingDesc.trim() || "AI-powered workflow platform for modern teams"
-      const audience = landingAudience.trim() || "modern teams"
-      const safeName = name.replace(/`/g, "")
-      const safeDesc = desc.replace(/`/g, "")
-      const safeAudience = audience.replace(/`/g, "")
+      const rawDesc = landingDesc.trim() || "AI-powered workflow platform"
+      const rawAudience = landingAudience.trim() || "modern teams"
+      const lang = landingLang || "english"
+
+      const titleCase = (v: string) =>
+        String(v || "")
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean)
+          .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(" ")
+
+      const audienceLabel = titleCase(rawAudience)
+      const productLabel = titleCase(name)
+
+      const copy = lang === "german"
+        ? {
+            htmlLang: "de",
+            badge: "KI-Workflow-Plattform",
+            headline: `${productLabel} für ${audienceLabel}`,
+            subheadline: `${productLabel} hilft ${rawAudience}, schneller zu arbeiten, Workflows zu automatisieren und mit weniger Aufwand bessere Ergebnisse zu erzielen.`,
+            navFeatures: "Funktionen",
+            navProduct: "Produkt",
+            navUseCases: "Einsatzbereiche",
+            navPricing: "Preise",
+            startTrial: "Kostenlos starten",
+            seeProduct: "Produkt ansehen",
+            stat1: "10x schneller",
+            stat1Label: "als klassische Workflows",
+            stat2: "72%",
+            stat2Label: "schnellere Launch-Zyklen",
+            stat3: "24/7",
+            stat3Label: "KI-unterstützte Umsetzung",
+            featuresEyebrow: "Funktionen",
+            featuresTitle: `Alles, was ${rawAudience} brauchen, um schneller voranzukommen`,
+            featuresText: "Eine hochwertige Landing-Page-Struktur mit klarer Hierarchie, starkem Wording und moderner Produktpräsentation.",
+            feature1Title: "KI-gestützte Workflows",
+            feature1Text: `${productLabel} verwandelt wiederkehrende Arbeit in schnellere, hochwertigere Ergebnisse.`,
+            feature2Title: "Für Umsetzung gebaut",
+            feature2Text: "Klare Sections, modernes Layout und eine Struktur, die sofort launch-ready wirkt.",
+            feature3Title: "Conversion-orientiert",
+            feature3Text: "Die Seite ist so aufgebaut, dass sie Vertrauen schafft, Mehrwert kommuniziert und Nutzer zur Aktion führt.",
+            productEyebrow: "Produkt",
+            productTitle: "Eine Premium-Struktur, die vom ersten Tag an überzeugend wirkt",
+            productText: "Nutze diese Seite als starken Startpunkt und passe später jede Section weiter an.",
+            bullet1Title: "Klare Positionierung",
+            bullet1Text: "Headline, Nutzenversprechen und CTA sind dort platziert, wo Nutzer sie erwarten.",
+            bullet2Title: "Starke visuelle Hierarchie",
+            bullet2Text: "Spacing, Cards und Section-Rhythmus sind auf moderne SaaS-Kommunikation optimiert.",
+            bullet3Title: "Einfach anpassbar",
+            bullet3Text: "Texte, Preise, Screenshots und Einsatzbereiche lassen sich später schnell austauschen.",
+            useEyebrow: "Einsatzbereiche",
+            useTitle: "Flexibel einsetzbar für verschiedene Geschäftsmodelle",
+            use1Title: "Für SaaS",
+            use1Text: "Erkläre Produktwert klar, stärke deine Positionierung und steigere Demo-Anfragen.",
+            use2Title: "Für Agenturen",
+            use2Text: "Präsentiere Leistungen, Case Studies und Angebote in einer deutlich hochwertigeren Form.",
+            use3Title: "Für KI-Tools",
+            use3Text: "Kombiniere Produkt-Erklärung, Vertrauen und Pricing in einer modernen Storyline.",
+            pricingEyebrow: "Preise",
+            pricingTitle: "Einfache Preisstruktur, die mit deinem Wachstum skaliert",
+            pricingText: "Nutze diese Preisblöcke als Ausgangspunkt und passe sie später an dein Modell an.",
+            getStartedEyebrow: "Loslegen",
+            getStartedTitle: `Starte ${productLabel} mit einer Seite, die bereits premium aussieht`,
+            getStartedText: "Diese Seite ist als hochwertiger Startpunkt gedacht. Ersetze Texte, passe Blöcke an und optimiere sie danach weiter.",
+            footer: `Entwickelt für ${rawAudience} · ${productLabel}`,
+            priceNote1: "Perfekt für erste Ergebnisse und schnelle Tests.",
+            priceNote2: "Ideal für Teams, die mehr Geschwindigkeit und Qualität wollen.",
+            priceNote3: "Für größere Teams mit mehr Launches und höherem Bedarf.",
+          }
+        : {
+            htmlLang: "en",
+            badge: "AI workflow platform",
+            headline: `${productLabel} for ${audienceLabel}`,
+            subheadline: `${productLabel} helps ${rawAudience} work faster, automate workflows and deliver better outcomes with less effort.`,
+            navFeatures: "Features",
+            navProduct: "Product",
+            navUseCases: "Use Cases",
+            navPricing: "Pricing",
+            startTrial: "Start Free Trial",
+            seeProduct: "See Product",
+            stat1: "10x faster",
+            stat1Label: "than traditional workflows",
+            stat2: "72%",
+            stat2Label: "faster launch cycles",
+            stat3: "24/7",
+            stat3Label: "AI-assisted execution",
+            featuresEyebrow: "Features",
+            featuresTitle: `Everything ${rawAudience} need to move faster`,
+            featuresText: "A premium landing page structure with clearer messaging, stronger hierarchy and a more polished product story.",
+            feature1Title: "AI-assisted workflows",
+            feature1Text: `${productLabel} helps turn repetitive work into faster, higher quality execution.`,
+            feature2Title: "Built for execution",
+            feature2Text: "Structured sections, modern layout and a product presentation that already feels launch-ready.",
+            feature3Title: "Conversion-first layout",
+            feature3Text: "The page is designed to build trust, communicate value quickly and drive action.",
+            productEyebrow: "Product",
+            productTitle: "A premium structure that feels convincing from day one",
+            productText: "Use this as your launch base and refine every section later without rebuilding the whole page.",
+            bullet1Title: "Clear positioning",
+            bullet1Text: "Headline, value proposition and CTA are placed where users expect them.",
+            bullet2Title: "Strong visual hierarchy",
+            bullet2Text: "Spacing, cards and section rhythm are tuned for a modern SaaS experience.",
+            bullet3Title: "Easy to customize",
+            bullet3Text: "Swap copy, pricing, screenshots and use cases later without changing the structure.",
+            useEyebrow: "Use Cases",
+            useTitle: "Designed to work across multiple go-to-market scenarios",
+            use1Title: "For SaaS",
+            use1Text: "Explain product value clearly, strengthen positioning and drive more demos.",
+            use2Title: "For agencies",
+            use2Text: "Present services, case studies and offers inside a much more premium-looking shell.",
+            use3Title: "For AI tools",
+            use3Text: "Combine product education, trust building and pricing in one modern narrative.",
+            pricingEyebrow: "Pricing",
+            pricingTitle: "Simple pricing that scales with your growth",
+            pricingText: "Use these pricing cards as a starting point and adapt them later to your actual business model.",
+            getStartedEyebrow: "Get Started",
+            getStartedTitle: `Launch ${productLabel} with a page that already looks premium`,
+            getStartedText: "This page is meant to be a strong starting point. Replace the copy, adjust the blocks and keep refining from there.",
+            footer: `Built for ${rawAudience} · ${productLabel}`,
+            priceNote1: "Best for getting started and validating early demand.",
+            priceNote2: "Built for teams that want more speed and better execution.",
+            priceNote3: "For bigger teams managing more launches and more scale.",
+          }
+
+      const safeName = productLabel.replace(/`/g, "")
+      const safeDesc = copy.subheadline.replace(/`/g, "")
+      const safeAudience = audienceLabel.replace(/`/g, "")
 
       const html = `<!doctype html>
-<html lang="en">
+<html lang="${copy.htmlLang}">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -641,41 +765,41 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
         <span>${safeName}</span>
       </div>
       <nav class="nav-links">
-        <a href="#features">Features</a>
-        <a href="#product">Product</a>
-        <a href="#use-cases">Use Cases</a>
-        <a href="#pricing">Pricing</a>
+        <a href="#features">${copy.navFeatures}</a>
+        <a href="#product">${copy.navProduct}</a>
+        <a href="#use-cases">${copy.navUseCases}</a>
+        <a href="#pricing">${copy.navPricing}</a>
       </nav>
-      <button class="nav-cta">Start Free Trial</button>
+      <button class="nav-cta">${copy.startTrial}</button>
     </div>
   </header>
 
   <section class="hero">
     <div class="wrap">
-      <span class="badge">AI workflow platform</span>
+      <span class="badge">${copy.badge}</span>
 
       <div class="hero-grid">
         <div>
-          <h1>${safeName} for ${safeAudience}</h1>
-          <p class="sub">${safeDesc}</p>
+          <h1>${copy.headline}</h1>
+          <p class="sub">${copy.subheadline}</p>
 
           <div class="hero-actions">
-            <a class="btn btn-primary" href="#pricing">Start Free Trial</a>
-            <a class="btn btn-secondary" href="#product">See Product</a>
+            <a class="btn btn-primary" href="#pricing">${copy.startTrial}</a>
+            <a class="btn btn-secondary" href="#product">${copy.seeProduct}</a>
           </div>
 
           <div class="hero-stats">
             <div class="hero-stat">
-              <div class="num">10x faster</div>
-              <div class="label">than traditional workflows</div>
+              <div class="num">${copy.stat1}</div>
+              <div class="label">${copy.stat1Label}</div>
             </div>
             <div class="hero-stat">
               <div class="num">72%</div>
-              <div class="label">faster launch cycles</div>
+              <div class="label">${copy.stat2Label}</div>
             </div>
             <div class="hero-stat">
               <div class="num">24/7</div>
-              <div class="label">AI-assisted execution</div>
+              <div class="label">${copy.stat3Label}</div>
             </div>
           </div>
         </div>
@@ -725,26 +849,26 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   <section id="features" class="section">
     <div class="wrap">
       <div class="section-head">
-        <div class="eyebrow">Features</div>
-        <h2>Everything ${safeAudience} need to move faster</h2>
-        <div class="muted">A premium structure designed for conversion, clarity and modern product storytelling.</div>
+        <div class="eyebrow">${copy.featuresEyebrow}</div>
+        <h2>${copy.featuresTitle}</h2>
+        <div class="muted">${copy.featuresText}</div>
       </div>
 
       <div class="feature-grid">
         <div class="feature">
           <div class="feature-icon">✦</div>
-          <h3>AI-assisted workflows</h3>
-          <div class="muted">Turn repetitive work into high-quality output with a faster, cleaner operating model.</div>
+          <h3>${copy.feature1Title}</h3>
+          <div class="muted">${copy.feature1Text}</div>
         </div>
         <div class="feature">
           <div class="feature-icon">◎</div>
-          <h3>Built for execution</h3>
-          <div class="muted">Structured sections, clear hierarchy and modern product design that already looks launch-ready.</div>
+          <h3>${copy.feature2Title}</h3>
+          <div class="muted">${copy.feature2Text}</div>
         </div>
         <div class="feature">
           <div class="feature-icon">↗</div>
-          <h3>Conversion-first layout</h3>
-          <div class="muted">A flow built to communicate value quickly, create trust and drive action.</div>
+          <h3>${copy.feature3Title}</h3>
+          <div class="muted">${copy.feature3Text}</div>
         </div>
       </div>
     </div>
@@ -754,31 +878,31 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
     <div class="wrap">
       <div class="demo">
         <div class="demo-copy">
-          <div class="eyebrow">Product</div>
-          <h2>A polished page structure that feels ready on day one</h2>
-          <div class="muted">Use this as your launch base and refine every section later. The layout is intentionally premium, minimal and flexible.</div>
+          <div class="eyebrow">${copy.productEyebrow}</div>
+          <h2>${copy.productTitle}</h2>
+          <div class="muted">${copy.productText}</div>
 
           <div class="bullet">
             <div class="bullet-mark">1</div>
             <div>
-              <strong>Clear positioning</strong>
-              <div class="muted">Headline, supporting copy and CTAs are placed where users expect them.</div>
+              <strong>${copy.bullet1Title}</strong>
+              <div class="muted">${copy.bullet1Text}</div>
             </div>
           </div>
 
           <div class="bullet">
             <div class="bullet-mark">2</div>
             <div>
-              <strong>Strong visual hierarchy</strong>
-              <div class="muted">Spacing, cards and section rhythm are tuned for modern SaaS presentation.</div>
+              <strong>${copy.bullet2Title}</strong>
+              <div class="muted">${copy.bullet2Text}</div>
             </div>
           </div>
 
           <div class="bullet">
             <div class="bullet-mark">3</div>
             <div>
-              <strong>Easy to customize</strong>
-              <div class="muted">Swap copy, pricing, screenshots and use cases without rebuilding the structure.</div>
+              <strong>${copy.bullet3Title}</strong>
+              <div class="muted">${copy.bullet3Text}</div>
             </div>
           </div>
         </div>
@@ -815,22 +939,22 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   <section id="use-cases" class="section">
     <div class="wrap">
       <div class="section-head">
-        <div class="eyebrow">Use Cases</div>
-        <h2>Designed to work across multiple go-to-market scenarios</h2>
+        <div class="eyebrow">${copy.useEyebrow}</div>
+        <h2>${copy.useTitle}</h2>
       </div>
 
       <div class="use-grid">
         <div class="use-card">
-          <h3>For SaaS</h3>
-          <div class="muted">Explain product value, differentiate your workflow and drive demos with a cleaner landing page structure.</div>
+          <h3>${copy.use1Title}</h3>
+          <div class="muted">${copy.use1Text}</div>
         </div>
         <div class="use-card">
-          <h3>For agencies</h3>
-          <div class="muted">Pitch services, show transformation and package offers inside a strong premium-looking shell.</div>
+          <h3>${copy.use2Title}</h3>
+          <div class="muted">${copy.use2Text}</div>
         </div>
         <div class="use-card">
-          <h3>For AI tools</h3>
-          <div class="muted">Combine product explanation, trust building and pricing in one fast, modern narrative.</div>
+          <h3>${copy.use3Title}</h3>
+          <div class="muted">${copy.use3Text}</div>
         </div>
       </div>
     </div>
@@ -839,16 +963,16 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   <section id="pricing" class="section">
     <div class="wrap">
       <div class="section-head">
-        <div class="eyebrow">Pricing</div>
-        <h2>Simple pricing that scales with your growth</h2>
-        <div class="muted">Use these cards as a starting point and customize the offers to your actual business model.</div>
+        <div class="eyebrow">${copy.pricingEyebrow}</div>
+        <h2>${copy.pricingTitle}</h2>
+        <div class="muted">${copy.pricingText}</div>
       </div>
 
       <div class="pricing">
         <div class="price-card">
           <h3>Starter</h3>
           <div class="price">€19<small>/mo</small></div>
-          <div class="muted">Best for trying the product and getting initial results quickly.</div>
+          <div class="muted">${copy.priceNote1}</div>
           <ul>
             <li>Core workflow access</li>
             <li>Basic team collaboration</li>
@@ -860,7 +984,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
           <div class="top-tag">Most Popular</div>
           <h3>Pro</h3>
           <div class="price">€49<small>/mo</small></div>
-          <div class="muted">Built for teams that want speed, quality and better conversion outcomes.</div>
+          <div class="muted">${copy.priceNote2}</div>
           <ul>
             <li>Advanced workflow automation</li>
             <li>Full editing flexibility</li>
@@ -871,7 +995,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
         <div class="price-card">
           <h3>Scale</h3>
           <div class="price">€99<small>/mo</small></div>
-          <div class="muted">For bigger teams managing more launches, pages and internal processes.</div>
+          <div class="muted">${copy.priceNote3}</div>
           <ul>
             <li>Higher usage limits</li>
             <li>Team-level collaboration</li>
@@ -885,13 +1009,11 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   <section class="cta">
     <div class="wrap">
       <div class="cta-box">
-        <div class="eyebrow">Get Started</div>
-        <h2>Launch ${safeName} with a page that already looks premium</h2>
-        <div class="muted" style="max-width:760px;margin:0 auto 26px;">
-          This page is designed to be an excellent starting point for product marketing. Replace the copy, adjust the blocks and keep refining from here.
-        </div>
+        <div class="eyebrow">${copy.getStartedEyebrow}</div>
+        <h2>${copy.getStartedTitle}</h2>
+        <div class="muted" style="max-width:760px;margin:0 auto 26px;">${copy.getStartedText}</div>
         <div class="hero-actions" style="justify-content:center;">
-          <a class="btn btn-primary" href="#">Start Free Trial</a>
+          <a class="btn btn-primary" href="#">${copy.startTrial}</a>
           <a class="btn btn-secondary" href="#features">Explore Features</a>
         </div>
       </div>
@@ -899,7 +1021,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   </section>
 
   <div class="footer">
-    Built for ${safeAudience} · ${safeName}
+    ${copy.footer}
   </div>
 </body>
 </html>`
@@ -919,6 +1041,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
       setLandingName("")
       setLandingDesc("")
       setLandingAudience("")
+      setLandingLang("english")
       await load()
       onOpen(project)
     } catch (e: any) {
@@ -1541,8 +1664,20 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
               value={landingAudience}
               onChange={e => setLandingAudience(e.target.value)}
               placeholder="e.g. creators, startups, agencies, ecommerce brands"
-              style={{ ...inputStyle, width: "100%", marginBottom: 20 }}
+              style={{ ...inputStyle, width: "100%", marginBottom: 12 }}
             />
+
+            <label style={{ fontSize: 11, fontWeight: 800, display: "block", marginBottom: 6, color: theme === "light" ? "#475569" : "rgba(148,163,184,0.72)" }}>
+              LANGUAGE
+            </label>
+            <select
+              value={landingLang}
+              onChange={e => setLandingLang(e.target.value as "english" | "german")}
+              style={{ ...inputStyle, width: "100%", marginBottom: 20 }}
+            >
+              <option value="english">English</option>
+              <option value="german">German</option>
+            </select>
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
               <button
