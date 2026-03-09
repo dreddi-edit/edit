@@ -137,9 +137,6 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
     checkOllama()
     fetch("/api/user/plan", { credentials: "include" })
       .then(r => r.json()).then(d => { if (d.ok && d.plan) setDemoPlan(d.plan as any) }).catch(() => {})
-  }, [])
-
-
 
   }, [])
 
