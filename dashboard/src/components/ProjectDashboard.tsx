@@ -1355,8 +1355,10 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
           </div>
         </div>
       )}
-      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} onThemeChange={(t) => setTheme(t as "dark"|"light")} />}
-      <style>{`@keyframes spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }`}</style>
+      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} onThemeChange={(theme) => setTheme(theme as "dark"|"light")} />}
+    </div>
+    </div>
+    </div>
     </div>
   )
 }
