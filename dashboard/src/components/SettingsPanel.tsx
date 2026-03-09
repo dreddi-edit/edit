@@ -2,7 +2,12 @@ import { useEffect, useState } from "react"
 import { toast } from "./Toast"
 import { getRequireApproval, setRequireApproval, getApprovalThreshold, setApprovalThreshold } from "../approval-settings"
 import { useTranslation } from "../i18n/useTranslation"
-import { analyzePageSpeed } from "../utils/api"
+import { 
+  getCrUXMetrics, analyzePageSpeed, searchUrl, generateContent, analyzeEntities, translateText, recognizeSpeech,
+  analyzeImage, analyzeVideo, searchVideos, getDeviceSpecs, processDocument, createSiteVersion, uploadFile, queryBigQuery,
+  type CrUXData, type PageSpeedData, type SearchData, type GeminiData, type NLPData, type TranslationData, type SpeechData,
+  type VisionData, type VideoData, type YouTubeData, type DeviceData, type DocumentData, type HostingData, type StorageData, type BigQueryData
+} from "../utils/googleApis"
 
 const BASE = ""
 
@@ -23,13 +28,23 @@ const ALL_MODELS = [
 
 export default function SettingsPanel({ onClose, onThemeChange }: { onClose: () => void; onThemeChange: (t: string) => void }) {
   const { t, lang, setLang } = useTranslation()
-  const [tab, setTab] = useState<"general" | "apikeys" | "org">("general")
+  const [tab, setTab] = useState<"general" | "apikeys" | "org" | "google">("general")
   const [settings, setSettings] = useState<Settings | null>(null)
   const [approvalOn, setApprovalOn] = useState(getRequireApproval())
   const [approvalThreshold, setApprovalThresholdState] = useState(getApprovalThreshold())
   const [onlyOwnKey, setOnlyOwnKey] = useState(false)
-  const [seoData, setSeoData] = useState<SeoData | null>(null)
+  const [seoData, setSeoData] = useState<PageSpeedData | null>(null)
   const [seoLoading, setSeoLoading] = useState(false)
+
+  // Google AI Suite states
+  const [googleLoading, setGoogleLoading] = useState<string | null>(null)
+  const [googleResults, setGoogleResults] = useState<Record<string, any>>({})
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    seo: true,
+    ai: false,
+    media: false,
+    export: false
+  })
 
   // API Keys
   const [myKeys, setMyKeys] = useState<ApiKey[]>([])
@@ -197,6 +212,7 @@ export default function SettingsPanel({ onClose, onThemeChange }: { onClose: () 
     { id: "general", label: "Allgemein" },
     { id: "apikeys", label: "API Keys" },
     { id: "org", label: "Organisation" },
+    { id: "google", label: "Google AI Suite" },
   ]
 
   const PROVIDER_COLORS: Record<string, string> = {
@@ -616,6 +632,149 @@ export default function SettingsPanel({ onClose, onThemeChange }: { onClose: () 
               </>
             )}
           </>)}
+
+          {/* GOOGLE AI SUITE */}
+          {tab === "google" && (
+            <>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 20, lineHeight: 1.6 }}>
+                15 Google APIs für SEO, KI-Inhalte, Bilder/Videos und Export/Deployment.
+              </div>
+
+              {/* SEO/Performance Section */}
+              <Section title="📊 SEO & Performance" collapsible expanded={expandedSections.seo} onToggle={() => toggleSection('seo')}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+                  <button onClick={() => runGoogleApi("Chrome UX Report", () => getCrUXMetrics(getCurrentUrl()))} disabled={googleLoading === "Chrome UX Report"} style={inputStyle}>
+                    {googleLoading === "Chrome UX Report" ? "..." : "🔍"} Chrome UX Report
+                  </button>
+                  <button onClick={() => runGoogleApi("PageSpeed Insights", () => analyzePageSpeed(getCurrentUrl()))} disabled={googleLoading === "PageSpeed Insights"} style={inputStyle}>
+                    {googleLoading === "PageSpeed Insights" ? "..." : "⚡"} PageSpeed Insights
+                  </button>
+                  <button onClick={() => runGoogleApi("Custom Search", () => searchUrl(getCurrentUrl()))} disabled={googleLoading === "Custom Search"} style={inputStyle}>
+                    {googleLoading === "Custom Search" ? "..." : "🔎"} Custom Search
+                  </button>
+                </div>
+                {googleResults["Chrome UX Report"] && (
+                  <div style={{ marginTop: 12, padding: 12, background: "var(--bg-card)", borderRadius: 8 }}>
+                    <strong>Chrome UX:</strong> Mobile {googleResults["Chrome UX Report"].mobileP75}ms | Desktop {googleResults["Chrome UX Report"].desktopP75}ms
+                  </div>
+                )}
+                {googleResults["PageSpeed Insights"] && (
+                  <div style={{ marginTop: 12, padding: 12, background: "var(--bg-card)", borderRadius: 8 }}>
+                    <strong>PageSpeed:</strong> {googleResults["PageSpeed Insights"].performance}/100 | SEO: {googleResults["PageSpeed Insights"].seo}/100 | FCP: {googleResults["PageSpeed Insights"].fcp}
+                  </div>
+                )}
+                {googleResults["Custom Search"] && (
+                  <div style={{ marginTop: 12, padding: 12, background: "var(--bg-card)", borderRadius: 8 }}>
+                    <strong>Search Results:</strong> {googleResults["Custom Search"].items?.length || 0} results found
+                  </div>
+                )}
+              </Section>
+
+              {/* AI Content Section */}
+              <Section title="🤖 AI Content" collapsible expanded={expandedSections.ai} onToggle={() => toggleSection('ai')}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+                  <button onClick={() => runGoogleApi("Gemini Generate", () => generateContent("Generate marketing copy for this website"))} disabled={googleLoading === "Gemini Generate"} style={inputStyle}>
+                    {googleLoading === "Gemini Generate" ? "..." : "✨"} Gemini Generate
+                  </button>
+                  <button onClick={() => runGoogleApi("NLP Entities", () => analyzeEntities("This is a sample text for entity analysis"))} disabled={googleLoading === "NLP Entities"} style={inputStyle}>
+                    {googleLoading === "NLP Entities" ? "..." : "📝"} NLP Entities
+                  </button>
+                  <button onClick={() => runGoogleApi("Translation", () => translateText("Hello world", "de"))} disabled={googleLoading === "Translation"} style={inputStyle}>
+                    {googleLoading === "Translation" ? "..." : "🌐"} Translate Text
+                  </button>
+                  <button onClick={() => runGoogleApi("Speech to Text", () => recognizeSpeech(new Blob()))} disabled={googleLoading === "Speech to Text"} style={inputStyle}>
+                    {googleLoading === "Speech to Text" ? "..." : "🎤"} Speech to Text
+                  </button>
+                </div>
+                {googleResults["Gemini Generate"] && (
+                  <div style={{ marginTop: 12, padding: 12, background: "var(--bg-card)", borderRadius: 8 }}>
+                    <strong>Gemini Output:</strong> {googleResults["Gemini Generate"].text?.substring(0, 100)}...
+                  </div>
+                )}
+                {googleResults["NLP Entities"] && (
+                  <div style={{ marginTop: 12, padding: 12, background: "var(--bg-card)", borderRadius: 8 }}>
+                    <strong>Entities:</strong> {googleResults["NLP Entities"].entities?.length || 0} found
+                  </div>
+                )}
+                {googleResults["Translation"] && (
+                  <div style={{ marginTop: 12, padding: 12, background: "var(--bg-card)", borderRadius: 8 }}>
+                    <strong>Translation:</strong> {googleResults["Translation"].translatedText}
+                  </div>
+                )}
+              </Section>
+
+              {/* Images/Videos Section */}
+              <Section title="🎬 Images & Videos" collapsible expanded={expandedSections.media} onToggle={() => toggleSection('media')}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+                  <button onClick={() => runGoogleApi("Vision Analysis", () => analyzeImage("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="))} disabled={googleLoading === "Vision Analysis"} style={inputStyle}>
+                    {googleLoading === "Vision Analysis" ? "..." : "👁️"} Vision Analysis
+                  </button>
+                  <button onClick={() => runGoogleApi("Video Intelligence", () => analyzeVideo(getCurrentUrl()))} disabled={googleLoading === "Video Intelligence"} style={inputStyle}>
+                    {googleLoading === "Video Intelligence" ? "..." : "🎥"} Video Intelligence
+                  </button>
+                  <button onClick={() => runGoogleApi("YouTube Search", () => searchVideos("web development"))} disabled={googleLoading === "YouTube Search"} style={inputStyle}>
+                    {googleLoading === "YouTube Search" ? "..." : "📺"} YouTube Search
+                  </button>
+                  <button onClick={() => runGoogleApi("Device Specs", () => getDeviceSpecs())} disabled={googleLoading === "Device Specs"} style={inputStyle}>
+                    {googleLoading === "Device Specs" ? "..." : "📱"} Device Specs
+                  </button>
+                </div>
+                {googleResults["Vision Analysis"] && (
+                  <div style={{ marginTop: 12, padding: 12, background: "var(--bg-card)", borderRadius: 8 }}>
+                    <strong>Vision:</strong> {googleResults["Vision Analysis"].labels?.length || 0} labels, {googleResults["Vision Analysis"].objects?.length || 0} objects
+                  </div>
+                )}
+                {googleResults["YouTube Search"] && (
+                  <div style={{ marginTop: 12, padding: 12, background: "var(--bg-card)", borderRadius: 8 }}>
+                    <strong>YouTube:</strong> {googleResults["YouTube Search"].items?.length || 0} videos found
+                  </div>
+                )}
+                {googleResults["Device Specs"] && (
+                  <div style={{ marginTop: 12, padding: 12, background: "var(--bg-card)", borderRadius: 8 }}>
+                    <strong>Devices:</strong> {googleResults["Device Specs"].deviceSpecs?.length || 0} device types
+                  </div>
+                )}
+              </Section>
+
+              {/* Export/Deploy Section */}
+              <Section title="🚀 Export & Deploy" collapsible expanded={expandedSections.export} onToggle={() => toggleSection('export')}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+                  <button onClick={() => runGoogleApi("Document AI", () => processDocument("<html><body>Sample document</body></html>"))} disabled={googleLoading === "Document AI"} style={inputStyle}>
+                    {googleLoading === "Document AI" ? "..." : "📄"} Document AI
+                  </button>
+                  <button onClick={() => runGoogleApi("Firebase Hosting", () => createSiteVersion("my-site"))} disabled={googleLoading === "Firebase Hosting"} style={inputStyle}>
+                    {googleLoading === "Firebase Hosting" ? "..." : "🔥"} Firebase Hosting
+                  </button>
+                  <button onClick={() => runGoogleApi("Cloud Storage", () => uploadFile(new File(["test"], "test.txt"), "my-bucket"))} disabled={googleLoading === "Cloud Storage"} style={inputStyle}>
+                    {googleLoading === "Cloud Storage" ? "..." : "☁️"} Cloud Storage
+                  </button>
+                  <button onClick={() => runGoogleApi("BigQuery", () => queryBigQuery("SELECT COUNT(*) as total FROM dataset.table"))} disabled={googleLoading === "BigQuery"} style={inputStyle}>
+                    {googleLoading === "BigQuery" ? "..." : "📊"} BigQuery
+                  </button>
+                </div>
+                {googleResults["Document AI"] && (
+                  <div style={{ marginTop: 12, padding: 12, background: "var(--bg-card)", borderRadius: 8 }}>
+                    <strong>Document AI:</strong> {googleResults["Document AI"].entities?.length || 0} entities extracted
+                  </div>
+                )}
+                {googleResults["Firebase Hosting"] && (
+                  <div style={{ marginTop: 12, padding: 12, background: "var(--bg-card)", borderRadius: 8 }}>
+                    <strong>Hosting:</strong> {googleResults["Firebase Hosting"].siteUrl} (v{googleResults["Firebase Hosting"].version})
+                  </div>
+                )}
+                {googleResults["Cloud Storage"] && (
+                  <div style={{ marginTop: 12, padding: 12, background: "var(--bg-card)", borderRadius: 8 }}>
+                    <strong>Storage:</strong> {googleResults["Cloud Storage"].fileUrl} ({googleResults["Cloud Storage"].size} bytes)
+                  </div>
+                )}
+                {googleResults["BigQuery"] && (
+                  <div style={{ marginTop: 12, padding: 12, background: "var(--bg-card)", borderRadius: 8 }}>
+                    <strong>BigQuery:</strong> {googleResults["BigQuery"].totalRows} rows returned
+                  </div>
+                )}
+              </Section>
+            </>
+          )}
         </div>
       </div>
     </div>
@@ -625,7 +784,6 @@ export default function SettingsPanel({ onClose, onThemeChange }: { onClose: () 
   const analyzeSEO = async () => {
     setSeoLoading(true);
     try {
-      // Get current project URL from the editor
       const currentUrl = window.location.origin + "/preview/" + window.location.pathname.split('/').pop();
       const data = await analyzePageSpeed(currentUrl);
       setSeoData(data);
@@ -637,15 +795,51 @@ export default function SettingsPanel({ onClose, onThemeChange }: { onClose: () 
     }
   };
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  // Google AI Suite functions
+  const getCurrentUrl = () => window.location.origin + "/preview/" + window.location.pathname.split('/').pop();
+
+  const runGoogleApi = async (apiName: string, apiFunction: () => Promise<any>) => {
+    setGoogleLoading(apiName);
+    try {
+      const result = await apiFunction();
+      setGoogleResults(prev => ({ ...prev, [apiName]: result }));
+      toast.success(`${apiName} completed successfully`);
+    } catch (error: any) {
+      console.error(`${apiName} failed:`, error);
+      toast.error(`${apiName} failed: ${error.message}`);
+    } finally {
+      setGoogleLoading(null);
+    }
+  };
+
+  const toggleSection = (section: string) => {
+    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
+  };
+
+function Section({ title, children, collapsible = false, expanded = true, onToggle }: { 
+  title: string; 
+  children: React.ReactNode; 
+  collapsible?: boolean; 
+  expanded?: boolean; 
+  onToggle?: () => void; 
+}) {
   return (
     <div style={{ marginBottom: 28 }}>
       <div style={{
         fontSize: 10, fontWeight: 800, letterSpacing: 1,
         color: "var(--text-muted)", marginBottom: 12,
         textTransform: "uppercase",
-      }}>{title}</div>
-      {children}
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        cursor: collapsible ? "pointer" : "default",
+      }} onClick={collapsible && onToggle ? onToggle : undefined}>
+        <span>{title}</span>
+        {collapsible && (
+          <span style={{ fontSize: 12, marginLeft: 8 }}>
+            {expanded ? "▼" : "▶"}
+          </span>
+        )}
+      </div>
+      {(!collapsible || expanded) && children}
     </div>
   )
 }
