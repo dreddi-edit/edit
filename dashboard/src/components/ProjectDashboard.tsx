@@ -301,54 +301,25 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
 
   const checkOllama = async () => {
     setOllamaStatus("checking")
-
-    const isLocalPage =
-      window.location.hostname === "localhost" ||
-      window.location.hostname === "127.0.0.1"
-
-    if (!isLocalPage) {
-      try {
-        const r = await fetch(`${BASE}/api/ai/ollama-health`, {
-          credentials: "include",
-          signal: AbortSignal.timeout(3000),
-        })
-        const d = await r.json()
-        if (d?.ok) setOllamaStatus("running")
-        else setOllamaStatus("offline")
-      } catch {
-        setOllamaStatus("offline")
-      }
-      return
-    }
-
     try {
-      const r = await fetch("http://localhost:11434/api/tags", {
-        signal: AbortSignal.timeout(3000),
+      const r = await fetch(`/api/ai/ollama-health`, {
+        credentials: "include",
+        signal: AbortSignal.timeout(5000),
       })
-      if (r.ok) {
-        const d = await r.json()
-        const models = (d.models || []).map((m: any) => m.name) as string[]
+      const d = await r.json()
+      if (d?.ok) {
         setOllamaStatus("running")
-        if (models.length > 0) {
-          toast.success(`Ollama läuft ✓ · ${models.slice(0,3).join(", ")}`)
+        if (d.models?.length > 0) {
+          toast.success(`Ollama läuft ✓ · ${d.models.slice(0,3).join(", ")}`)
         } else {
           toast.warning("Ollama läuft aber keine Modelle gefunden. Führe: ollama pull qwen2.5-coder:7b aus")
         }
-        return
+      } else {
+        setOllamaStatus("offline")
       }
-    } catch {}
-
-    try {
-      await fetch("http://localhost:11434", {
-        signal: AbortSignal.timeout(2000),
-        mode: "no-cors"
-      })
-      setOllamaStatus("running")
-      toast.success("Ollama läuft ✓")
-      return
-    } catch {}
-
-    setOllamaStatus("offline")
+    } catch {
+      setOllamaStatus("offline")
+    }
   }
 
   const logout = async () => {
