@@ -117,7 +117,7 @@ import { registerProjectRoutes } from "./projects.js"
 import { sendPasswordReset } from "./email.js"
 import cors from "cors"
 import { proxy, asset } from "./proxy.js"
-import { claudeRewriteBlock, claudeGenerateLandingCopy } from "./claude.js"
+import { claudeRewriteBlock, claudeGenerateLandingCopy, claudeGenerateLandingHtml } from "./claude.js"
 import { geminiRewriteBlock } from "./gemini.js"
 import { parseInstruction } from "./aiNavigator.js"
 import { groqRewriteBlock } from "./groq.js"
@@ -363,7 +363,7 @@ app.post("/api/ai/demo-landing-copy", authMiddleware, async (req, res) => {
       return res.status(400).json({ ok: false, error: "Missing product name" })
     }
 
-    const result = await claudeGenerateLandingCopy({
+    const result = await claudeGenerateLandingHtml({
       name: String(name || "").trim(),
       description: String(description || "").trim(),
       audience: String(audience || "").trim(),
@@ -387,12 +387,12 @@ app.post("/api/ai/demo-landing-copy", authMiddleware, async (req, res) => {
       ok: true,
       model: "claude-sonnet-4-6",
       provider: "claude",
-      copy: result.copy,
+      html: result.html,
       usage: result.usage || null,
       cost_eur: deducted
     })
   } catch (error) {
-    console.error("Demo landing copy error:", error)
+    console.error("Demo landing HTML error:", error)
     return res.json({ ok: false, error: error.message })
   }
 })
