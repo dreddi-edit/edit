@@ -356,7 +356,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
     onLogout()
   }
 
-  const generateLandingPage = async () => {
+  const generateLandingPageTest = async () => {
     if (!landingName.trim()) { toast.warning("Produktname erforderlich"); return }
     setLandingGenerating(true)
 
@@ -1117,7 +1117,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
               </button>
 
               <button
-                onClick={generateLandingPage}
+                onClick={generateLandingPageTest}
                 disabled={landingGenerating}
                 style={{
                   height: 40,
