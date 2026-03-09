@@ -128,6 +128,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   const [landingAudience, setLandingAudience] = useState("")
   const [landingLang, setLandingLang] = useState<"english" | "german">("english")
   const [landingGenerating, setLandingGenerating] = useState(false)
+  const [landingComplexity, setLandingComplexity] = useState(5)
   const [templates, setTemplates] = useState<any[]>([])
   const [ollamaStatus, setOllamaStatus] = useState<"checking"|"running"|"offline">("checking")
   const [ollamaOs, setOllamaOs] = useState<"mac"|"windows"|"linux">("mac")
@@ -376,6 +377,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
           description: rawDesc,
           audience: rawAudience,
           language: lang,
+          complexity: landingComplexity,
         }),
       })
 
@@ -1160,6 +1162,22 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
               <option value="german">German</option>
             </select>
 
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ fontSize: 11, fontWeight: 800, display: "flex", justifyContent: "space-between", marginBottom: 8, color: theme === "light" ? "#475569" : "rgba(148,163,184,0.72)" }}>
+                <span>COMPLEXITY</span>
+                <span style={{ color: landingComplexity <= 3 ? "#22c55e" : landingComplexity <= 6 ? "#f59e0b" : "#6366f1" }}>
+                  {landingComplexity <= 3 ? "Simple (~3ct)" : landingComplexity <= 6 ? "Standard (~10ct)" : "Premium (~25ct)"}
+                </span>
+              </label>
+              <input
+                type="range" min={1} max={10} value={landingComplexity}
+                onChange={e => setLandingComplexity(Number(e.target.value))}
+                style={{ width: "100%", accentColor: "#6366f1", cursor: "pointer" }}
+              />
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "rgba(148,163,184,0.5)", marginTop: 4 }}>
+                <span>1 – Quick</span><span>5 – Balanced</span><span>10 – Premium</span>
+              </div>
+            </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
               <button
                 onClick={() => setShowLandingGen(false)}

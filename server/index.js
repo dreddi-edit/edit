@@ -367,7 +367,7 @@ app.get("/api/ai/ollama-health", async (_req, res) => {
 
 app.post("/api/ai/demo-landing-copy", authMiddleware, async (req, res) => {
   try {
-    const { name, description, audience, language } = req.body || {}
+    const { name, description, audience, language, complexity } = req.body || {}
 
     if (!String(name || "").trim()) {
       return res.status(400).json({ ok: false, error: "Missing product name" })
@@ -378,6 +378,7 @@ app.post("/api/ai/demo-landing-copy", authMiddleware, async (req, res) => {
       description: String(description || "").trim(),
       audience: String(audience || "").trim(),
       language: String(language || "english").trim(),
+      complexity: Math.min(10, Math.max(1, Number(complexity || 5))),
       model: "claude-sonnet-4-6"
     })
 

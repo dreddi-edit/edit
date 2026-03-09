@@ -43,22 +43,25 @@ export async function claudeGenerateLandingCopy({ name, description = "", audien
     '{"badge":"","headline":"","subheadline":"","stat1":"","stat1Label":"","stat2":"","stat2Label":"","stat3":"","stat3Label":"","featuresTitle":"","featuresText":"","feature1Title":"","feature1Text":"","feature2Title":"","feature2Text":"","feature3Title":"","feature3Text":"","productTitle":"","productText":"","bullet1Title":"","bullet1Text":"","bullet2Title":"","bullet2Text":"","bullet3Title":"","bullet3Text":"","useTitle":"","use1Title":"","use1Text":"","use2Title":"","use2Text":"","use3Title":"","use3Text":"","pricingTitle":"","pricingText":"","priceNote1":"","priceNote2":"","priceNote3":"","ctaTitle":"","ctaText":"","ctaPrimary":"","ctaSecondary":"","navFeatures":"","navProduct":"","navUseCases":"","navPricing":"","startTrial":"","seeProduct":"","pricingStarter":"","pricingPro":"","pricingScale":"","footer":""}'
   ].join("\n")
 
+  const simpleSections = ["Hero section", "3 feature cards", "CTA section"]
+  const standardSections = ["Hero", "Feature cards", "Stats/metrics", "Pricing", "FAQ", "CTA", "Footer"]
+  const premiumSections = ["Hero", "Dashboard mockup", "SVG charts", "Feature cards", "Stats", "Use cases", "Pricing", "FAQ accordion", "Testimonials", "CTA", "Footer"]
+  const sections = complexity <= 3 ? simpleSections : complexity <= 6 ? standardSections : premiumSections
+
   const user = [
     `Language: ${language}`,
     `Product name: ${name || ""}`,
     `Description: ${description || ""}`,
     `Target audience: ${audience || ""}`,
     "",
+    `Build a ${complexity <= 3 ? "clean simple" : complexity <= 6 ? "professional" : "visually impressive premium"} landing page.`,
     "Requirements:",
-    "- Make the copy significantly better than the raw input.",
-    "- The headline must feel premium and polished.",
-    "- The subheadline must clearly explain the value proposition.",
-    "- Feature titles should be concise and strong.",
-    "- Feature texts should sound useful and believable.",
-    "- Pricing text should sound like a real SaaS landing page.",
-    "- CTA text should feel persuasive.",
-    "- Avoid buzzword spam and obvious filler.",
-    "- Output JSON only."
+    "- Full HTML document only",
+    "- Embedded CSS only",
+    "- Minimal embedded JS only if needed",
+    ...sections.map(s => `- Include: ${s}`),
+    "- Strong marketing copy, no lorem ipsum",
+    "- Output HTML only, no markdown"
   ].join("\n")
 
   const resp = await fetch("https://api.anthropic.com/v1/messages", {
@@ -96,7 +99,7 @@ export async function claudeGenerateLandingCopy({ name, description = "", audien
   return { copy: parsed, usage: data.usage || null }
 }
 
-export async function claudeGenerateLandingHtml({ name, description = "", audience = "", language = "english", model = "claude-sonnet-4-6" }) {
+export async function claudeGenerateLandingHtml({ name, description = "", audience = "", language = "english", model = "claude-sonnet-4-6", complexity = 5 }) {
   const key = process.env.ANTHROPIC_API_KEY
   if (!key) throw new Error("ANTHROPIC_API_KEY is not set")
 
@@ -151,7 +154,7 @@ export async function claudeGenerateLandingHtml({ name, description = "", audien
     },
     body: JSON.stringify({
       model,
-      max_tokens: 8000,
+      max_tokens: complexity <= 3 ? 4000 : complexity <= 6 ? 8000 : 16000,
       temperature: 0.8,
       system,
       messages: [{ role: "user", content: user }]
