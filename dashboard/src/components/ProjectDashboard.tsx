@@ -114,6 +114,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   const [templateExtracting, setTemplateExtracting] = useState(false)
   const [templates, setTemplates] = useState<any[]>([])
   const [ollamaStatus, setOllamaStatus] = useState<"checking"|"running"|"offline">("checking")
+  const [ollamaOs, setOllamaOs] = useState<"mac"|"windows"|"linux">("mac")
 
   useEffect(() => { 
     load()
@@ -244,32 +245,36 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   }
 
   const checkOllama = async () => {
+    setOllamaStatus("checking")
+    // Try browser-direct first (no-cors just to check if port is open)
     try {
-      // Check directly from browser to localhost - works even when app is on Railway
       const r = await fetch("http://localhost:11434/api/tags", { 
-        signal: AbortSignal.timeout(2000),
-        mode: "cors"
+        signal: AbortSignal.timeout(3000),
       })
       if (r.ok) {
         const d = await r.json()
-        const models = (d.models || []).map((m: any) => m.name)
+        const models = (d.models || []).map((m: any) => m.name) as string[]
         setOllamaStatus("running")
         if (models.length > 0) {
-          toast.success(`Ollama läuft · Modelle: ${models.slice(0,3).join(", ")}`)
+          toast.success(`Ollama läuft ✓ · ${models.slice(0,3).join(", ")}`)
+        } else {
+          toast.warning("Ollama läuft aber keine Modelle gefunden. Führe: ollama pull qwen2.5-coder:7b aus")
         }
-      } else {
-        setOllamaStatus("offline")
+        return
       }
-    } catch {
-      // Fallback: try server-side check
-      try {
-        const r = await fetch("/api/ai/ollama-health", { signal: AbortSignal.timeout(2000) })
-        const d = await r.json()
-        setOllamaStatus(d.ok ? "running" : "offline")
-      } catch {
-        setOllamaStatus("offline")
-      }
-    }
+    } catch {}
+    // Fallback: no-cors ping (cannot read response but can detect if port open)
+    try {
+      await fetch("http://localhost:11434", { 
+        signal: AbortSignal.timeout(2000),
+        mode: "no-cors"
+      })
+      // If we get here without throwing, port is open
+      setOllamaStatus("running")
+      toast.success("Ollama läuft ✓")
+      return
+    } catch {}
+    setOllamaStatus("offline")
   }
 
   const logout = async () => {
@@ -500,30 +505,79 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
                     {ollamaStatus === "checking" ? "PRÜFE..." : ollamaStatus === "running" ? "✓ LÄUFT" : "✕ OFFLINE"}
                   </div>
                 </div>
-                {ollamaStatus === "offline" && (
-                  <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.15)" }}>
-                    <div style={{ fontSize: 11, color: "rgba(239,68,68,0.7)", marginBottom: 8 }}>
-                      Ollama ist nicht installiert oder läuft nicht. Installiere es für kostenlose KI-Nutzung.
-                    </div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer" style={{
-                        height: 28, padding: "0 12px", borderRadius: 6, border: "none",
-                        background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-                        color: "white", fontWeight: 700, fontSize: 11, cursor: "pointer",
-                        display: "flex", alignItems: "center", gap: 5, textDecoration: "none",
-                      }}>↓ Ollama installieren</a>
+                {ollamaStatus === "offline" && (() => {
+                  const os = ollamaOs;
+                  const steps: Record<"mac"|"windows"|"linux", {title: string, cmd?: string, link?: string, linkLabel?: string}[]> = {
+                    mac: [
+                      { title: "Installieren", link: "https://ollama.com/download/mac", linkLabel: "↓ ollama.com/download" },
+                      { title: "Terminal öffnen & starten", cmd: "ollama serve" },
+                      { title: "Modell laden", cmd: "ollama pull qwen2.5-coder:7b" },
+                    ],
+                    windows: [
+                      { title: "Installieren", link: "https://ollama.com/download/windows", linkLabel: "↓ ollama.com/download" },
+                      { title: "Nach Installation startet Ollama automatisch" },
+                      { title: "Modell laden (CMD/PowerShell)", cmd: "ollama pull qwen2.5-coder:7b" },
+                    ],
+                    linux: [
+                      { title: "Installieren (Terminal)", cmd: "curl -fsSL https://ollama.com/install.sh | sh" },
+                      { title: "Starten", cmd: "ollama serve" },
+                      { title: "Modell laden", cmd: "ollama pull qwen2.5-coder:7b" },
+                    ],
+                  };
+                  return (
+                    <div style={{ marginTop: 10, padding: "12px 14px", borderRadius: 8, background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.12)" }}>
+                      <div style={{ fontSize: 11, color: "rgba(239,68,68,0.7)", marginBottom: 10 }}>
+                        Ollama nicht erreichbar – folge der Checkliste:
+                      </div>
+                      {/* OS Tabs */}
+                      <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
+                        {(["mac","windows","linux"] as const).map(o => (
+                          <button key={o} onClick={() => setOllamaOs(o)} style={{
+                            padding: "3px 10px", borderRadius: 5, fontSize: 10, fontWeight: 700,
+                            cursor: "pointer", border: "1px solid",
+                            background: os === o ? "rgba(99,102,241,0.2)" : "transparent",
+                            color: os === o ? "rgba(99,102,241,0.9)" : "rgba(148,163,184,0.5)",
+                            borderColor: os === o ? "rgba(99,102,241,0.3)" : "rgba(148,163,184,0.15)",
+                          }}>{o === "mac" ? "macOS" : o === "windows" ? "Windows" : "Linux"}</button>
+                        ))}
+                      </div>
+                      {/* Steps */}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {steps[os].map((step, i) => (
+                          <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                            <div style={{
+                              minWidth: 18, height: 18, borderRadius: "50%", background: "rgba(99,102,241,0.15)",
+                              border: "1px solid rgba(99,102,241,0.25)", color: "rgba(99,102,241,0.8)",
+                              fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", marginTop: 1,
+                            }}>{i+1}</div>
+                            <div>
+                              <div style={{ fontSize: 11, color: "rgba(200,200,210,0.8)", marginBottom: 2 }}>{step.title}</div>
+                              {step.cmd && (
+                                <code style={{
+                                  display: "block", fontSize: 10, padding: "3px 8px", borderRadius: 4,
+                                  background: "rgba(0,0,0,0.35)", color: "rgba(180,220,180,0.9)",
+                                  fontFamily: "monospace", letterSpacing: 0.3,
+                                }}>{step.cmd}</code>
+                              )}
+                              {step.link && (
+                                <a href={step.link} target="_blank" rel="noopener noreferrer" style={{
+                                  fontSize: 10, color: "rgba(99,102,241,0.8)", textDecoration: "none",
+                                  padding: "2px 8px", borderRadius: 4, border: "1px solid rgba(99,102,241,0.25)",
+                                  background: "rgba(99,102,241,0.1)", display: "inline-block",
+                                }}>{step.linkLabel}</a>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                       <button onClick={checkOllama} style={{
-                        height: 28, padding: "0 10px", borderRadius: 6,
-                        border: "1px solid rgba(148,163,184,0.2)",
-                        background: "transparent", color: "rgba(148,163,184,0.6)",
-                        fontSize: 11, cursor: "pointer",
+                        marginTop: 12, height: 28, padding: "0 12px", borderRadius: 6, width: "100%",
+                        border: "1px solid rgba(148,163,184,0.2)", background: "rgba(148,163,184,0.06)",
+                        color: "rgba(148,163,184,0.7)", fontSize: 11, cursor: "pointer", fontWeight: 600,
                       }}>↺ Erneut prüfen</button>
                     </div>
-                    <div style={{ marginTop: 8, fontSize: 10, color: "rgba(148,163,184,0.4)", lineHeight: 1.5 }}>
-                      Nach der Installation: <code style={{ background: "rgba(0,0,0,0.3)", padding: "1px 5px", borderRadius: 3 }}>ollama pull llama3.1</code> ausführen
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
                 {ollamaStatus === "running" && (
                   <div style={{ marginTop: 6, fontSize: 11, color: "rgba(34,197,94,0.6)" }}>
                     Ollama läuft lokal – KI-Anfragen sind kostenlos

@@ -1143,6 +1143,8 @@ const [aiLoading, setAiLoading] = useState(false);
       for (const node of inputNodes.slice(0, 30)) {
         const tag = node.tagName.toLowerCase();
         const type = tag === "input" ? ((node.getAttribute("type") || "text").toLowerCase()) : tag;
+        // Skip hidden fields - they are internal WordPress/plugin fields
+        if (type === "hidden") continue;
         const name = (node.getAttribute("name") || node.getAttribute("id") || "").trim();
         const placeholder = (node.getAttribute("placeholder") || "").trim();
         let labelText = "";
