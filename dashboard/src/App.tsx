@@ -349,6 +349,7 @@ const assignPlan = async (userId: number, userEmail: string) => {
 
   if (authUser && authUser.email === userEmail) {
     setDemoPlan(plan)
+    try { localStorage.setItem("se_demo_plan", plan) } catch {}
   }
 
   alert(`✅ Demo plan "${plan}" assigned to ${userEmail}`)

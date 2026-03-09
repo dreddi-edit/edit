@@ -104,6 +104,9 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   const [showCredits, setShowCredits] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [balance, setBalance] = useState<number | null>(null)
+  const [demoPlan, setDemoPlan] = useState<"basis"|"starter"|"pro"|"scale">(
+    ((localStorage.getItem("se_demo_plan") as "basis"|"starter"|"pro"|"scale") || "basis")
+  )
   const [theme, setTheme] = useState<"dark"|"light">(
     (localStorage.getItem("se_theme") as "dark"|"light") || "dark"
   )
@@ -125,6 +128,48 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   useEffect(() => {
     localStorage.setItem("se_theme", theme)
   }, [theme])
+
+  const planMeta: Record<"basis"|"starter"|"pro"|"scale", { label: string; price: string; border: string; bg: string; accent: string }> = {
+    basis: {
+      label: "Basis",
+      price: "€9/mo",
+      border: "rgba(99,102,241,0.35)",
+      bg: "rgba(99,102,241,0.12)",
+      accent: "rgba(99,102,241,0.95)",
+    },
+    starter: {
+      label: "Starter",
+      price: "€29/mo",
+      border: "rgba(34,197,94,0.35)",
+      bg: "rgba(34,197,94,0.12)",
+      accent: "rgba(34,197,94,0.95)",
+    },
+    pro: {
+      label: "Pro",
+      price: "€79/mo",
+      border: "rgba(168,85,247,0.35)",
+      bg: "rgba(168,85,247,0.12)",
+      accent: "rgba(168,85,247,0.95)",
+    },
+    scale: {
+      label: "Scale",
+      price: "€149/mo",
+      border: "rgba(245,158,11,0.35)",
+      bg: "rgba(245,158,11,0.12)",
+      accent: "rgba(245,158,11,0.95)",
+    },
+  }
+
+  const activePlanMeta = planMeta[demoPlan]
+
+  useEffect(() => {
+    const syncPlan = () => {
+      const p = (localStorage.getItem("se_demo_plan") as "basis"|"starter"|"pro"|"scale") || "basis"
+      setDemoPlan(p)
+    }
+    window.addEventListener("focus", syncPlan)
+    return () => window.removeEventListener("focus", syncPlan)
+  }, [])
 
   const takeScreenshot = async (projectId: number, url: string) => {
     if (!url) return
@@ -343,6 +388,36 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
 
         {/* Right */}
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{
+            minHeight: 32,
+            padding: "5px 10px",
+            borderRadius: 8,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            border: `1px solid ${activePlanMeta.border}`,
+            background: activePlanMeta.bg,
+            color: "white",
+            lineHeight: 1.1,
+          }}>
+            <div style={{
+              width: 8,
+              height: 8,
+              borderRadius: 999,
+              background: activePlanMeta.accent,
+              boxShadow: `0 0 10px ${activePlanMeta.accent}`,
+              flexShrink: 0,
+            }} />
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              <span style={{ fontSize: 10, fontWeight: 900, color: activePlanMeta.accent }}>
+                PLAN · {activePlanMeta.label}
+              </span>
+              <span style={{ fontSize: 10, opacity: 0.8 }}>
+                {activePlanMeta.price}
+              </span>
+            </div>
+          </div>
+
           <button onClick={() => setShowCredits(true)} style={{
             height: 32, padding: "0 12px", borderRadius: 8,
             border: balance !== null && balance <= 0.01 ? "1px solid rgba(239,68,68,0.4)" : "1px solid rgba(255,255,255,0.1)",
