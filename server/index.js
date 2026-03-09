@@ -114,6 +114,7 @@ import { registerOrgRoutes } from "./organisations.js"
 import { registerStripeRoutes } from "./stripe.js"
 import { registerScreenshotRoutes } from "./screenshot.js"
 import { registerProjectRoutes } from "./projects.js"
+import { registerTemplateRoutes } from "./templates.js"
 import { sendPasswordReset } from "./email.js"
 import cors from "cors"
 import { proxy, asset } from "./proxy.js"
@@ -742,6 +743,7 @@ app.get(['/wp-content/*', '/wp-includes/*', '/_static/*'], (req, res) => {
 
 registerAuthRoutes(app)
 registerProjectRoutes(app)
+registerTemplateRoutes(app)
 registerCreditRoutes(app)
 registerSettingsRoutes(app)
 registerOrgRoutes(app)
