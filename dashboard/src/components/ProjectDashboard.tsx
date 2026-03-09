@@ -433,6 +433,12 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
     }
   }
 
+  const deleteTemplate = async (id: number) => {
+    if (!confirm("Template löschen?")) return
+    await fetch(`/api/templates/${id}`, { method: "DELETE", credentials: "include" })
+    loadTemplates()
+  }
+
   const QUICK_ACTIONS = [
     {
       icon: "+",
@@ -627,6 +633,60 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
               <ProjectCard key={p.id} p={p} onOpen={() => onOpen(p)} onDelete={() => del(p.id, p.name)} theme={theme} />
             ))}
           </div>
+
+          {/* Templates Section */}
+          {templates.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: theme === "light" ? "#94a3b8" : "rgba(148,163,184,0.4)", marginBottom: 16, textTransform: "uppercase" }}>Templates</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {templates.map(t => (
+                  <div key={t.id} style={{
+                    borderRadius: 14, cursor: "pointer", overflow: "hidden",
+                    border: `1px solid ${theme === "light" ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.07)"}`,
+                    background: theme === "light" ? "#ffffff" : "rgba(15,20,35,0.9)",
+                    transition: "transform 0.15s, border-color 0.15s, box-shadow 0.15s",
+                  }}
+                  onMouseEnter={e => {
+                    const el = e.currentTarget as HTMLElement
+                    el.style.transform = "translateY(-3px)"
+                    el.style.borderColor = theme === "light" ? "rgba(99,102,241,0.2)" : "rgba(99,102,241,0.3)"
+                    el.style.boxShadow = theme === "light" ? "0 10px 30px rgba(0,0,0,0.1)" : "0 10px 30px rgba(0,0,0,0.3)"
+                  }}
+                  onMouseLeave={e => {
+                    const el = e.currentTarget as HTMLElement
+                    el.style.transform = "translateY(0)"
+                    el.style.borderColor = theme === "light" ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.07)"
+                    el.style.boxShadow = "none"
+                  }}>
+                    <div style={{ padding: "16px" }}>
+                      <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, color: theme === "light" ? "#0f172a" : "white" }}>{t.name}</div>
+                      {t.url && (
+                        <div style={{ fontSize: 12, color: theme === "light" ? "#64748b" : "rgba(148,163,184,0.7)", marginBottom: 8 }}>
+                          {t.url}
+                        </div>
+                      )}
+                      <div style={{ fontSize: 11, color: theme === "light" ? "#94a3b8" : "rgba(148,163,184,0.5)", marginBottom: 12 }}>
+                        {new Date(t.created_at).toLocaleDateString('de-DE')}
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button onClick={() => applyTemplate(t.id)} style={{
+                          flex: 1, height: 32, borderRadius: 8, border: "none",
+                          background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                          color: "white", fontWeight: 600, cursor: "pointer", fontSize: 12,
+                        }}>Apply</button>
+                        <button onClick={() => deleteTemplate(t.id)} style={{
+                          flex: 1, height: 32, borderRadius: 8,
+                          border: `1px solid ${theme === "light" ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.07)"}`,
+                          background: "transparent", color: theme === "light" ? "#ef4444" : "#f87171",
+                          cursor: "pointer", fontSize: 12,
+                        }}>Delete</button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Rechte Spalte – Actions + Info */}
