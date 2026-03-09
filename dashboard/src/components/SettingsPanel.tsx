@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { toast } from "./Toast"
-import { getRequireApproval, setRequireApproval } from "../approval-settings"
+import { getRequireApproval, setRequireApproval, getApprovalThreshold, setApprovalThreshold } from "../approval-settings"
 
 const BASE = ""
 
@@ -22,6 +22,8 @@ export default function SettingsPanel({ onClose, onThemeChange }: { onClose: () 
   const [tab, setTab] = useState<"general" | "apikeys" | "org">("general")
   const [settings, setSettings] = useState<Settings | null>(null)
   const [approvalOn, setApprovalOn] = useState(getRequireApproval())
+  const [approvalThreshold, setApprovalThresholdState] = useState(getApprovalThreshold())
+  const [onlyOwnKey, setOnlyOwnKey] = useState(false)
 
   // API Keys
   const [myKeys, setMyKeys] = useState<ApiKey[]>([])
@@ -278,10 +280,24 @@ export default function SettingsPanel({ onClose, onThemeChange }: { onClose: () 
                 </div>
                 <Toggle on={approvalOn} onChange={v => { setApprovalOn(v); setRequireApproval(v) }} />
               </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-card)", marginTop: 8 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>Approval ab Betrag (€)</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>Calls unter diesem Limit gehen direkt durch</div>
+                </div>
+                <input type="number" min="0" step="0.01" value={approvalThreshold} onChange={e => { const v = parseFloat(e.target.value) || 0; setApprovalThresholdState(v); setApprovalThreshold(v) }} style={{ width: 70, padding: "6px 8px", borderRadius: 8, border: "1px solid var(--border)", background: "var(--bg-card)", color: "white", fontSize: 13, textAlign: "right" }} />
+              </div>
             </Section>
 
             <Section title="KI Modelle">
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", borderRadius: 10, border: "1px solid var(--border)", background: "var(--bg-card)", marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>Nur eigenen API Key nutzen</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 3 }}>{onlyOwnKey ? "Alle System-Modelle deaktiviert" : "Alle verfügbaren Modelle aktiv"}</div>
+                </div>
+                <Toggle on={onlyOwnKey} onChange={v => { setOnlyOwnKey(v); if (v) { saveSettings({ disabled_models: ALL_MODELS.map(m => m.value) }) } else { saveSettings({ disabled_models: [] }) } }} />
+              </div>
                 {ALL_MODELS.map(m => {
                   const disabled = settings.disabled_models.includes(m.value)
                   return (

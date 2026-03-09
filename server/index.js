@@ -777,9 +777,10 @@ app.get("/api/admin/me", authMiddleware, (req, res) => {
 app.get("/api/admin/users", authMiddleware, ownerOnly, (_req, res) => {
   try {
     const rows = db.prepare(`
-      SELECT u.id, u.email, u.name, u.created_at, COALESCE(c.balance_eur, 0) as credits
+      SELECT u.id, u.email, u.name, u.created_at, COALESCE(c.balance_eur, 0) as credits, COALESCE(s.plan, 'basis') as plan
       FROM users u
       LEFT JOIN credits c ON u.id = c.user_id
+      LEFT JOIN user_settings s ON u.id = s.user_id
       ORDER BY u.id DESC
     `).all()
     

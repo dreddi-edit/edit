@@ -259,15 +259,14 @@ const loadAdminUsers = async () => {
   try {
     const r = await fetch("/api/admin/users", { credentials: "include" })
     const d = await r.json()
-    if (d.ok) setAdminUsers(d.users || [])
-    else alert(d.error || "Admin load failed")
-  } catch {
-    alert("Admin load failed")
-  } finally {
-    setAdminLoading(false)
-  }
+    if (d.ok) {
+      setAdminUsers(d.users || [])
+      const plans: Record<number, any> = {}
+      for (const u of d.users || []) { plans[u.id] = u.plan || "basis" }
+      setAdminUserPlans(plans)
+    } else alert(d.error || "Admin load failed")
+  } catch { alert("Admin load failed") } finally { setAdminLoading(false) }
 }
-
 const deleteUser = async (userId: number, userEmail: string) => {
   if (!confirm(`Are you sure you want to delete user "${userEmail}"? This will also delete all their projects.`)) {
     return
@@ -598,149 +597,65 @@ useEffect(() => {
   )
 
   if (view === "admin") {
+    const planColors: Record<string, string> = { basis: "#6366f1", starter: "#22c55e", pro: "#a855f7", scale: "#f59e0b" }
     return (
-      <div style={{ minHeight: "100vh", background: "#0b1220", color: "white", padding: 24 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-          <div>
-            <div style={{ fontSize: 28, fontWeight: 900 }}>Owner Admin</div>
-            <div style={{ fontSize: 13, color: "#94a3b8", marginTop: 6 }}>Minimal internal admin console</div>
-          </div>
-          <div style={{ display: "flex", gap: 10 }}>
-          <button
-            onClick={() => setShowCreateUser(true)}
-            style={{ height: 40, padding: "0 14px", borderRadius: 10, border: "1px solid #334155", background: "#111827", color: "white", cursor: "pointer", fontWeight: 700 }}
-          >
-            Create User
-          </button>
-          <button
-            onClick={loadAdminUsers}
-            style={{ height: 40, padding: "0 14px", borderRadius: 10, border: "1px solid #334155", background: "#111827", color: "white", cursor: "pointer", fontWeight: 700 }}
-          >
-            {adminLoading ? "Loading..." : "Reload Users"}
-          </button>
-          <button
-            onClick={() => setView("dashboard")}
-            style={{ height: 40, padding: "0 14px", borderRadius: 10, border: "1px solid #334155", background: "#111827", color: "white", cursor: "pointer", fontWeight: 700 }}
-          >
-            Back
-          </button>
-        </div>
-        </div>
-
-        <div style={{ background: "#111827", border: "1px solid #334155", borderRadius: 16, overflow: "hidden" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "80px 1.8fr 1fr 120px 1fr 120px", padding: 14, background: "#1f2937", fontWeight: 800 }}>
-            <div>ID</div>
-            <div>Email</div>
-            <div>Name</div>
-            <div>Plan</div>
-            <div>Created</div>
-            <div>Actions</div>
-          </div>
-
-          {adminUsers.map((u: any) => (
-            <div key={u.id} style={{ display: "grid", gridTemplateColumns: "80px 1.8fr 1fr 120px 1fr 120px", padding: 14, borderTop: "1px solid #1f2937", alignItems: "center" }}>
-              <div>{u.id}</div>
-              <div>{u.email}</div>
-              <div>{u.name || "-"}</div>
-              <div>
-                <span style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  minWidth: 72,
-                  padding: "6px 10px",
-                  borderRadius: 999,
-                  fontSize: 11,
-                  fontWeight: 800,
-                  border: "1px solid rgba(99,102,241,0.35)",
-                  background: "rgba(99,102,241,0.12)",
-                  color: "white",
-                  textTransform: "capitalize",
-                }}>
-                  {adminUserPlans[u.id] || "basis"}
-                </span>
-              </div>
-              <div>{u.created_at || "-"}</div>
-              <div style={{ display: "flex", gap: 5, flexDirection: "column" }}>
-                <button
-                  onClick={() => addCredits(u.id, u.email)}
-                  style={{ padding: "6px 8px", borderRadius: 4, border: "1px solid #10b981", background: "#10b981", color: "white", cursor: "pointer", fontSize: 11, fontWeight: 600 }}
-                >
-                  💰 Add Credits
-                </button>
-                <button
-                  onClick={() => assignPlan(u.id, u.email)}
-                  style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid #6366f1", background: "#6366f1", color: "white", cursor: "pointer", fontSize: 11 }}
-                >
-                  🧩 Plan
-                </button>
-                <button
-                  onClick={() => resetPassword(u.id, u.email)}
-                  style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid #f59e0b", background: "#f59e0b", color: "white", cursor: "pointer", fontSize: 11 }}
-                >
-                  🔑 Reset PW
-                </button>
-                <button
-                  onClick={() => deleteUser(u.id, u.email)}
-                  style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid #dc2626", background: "#dc2626", color: "white", cursor: "pointer", fontSize: 11 }}
-                >
-                  🗑️ Delete
-                </button>
-              </div>
+      <div style={{ minHeight: "100vh", background: "#060b14", color: "white", fontFamily: "system-ui, sans-serif", padding: "32px 40px" }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32 }}>
+            <div>
+              <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5 }}>Admin Console</div>
+              <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>{adminUsers.length} users · internal only</div>
             </div>
-          ))}
-
-          {!adminLoading && adminUsers.length === 0 && (
-            <div style={{ padding: 20, color: "#94a3b8" }}>No users loaded yet.</div>
-          )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setShowCreateUser(true)} style={{ height: 36, padding: "0 16px", borderRadius: 8, border: "1px solid #1e293b", background: "#0f172a", color: "white", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>+ New User</button>
+              <button onClick={loadAdminUsers} style={{ height: 36, padding: "0 16px", borderRadius: 8, border: "1px solid #1e293b", background: "#0f172a", color: "#94a3b8", cursor: "pointer", fontSize: 13 }}>{adminLoading ? "Loading…" : "↻ Refresh"}</button>
+              <button onClick={() => setView("dashboard")} style={{ height: 36, padding: "0 16px", borderRadius: 8, border: "1px solid #1e293b", background: "#0f172a", color: "#94a3b8", cursor: "pointer", fontSize: 13 }}>← Back</button>
+            </div>
+          </div>
+          <div style={{ background: "#0d1525", border: "1px solid #1e293b", borderRadius: 14, overflow: "hidden" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "48px 1fr 140px 100px 100px 160px", padding: "10px 20px", background: "#0f172a", borderBottom: "1px solid #1e293b", fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: 0.8 }}>
+              <div>ID</div><div>User</div><div>Plan</div><div>Credits</div><div>Joined</div><div style={{ textAlign: "right" }}>Actions</div>
+            </div>
+            {adminUsers.map((u: any) => {
+              const plan = adminUserPlans[u.id] || "basis"
+              const color = planColors[plan] || "#6366f1"
+              return (
+                <div key={u.id} style={{ display: "grid", gridTemplateColumns: "48px 1fr 140px 100px 100px 160px", padding: "14px 20px", borderBottom: "1px solid #0f172a", alignItems: "center" }}>
+                  <div style={{ fontSize: 12, color: "#334155", fontWeight: 700 }}>#{u.id}</div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{u.email}</div>
+                    <div style={{ fontSize: 11, color: "#475569", marginTop: 2 }}>{u.name || "—"}</div>
+                  </div>
+                  <div>
+                    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: `${color}18`, border: `1px solid ${color}40`, color }}>
+                      {plan.charAt(0).toUpperCase() + plan.slice(1)}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 13, color: "#94a3b8" }}>€{Number(u.credits || 0).toFixed(2)}</div>
+                  <div style={{ fontSize: 11, color: "#475569" }}>{(u.created_at || "").slice(0, 10)}</div>
+                  <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                    <button onClick={() => addCredits(u.id, u.email)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #10b98130", background: "#10b98115", color: "#10b981", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Credits</button>
+                    <button onClick={() => assignPlan(u.id, u.email)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #6366f130", background: "#6366f115", color: "#818cf8", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Plan</button>
+                    <button onClick={() => resetPassword(u.id, u.email)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #f59e0b30", background: "#f59e0b15", color: "#fbbf24", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>PW</button>
+                    <button onClick={() => deleteUser(u.id, u.email)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #ef444430", background: "#ef444415", color: "#f87171", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Del</button>
+                  </div>
+                </div>
+              )
+            })}
+            {!adminLoading && adminUsers.length === 0 && (
+              <div style={{ padding: 32, color: "#334155", textAlign: "center", fontSize: 13 }}>No users yet. Click Refresh.</div>
+            )}
+          </div>
         </div>
-
-        {/* Create User Modal */}
         {showCreateUser && (
-          <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-            <div style={{ background: "#1f2937", padding: 24, borderRadius: 12, border: "1px solid #334155", width: 400 }}>
-              <h3 style={{ margin: "0 0 16px 0", color: "white" }}>Create New User</h3>
-              <input
-                type="email"
-                placeholder="Email"
-                value={newUser.email}
-                onChange={(e) => setNewUser({...newUser, email: e.target.value})}
-                style={{ width: "100%", padding: 8, marginBottom: 8, borderRadius: 4, border: "1px solid #334155", background: "#111827", color: "white" }}
-              />
-              <input
-                type="password"
-                placeholder="Password"
-                value={newUser.password}
-                onChange={(e) => setNewUser({...newUser, password: e.target.value})}
-                style={{ width: "100%", padding: 8, marginBottom: 8, borderRadius: 4, border: "1px solid #334155", background: "#111827", color: "white" }}
-              />
-              <input
-                type="text"
-                placeholder="Name (optional)"
-                value={newUser.name}
-                onChange={(e) => setNewUser({...newUser, name: e.target.value})}
-                style={{ width: "100%", padding: 8, marginBottom: 8, borderRadius: 4, border: "1px solid #334155", background: "#111827", color: "white" }}
-              />
-              <input
-                type="number"
-                placeholder="Credits in dollars (default 0)"
-                value={newUser.credits}
-                onChange={(e) => setNewUser({...newUser, credits: Number(e.target.value)})}
-                style={{ width: "100%", padding: 8, marginBottom: 16, borderRadius: 4, border: "1px solid #334155", background: "#111827", color: "white" }}
-              />
-              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                <button
-                  onClick={() => { setShowCreateUser(false); setNewUser({ email: "", password: "", name: "", credits: 0 }) }}
-                  style={{ padding: "8px 16px", borderRadius: 4, border: "1px solid #334155", background: "#111827", color: "white", cursor: "pointer" }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={createUser}
-                  style={{ padding: "8px 16px", borderRadius: 4, border: "1px solid #6366f1", background: "#6366f1", color: "white", cursor: "pointer" }}
-                >
-                  Create User
-                </button>
+          <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+            <div style={{ background: "#0d1525", padding: 28, borderRadius: 14, border: "1px solid #1e293b", width: 400 }}>
+              <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 20 }}>Create User</div>
+              {["email","password","name"].map(f => (<input key={f} placeholder={f} type={f==="password"?"password":"text"} value={(newUser as any)[f]} onChange={e => setNewUser((p:any) => ({...p,[f]:e.target.value}))} style={{ display:"block", width:"100%", marginBottom:10, padding:"9px 12px", borderRadius:8, border:"1px solid #1e293b", background:"#060b14", color:"white", fontSize:13, boxSizing:"border-box" }} />))}
+              <input placeholder="credits (€)" type="number" value={newUser.credits} onChange={e => setNewUser((p:any) => ({...p,credits:Number(e.target.value)}))} style={{ display:"block", width:"100%", marginBottom:16, padding:"9px 12px", borderRadius:8, border:"1px solid #1e293b", background:"#060b14", color:"white", fontSize:13, boxSizing:"border-box" }} />
+              <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
+                <button onClick={() => setShowCreateUser(false)} style={{ padding:"8px 16px", borderRadius:8, border:"1px solid #1e293b", background:"transparent", color:"#94a3b8", cursor:"pointer", fontSize:13 }}>Cancel</button>
+                <button onClick={createUser} style={{ padding:"8px 16px", borderRadius:8, border:"none", background:"#6366f1", color:"white", cursor:"pointer", fontSize:13, fontWeight:700 }}>Create</button>
               </div>
             </div>
           </div>
