@@ -1,10 +1,11 @@
-import puppeteer from "puppeteer-core"
+import puppeteer from "puppeteer"
+import { uploadThumbnail } from "./cloudStorage.js"
 import { authMiddleware } from "./auth.js"
 import db from "./db.js"
 import path from "path"
 import fs from "fs"
 
-const CHROME_PATH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+const CHROME_PATH = process.env.CHROME_PATH || null
 const THUMB_DIR = path.join(process.cwd(), "thumbnails")
 
 if (!fs.existsSync(THUMB_DIR)) fs.mkdirSync(THUMB_DIR)
@@ -18,7 +19,7 @@ export function registerScreenshotRoutes(app) {
     let browser
     try {
       browser = await puppeteer.launch({
-        executablePath: CHROME_PATH,
+        executablePath: CHROME_PATH || undefined,
         headless: true,
         args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
       })
@@ -32,10 +33,15 @@ export function registerScreenshotRoutes(app) {
 
       await page.screenshot({ path: filepath, type: "jpeg", quality: 70, clip: { x: 0, y: 0, width: 1280, height: 800 } })
 
-      // In DB speichern
-      const thumbUrl = `/thumbnails/${filename}`
+      // Upload to GCS
+      let thumbUrl = `/thumbnails/${filename}`
+      try {
+        thumbUrl = await uploadThumbnail(filepath, filename)
+        console.log("Thumbnail uploaded to GCS:", thumbUrl)
+      } catch (e) {
+        console.warn("GCS upload failed, using local:", e.message)
+      }
       db.prepare("UPDATE projects SET thumbnail = ? WHERE id = ?").run(thumbUrl, project_id)
-
       res.json({ ok: true, thumbnail: thumbUrl })
     } catch (e) {
       console.error("Screenshot Fehler:", e.message)

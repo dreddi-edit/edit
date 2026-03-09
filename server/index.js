@@ -114,6 +114,7 @@ import { registerOrgRoutes } from "./organisations.js"
 import { registerStripeRoutes } from "./stripe.js"
 import { registerScreenshotRoutes } from "./screenshot.js"
 import { registerGoogleServiceRoutes } from "./googleServices.js"
+import { uploadExportZip } from "./cloudStorage.js"
 import { registerProjectRoutes } from "./projects.js"
 import { registerTemplateRoutes } from "./templates.js"
 import { sendPasswordReset } from "./email.js"
@@ -391,7 +392,7 @@ app.post("/api/ai/demo-landing-copy", authMiddleware, async (req, res) => {
           result.usage.input_tokens || 0,
           result.usage.output_tokens || 0
         )
-      } catch {}
+      } catch (e) { console.error("deductCredits failed:", e.message) }
     }
 
     return res.json({
@@ -719,9 +720,26 @@ app.post("/api/export", async (req, res) => {
 
     let exportHtml = injectResponsive(transformExportHtml(content, exportMode))
 
+    // If cloud=1 requested, upload to GCS and return link
+    if (req.body.cloud === true || req.body.cloud === "1") {
+      const chunks = []
+      const archiveCloud = archiver("zip", { zlib: { level: 9 } })
+      archiveCloud.append(exportHtml, { name: "index.html" })
+      archiveCloud.on("data", chunk => chunks.push(chunk))
+      await archiveCloud.finalize()
+      const buffer = Buffer.concat(chunks)
+      const uniqueName = `${Date.now()}_${filename}`
+      try {
+        const gcsUrl = await uploadExportZip(buffer, uniqueName)
+        return res.json({ ok: true, url: gcsUrl, filename })
+      } catch (e) {
+        console.warn("GCS export upload failed:", e.message)
+      }
+    }
+
+    // Default: stream ZIP directly
     res.setHeader("Content-Type", "application/zip")
     res.setHeader("Content-Disposition", `attachment; filename=${filename}`)
-
     const archive = archiver("zip", { zlib: { level: 9 } })
     archive.pipe(res)
     archive.append(exportHtml, { name: "index.html" })

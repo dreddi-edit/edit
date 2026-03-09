@@ -176,8 +176,9 @@ export async function claudeGenerateLandingHtml({ name, description = "", audien
     .replace(/\s*```$/i, "")
   const isComplete = text.includes("</html>") || text.includes("</body>")
   if (!isComplete) {
-    console.error("Claude HTML truncated, length:", text.length)
-    throw new Error("Generated HTML was truncated. Please try again.")
+    console.warn("Claude HTML truncated, auto-closing. Length:", text.length)
+    const fixed = text + "\n</body></html>"
+    return { html: fixed, usage: data.usage || null, truncated: true }
   }
   return { html: text, usage: data.usage || null }
 

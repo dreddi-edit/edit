@@ -9,6 +9,7 @@
     "dev": "node index.js"
   },
   "dependencies": {
+    "@google-cloud/storage": "^7.19.0",
     "archiver": "^7.0.1",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.6.2",
@@ -21,7 +22,7 @@
     "jsonwebtoken": "^9.0.3",
     "node-fetch": "^3.3.2",
     "nodemailer": "^8.0.1",
-    "puppeteer-core": "^24.38.0",
+    "puppeteer": "^24.38.0",
     "resend": "^6.9.3",
     "stripe": "^20.4.1"
   }
