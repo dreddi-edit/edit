@@ -55,7 +55,7 @@ export interface BigQueryData { rows: Array<Array<any>>; totalRows: number; sche
 
 // 1. Chrome UX Report API
 export const getCrUXMetrics = async (url: string): Promise<CrUXData> => {
-  const data = await apiCall(`https://chromeuxreport.googleapis.com/v1/records:queryHistory?key=${apiKey}`, {
+  const data = await apiCall(`https://chromeuxreport.googleapis.com/v1/records:queryRecord?key=${apiKey}`, {
     method: 'POST',
     body: JSON.stringify({ request: { url } })
   });
@@ -85,7 +85,7 @@ export const analyzePageSpeed = async (url: string): Promise<PageSpeedData> => {
 // 3. Custom Search API
 export const searchUrl = async (url: string): Promise<SearchData> => {
   const data = await apiCall(
-    `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=017576662512468239146:omuauf_lfve&q=${encodeURIComponent(url)}`
+    `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${import.meta.env.VITE_GOOGLE_CX}&q=${encodeURIComponent(url)}`
   );
   
   return {
@@ -99,7 +99,7 @@ export const searchUrl = async (url: string): Promise<SearchData> => {
 
 // 4. Generative Language (Gemini) API
 export const generateContent = async (prompt: string): Promise<GeminiData> => {
-  const data = await apiCall(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`, {
+  const data = await apiCall(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
     method: 'POST',
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }]

@@ -113,6 +113,7 @@ import { registerSettingsRoutes } from "./settings.js"
 import { registerOrgRoutes } from "./organisations.js"
 import { registerStripeRoutes } from "./stripe.js"
 import { registerScreenshotRoutes } from "./screenshot.js"
+import { registerGoogleServiceRoutes } from "./googleServices.js"
 import { registerProjectRoutes } from "./projects.js"
 import { registerTemplateRoutes } from "./templates.js"
 import { sendPasswordReset } from "./email.js"
@@ -210,7 +211,7 @@ app.use(express.urlencoded({ extended: true }))
 app.use(cors({
   origin: process.env.NODE_ENV === "production"
     ? (process.env.ALLOWED_ORIGIN || true)
-    : ["http://localhost:process.env.PORT || 8787", "http://localhost:8788"],
+    : [`http://localhost:${process.env.PORT || 8787}`, "http://localhost:8788"],
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   credentials: true
@@ -252,7 +253,7 @@ app.get("/proxy", async (req, res) => {
 app.get("/asset", asset)
 
 app.get("/health", (_req, res) => {
-  res.status(200).json({ ok: true, port: process.env.PORT || process.env.PORT || 8787 })
+  res.status(200).json({ ok: true, port: process.env.PORT || 8787 })
 })
 
 app.post("/api/ai/analyze-and-rebuild", authMiddleware, async (req, res) => {
@@ -763,6 +764,7 @@ function ownerOnly(req, res, next) {
 
 registerStripeRoutes(app)
 registerScreenshotRoutes(app)
+registerGoogleServiceRoutes(app)
 
 
 app.get("/api/admin/me", authMiddleware, (req, res) => {
@@ -1144,8 +1146,8 @@ app.post("/reset-password", async (req, res) => {
   `)
 })
 
-const PORT = process.env.PORT || process.env.PORT || 8787
-app.listen(process.env.PORT || 8787, "0.0.0.0", PORT, "0.0.0.0", () => {
+const PORT = process.env.PORT || 8787
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`site-editor-server running on ${PORT}`)
 })
 
