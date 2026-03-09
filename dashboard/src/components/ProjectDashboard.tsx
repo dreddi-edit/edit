@@ -637,29 +637,22 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
       action: () => setShowLandingGen(true),
     },
     {
-      icon: "◎",
-      title: "Ollama Status",
-      desc: "Lokale KI prüfen",
-      action: async () => {
-        try {
-          const r = await fetch(`${BASE}/api/ai/ollama-health`)
-          const d = await r.json()
-          if (d.ok) toast.success(`Ollama läuft · ${d.models?.join(", ") || "Modelle geladen"}`)
-          else toast.warning("Ollama nicht erreichbar – Cloud-KI wird genutzt")
-        } catch { toast.error("Server nicht erreichbar – läuft er auf Port 8787?") }
-      },
+      icon: "SEO",
+      title: "SEO Optimizing",
+      desc: "Beta · SEO Analyse und Optimierung",
+      action: () => toast.warning("SEO Optimizing ist aktuell noch Beta"),
     },
     {
-      icon: "⚙",
-      title: "API Keys",
-      desc: "Eigene Keys hinzufügen",
-      action: () => { setShowSettings(true) },
+      icon: "🌍",
+      title: "Language Optimizing",
+      desc: "Beta · Sprache und Lokalisierung optimieren",
+      action: () => toast.warning("Language Optimizing ist aktuell noch Beta"),
     },
     {
-      icon: "€",
-      title: "Guthaben",
-      desc: "Aktuelles Guthaben & Aufladen",
-      action: () => setShowCredits(true),
+      icon: "☁",
+      title: "Hosting",
+      desc: "Beta · Deployment und Hosting Flow",
+      action: () => toast.warning("Hosting ist aktuell noch Beta"),
     },
     {
       icon: "⬚",
