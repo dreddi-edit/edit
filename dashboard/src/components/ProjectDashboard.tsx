@@ -358,7 +358,38 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
       const audienceLabel = titleCase(rawAudience)
       const productLabel = titleCase(name)
 
-      const copy = lang === "german"
+      let copy: any = null
+
+      try {
+        const resp = await fetch("/api/ai/demo-landing-copy", {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            name,
+            description: rawDesc,
+            audience: rawAudience,
+            language: lang,
+          }),
+        })
+        const data = await resp.json()
+        if (data?.usage || data?.cost_eur != null) {
+          try {
+            window.dispatchEvent(new CustomEvent("bo:ai-usage", {
+              detail: {
+                usage: data.usage || null,
+                cost_eur: Number(data.cost_eur || 0),
+                model: String(data.model || "claude-sonnet-4-6"),
+              }
+            }))
+          } catch {}
+        }
+        if (data?.ok && data?.copy) {
+          copy = data.copy
+        }
+      } catch {}
+
+      if (!copy) copy = lang === "german"
         ? {
             htmlLang: "de",
             badge: "KI-Workflow-Plattform",
@@ -467,6 +498,65 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
             priceNote2: "Built for teams that want more speed and better execution.",
             priceNote3: "For bigger teams managing more launches and more scale.",
           }
+
+      copy = {
+        htmlLang: lang === "german" ? "de" : "en",
+        badge: copy.badge || (lang === "german" ? "KI-Workflow-Plattform" : "AI workflow platform"),
+        headline: copy.headline || (lang === "german" ? `${productLabel} für ${audienceLabel}` : `${productLabel} for ${audienceLabel}`),
+        subheadline: copy.subheadline || copy.featuresText || rawDesc,
+        navFeatures: copy.navFeatures || (lang === "german" ? "Funktionen" : "Features"),
+        navProduct: copy.navProduct || (lang === "german" ? "Produkt" : "Product"),
+        navUseCases: copy.navUseCases || (lang === "german" ? "Einsatzbereiche" : "Use Cases"),
+        navPricing: copy.navPricing || (lang === "german" ? "Preise" : "Pricing"),
+        startTrial: copy.startTrial || (lang === "german" ? "Kostenlos starten" : "Start Free Trial"),
+        seeProduct: copy.seeProduct || (lang === "german" ? "Produkt ansehen" : "See Product"),
+        stat1: copy.stat1 || (lang === "german" ? "10x schneller" : "10x faster"),
+        stat1Label: copy.stat1Label || (lang === "german" ? "als klassische Workflows" : "than traditional workflows"),
+        stat2: copy.stat2 || "72%",
+        stat2Label: copy.stat2Label || (lang === "german" ? "schnellere Launch-Zyklen" : "faster launch cycles"),
+        stat3: copy.stat3 || "24/7",
+        stat3Label: copy.stat3Label || (lang === "german" ? "KI-unterstützte Umsetzung" : "AI-assisted execution"),
+        featuresTitle: copy.featuresTitle || (lang === "german" ? `Alles, was ${rawAudience} brauchen, um schneller voranzukommen` : `Everything ${rawAudience} need to move faster`),
+        featuresText: copy.featuresText || rawDesc,
+        feature1Title: copy.feature1Title || (lang === "german" ? "KI-gestützte Workflows" : "AI-assisted workflows"),
+        feature1Text: copy.feature1Text || rawDesc,
+        feature2Title: copy.feature2Title || (lang === "german" ? "Für Umsetzung gebaut" : "Built for execution"),
+        feature2Text: copy.feature2Text || rawDesc,
+        feature3Title: copy.feature3Title || (lang === "german" ? "Conversion-orientiert" : "Conversion-first layout"),
+        feature3Text: copy.feature3Text || rawDesc,
+        productEyebrow: copy.productEyebrow || (lang === "german" ? "Produkt" : "Product"),
+        productTitle: copy.productTitle || (lang === "german" ? "Eine Premium-Struktur, die vom ersten Tag an überzeugt" : "A premium structure that feels convincing from day one"),
+        productText: copy.productText || rawDesc,
+        bullet1Title: copy.bullet1Title || (lang === "german" ? "Klare Positionierung" : "Clear positioning"),
+        bullet1Text: copy.bullet1Text || rawDesc,
+        bullet2Title: copy.bullet2Title || (lang === "german" ? "Starke visuelle Hierarchie" : "Strong visual hierarchy"),
+        bullet2Text: copy.bullet2Text || rawDesc,
+        bullet3Title: copy.bullet3Title || (lang === "german" ? "Einfach anpassbar" : "Easy to customize"),
+        bullet3Text: copy.bullet3Text || rawDesc,
+        useEyebrow: copy.useEyebrow || (lang === "german" ? "Einsatzbereiche" : "Use Cases"),
+        useTitle: copy.useTitle || (lang === "german" ? "Flexibel einsetzbar für verschiedene Geschäftsmodelle" : "Designed to work across multiple go-to-market scenarios"),
+        use1Title: copy.use1Title || (lang === "german" ? "Für SaaS" : "For SaaS"),
+        use1Text: copy.use1Text || rawDesc,
+        use2Title: copy.use2Title || (lang === "german" ? "Für Agenturen" : "For agencies"),
+        use2Text: copy.use2Text || rawDesc,
+        use3Title: copy.use3Title || (lang === "german" ? "Für KI-Tools" : "For AI tools"),
+        use3Text: copy.use3Text || rawDesc,
+        pricingEyebrow: copy.pricingEyebrow || (lang === "german" ? "Preise" : "Pricing"),
+        pricingTitle: copy.pricingTitle || (lang === "german" ? "Einfache Preisstruktur, die mit deinem Wachstum skaliert" : "Simple pricing that scales with your growth"),
+        pricingText: copy.pricingText || rawDesc,
+        getStartedEyebrow: copy.getStartedEyebrow || (lang === "german" ? "Loslegen" : "Get Started"),
+        getStartedTitle: copy.ctaTitle || copy.getStartedTitle || (lang === "german" ? `Starte ${productLabel} mit einer Seite, die bereits premium aussieht` : `Launch ${productLabel} with a page that already looks premium`),
+        getStartedText: copy.ctaText || copy.getStartedText || rawDesc,
+        ctaPrimary: copy.ctaPrimary || copy.startTrial || (lang === "german" ? "Kostenlos starten" : "Start Free Trial"),
+        ctaSecondary: copy.ctaSecondary || copy.seeProduct || (lang === "german" ? "Mehr erfahren" : "Learn more"),
+        pricingStarter: copy.pricingStarter || "Starter",
+        pricingPro: copy.pricingPro || "Pro",
+        pricingScale: copy.pricingScale || "Scale",
+        priceNote1: copy.priceNote1 || (lang === "german" ? "Perfekt für erste Ergebnisse und schnelle Tests." : "Best for getting started and validating early demand."),
+        priceNote2: copy.priceNote2 || (lang === "german" ? "Ideal für Teams, die mehr Geschwindigkeit und Qualität wollen." : "Built for teams that want more speed and better execution."),
+        priceNote3: copy.priceNote3 || (lang === "german" ? "Für größere Teams mit mehr Launches und mehr Skalierung." : "For bigger teams managing more launches and more scale."),
+        footer: copy.footer || (lang === "german" ? `Entwickelt für ${rawAudience} · ${productLabel}` : `Built for ${rawAudience} · ${productLabel}`),
+      }
 
       const safeName = productLabel.replace(/`/g, "")
       const safeDesc = copy.subheadline.replace(/`/g, "")
@@ -970,7 +1060,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
 
       <div class="pricing">
         <div class="price-card">
-          <h3>Starter</h3>
+          <h3>${copy.pricingStarter}</h3>
           <div class="price">€19<small>/mo</small></div>
           <div class="muted">${copy.priceNote1}</div>
           <ul>
@@ -982,7 +1072,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
 
         <div class="price-card featured">
           <div class="top-tag">Most Popular</div>
-          <h3>Pro</h3>
+          <h3>${copy.pricingPro}</h3>
           <div class="price">€49<small>/mo</small></div>
           <div class="muted">${copy.priceNote2}</div>
           <ul>
@@ -993,7 +1083,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
         </div>
 
         <div class="price-card">
-          <h3>Scale</h3>
+          <h3>${copy.pricingScale}</h3>
           <div class="price">€99<small>/mo</small></div>
           <div class="muted">${copy.priceNote3}</div>
           <ul>
@@ -1014,7 +1104,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
         <div class="muted" style="max-width:760px;margin:0 auto 26px;">${copy.getStartedText}</div>
         <div class="hero-actions" style="justify-content:center;">
           <a class="btn btn-primary" href="#">${copy.startTrial}</a>
-          <a class="btn btn-secondary" href="#features">Explore Features</a>
+          <a class="btn btn-secondary" href="#features">${copy.ctaSecondary}</a>
         </div>
       </div>
     </div>

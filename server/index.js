@@ -117,7 +117,7 @@ import { registerProjectRoutes } from "./projects.js"
 import { sendPasswordReset } from "./email.js"
 import cors from "cors"
 import { proxy, asset } from "./proxy.js"
-import { claudeRewriteBlock } from "./claude.js"
+import { claudeRewriteBlock, claudeGenerateLandingCopy } from "./claude.js"
 import { geminiRewriteBlock } from "./gemini.js"
 import { parseInstruction } from "./aiNavigator.js"
 import { groqRewriteBlock } from "./groq.js"
@@ -352,6 +352,48 @@ app.get("/api/ai/ollama-health", async (_req, res) => {
     res.json({ ok: result.ok, models: result.models || [] })
   } catch (error) {
     res.json({ ok: false, models: [], error: error.message })
+  }
+})
+
+app.post("/api/ai/demo-landing-copy", authMiddleware, async (req, res) => {
+  try {
+    const { name, description, audience, language } = req.body || {}
+
+    if (!String(name || "").trim()) {
+      return res.status(400).json({ ok: false, error: "Missing product name" })
+    }
+
+    const result = await claudeGenerateLandingCopy({
+      name: String(name || "").trim(),
+      description: String(description || "").trim(),
+      audience: String(audience || "").trim(),
+      language: String(language || "english").trim(),
+      model: "claude-sonnet-4-6"
+    })
+
+    let deducted = 0
+    if (req.user?.id && result?.usage) {
+      try {
+        deducted = deductCredits(
+          req.user.id,
+          "claude-sonnet-4-6",
+          result.usage.input_tokens || 0,
+          result.usage.output_tokens || 0
+        )
+      } catch {}
+    }
+
+    return res.json({
+      ok: true,
+      model: "claude-sonnet-4-6",
+      provider: "claude",
+      copy: result.copy,
+      usage: result.usage || null,
+      cost_eur: deducted
+    })
+  } catch (error) {
+    console.error("Demo landing copy error:", error)
+    return res.json({ ok: false, error: error.message })
   }
 })
 

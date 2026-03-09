@@ -27,6 +27,75 @@ function safeJsonParse(input) {
 }
 
 
+export async function claudeGenerateLandingCopy({ name, description = "", audience = "", language = "english", model = "claude-sonnet-4-6" }) {
+  const key = process.env.ANTHROPIC_API_KEY
+  if (!key) throw new Error("ANTHROPIC_API_KEY is not set")
+
+  const system = [
+    "You are an elite SaaS copywriter and product marketer.",
+    "Write premium, high-conversion landing page copy.",
+    "Improve weak wording aggressively.",
+    "Do not repeat the raw input verbatim unless it is already excellent.",
+    "Return ONLY raw JSON. No markdown. No backticks.",
+    "Keep the tone premium, modern, credible and conversion-focused.",
+    "The language must exactly match the requested language.",
+    'Return this exact JSON schema:',
+    '{"badge":"","headline":"","subheadline":"","stat1":"","stat1Label":"","stat2":"","stat2Label":"","stat3":"","stat3Label":"","featuresTitle":"","featuresText":"","feature1Title":"","feature1Text":"","feature2Title":"","feature2Text":"","feature3Title":"","feature3Text":"","productTitle":"","productText":"","bullet1Title":"","bullet1Text":"","bullet2Title":"","bullet2Text":"","bullet3Title":"","bullet3Text":"","useTitle":"","use1Title":"","use1Text":"","use2Title":"","use2Text":"","use3Title":"","use3Text":"","pricingTitle":"","pricingText":"","priceNote1":"","priceNote2":"","priceNote3":"","ctaTitle":"","ctaText":"","ctaPrimary":"","ctaSecondary":"","navFeatures":"","navProduct":"","navUseCases":"","navPricing":"","startTrial":"","seeProduct":"","pricingStarter":"","pricingPro":"","pricingScale":"","footer":""}'
+  ].join("\n")
+
+  const user = [
+    `Language: ${language}`,
+    `Product name: ${name || ""}`,
+    `Description: ${description || ""}`,
+    `Target audience: ${audience || ""}`,
+    "",
+    "Requirements:",
+    "- Make the copy significantly better than the raw input.",
+    "- The headline must feel premium and polished.",
+    "- The subheadline must clearly explain the value proposition.",
+    "- Feature titles should be concise and strong.",
+    "- Feature texts should sound useful and believable.",
+    "- Pricing text should sound like a real SaaS landing page.",
+    "- CTA text should feel persuasive.",
+    "- Avoid buzzword spam and obvious filler.",
+    "- Output JSON only."
+  ].join("\n")
+
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": key,
+      "anthropic-version": "2023-06-01"
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 1800,
+      temperature: 0.7,
+      system,
+      messages: [{ role: "user", content: user }]
+    })
+  })
+
+  if (!resp.ok) {
+    const t = await resp.text()
+    throw new Error(`Anthropic error ${resp.status}: ${t}`)
+  }
+
+  const data = await resp.json()
+  const text = (data?.content || [])
+    .map((c) => (c?.type === "text" ? c.text : ""))
+    .join("")
+    .trim()
+
+  const parsed = safeJsonParse(extractJsonFromText(text))
+  if (!parsed) {
+    throw new Error("Claude landing copy parse failed")
+  }
+
+  return { copy: parsed, usage: data.usage || null }
+}
+
 export async function claudeRewriteBlock({ html, instruction, systemHint = "", model = "claude-sonnet-4-6" }) {
   const key = process.env.ANTHROPIC_API_KEY
   if (!key) throw new Error("ANTHROPIC_API_KEY is not set")
