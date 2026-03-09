@@ -166,6 +166,7 @@ export default function App() {
 
 
 const [adminUsers, setAdminUsers] = useState<any[]>([])
+const [adminUserPlans, setAdminUserPlans] = useState<Record<number, "basis" | "starter" | "pro" | "scale">>({})
 const [adminLoading, setAdminLoading] = useState(false)
 const [showCreateUser, setShowCreateUser] = useState(false)
 const [newUser, setNewUser] = useState({ email: "", password: "", name: "", credits: 0 })
@@ -173,6 +174,61 @@ const [newUser, setNewUser] = useState({ email: "", password: "", name: "", cred
   const [showCredits, setShowCredits] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [balance, setBalance] = useState<number | null>(null)
+  const [demoPlan, setDemoPlan] = useState<"basis" | "starter" | "pro" | "scale">("basis")
+
+  const demoPlanMeta: Record<"basis" | "starter" | "pro" | "scale", {
+    label: string
+    price: string
+    users: string
+    projects: string
+    team: string
+    accent: string
+    bg: string
+    border: string
+  }> = {
+    basis: {
+      label: "Basis",
+      price: "€9/mo",
+      users: "1 user",
+      projects: "3 projects",
+      team: "No team",
+      accent: "rgba(99,102,241,0.95)",
+      bg: "rgba(99,102,241,0.12)",
+      border: "rgba(99,102,241,0.35)",
+    },
+    starter: {
+      label: "Starter",
+      price: "€29/mo",
+      users: "1 user",
+      projects: "10 projects",
+      team: "2 team members",
+      accent: "rgba(34,197,94,0.95)",
+      bg: "rgba(34,197,94,0.12)",
+      border: "rgba(34,197,94,0.35)",
+    },
+    pro: {
+      label: "Pro",
+      price: "€79/mo",
+      users: "3 users",
+      projects: "30 projects",
+      team: "10 team members",
+      accent: "rgba(168,85,247,0.95)",
+      bg: "rgba(168,85,247,0.12)",
+      border: "rgba(168,85,247,0.35)",
+    },
+    scale: {
+      label: "Scale",
+      price: "€149/mo",
+      users: "10 users",
+      projects: "100 projects",
+      team: "50 team members",
+      accent: "rgba(245,158,11,0.95)",
+      bg: "rgba(245,158,11,0.12)",
+      border: "rgba(245,158,11,0.35)",
+    },
+  }
+
+  const activePlanMeta = demoPlanMeta[demoPlan]
   const [exportMode, setExportMode] = useState<"wp-placeholder" | "html-clean" | "html-raw">("wp-placeholder")
   const [selectedElementGroup, setSelectedElementGroup] = useState({
     wordpress: "",
@@ -270,6 +326,32 @@ const resetPassword = async (userId: number, userEmail: string) => {
   } catch {
     alert("Failed to send reset - network error")
   }
+}
+
+const assignPlan = async (userId: number, userEmail: string) => {
+  const current = adminUserPlans[userId] || "basis"
+  const next = prompt(
+    `Assign demo plan to "${userEmail}"\n\nOptions: basis, starter, pro, scale`,
+    current
+  )
+
+  if (!next) return
+
+  const normalized = String(next).trim().toLowerCase()
+  if (!["basis", "starter", "pro", "scale"].includes(normalized)) {
+    alert("Invalid plan. Use: basis, starter, pro, scale")
+    return
+  }
+
+  const plan = normalized as "basis" | "starter" | "pro" | "scale"
+
+  setAdminUserPlans(prev => ({ ...prev, [userId]: plan }))
+
+  if (authUser && authUser.email === userEmail) {
+    setDemoPlan(plan)
+  }
+
+  alert(`✅ Demo plan "${plan}" assigned to ${userEmail}`)
 }
 
 const createUser = async () => {
@@ -511,19 +593,38 @@ useEffect(() => {
         </div>
 
         <div style={{ background: "#111827", border: "1px solid #334155", borderRadius: 16, overflow: "hidden" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "80px 1.8fr 1fr 1fr 120px", padding: 14, background: "#1f2937", fontWeight: 800 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "80px 1.8fr 1fr 120px 1fr 120px", padding: 14, background: "#1f2937", fontWeight: 800 }}>
             <div>ID</div>
             <div>Email</div>
             <div>Name</div>
+            <div>Plan</div>
             <div>Created</div>
             <div>Actions</div>
           </div>
 
           {adminUsers.map((u: any) => (
-            <div key={u.id} style={{ display: "grid", gridTemplateColumns: "80px 1.8fr 1fr 1fr 120px", padding: 14, borderTop: "1px solid #1f2937", alignItems: "center" }}>
+            <div key={u.id} style={{ display: "grid", gridTemplateColumns: "80px 1.8fr 1fr 120px 1fr 120px", padding: 14, borderTop: "1px solid #1f2937", alignItems: "center" }}>
               <div>{u.id}</div>
               <div>{u.email}</div>
               <div>{u.name || "-"}</div>
+              <div>
+                <span style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  minWidth: 72,
+                  padding: "6px 10px",
+                  borderRadius: 999,
+                  fontSize: 11,
+                  fontWeight: 800,
+                  border: "1px solid rgba(99,102,241,0.35)",
+                  background: "rgba(99,102,241,0.12)",
+                  color: "white",
+                  textTransform: "capitalize",
+                }}>
+                  {adminUserPlans[u.id] || "basis"}
+                </span>
+              </div>
               <div>{u.created_at || "-"}</div>
               <div style={{ display: "flex", gap: 5, flexDirection: "column" }}>
                 <button
@@ -531,6 +632,12 @@ useEffect(() => {
                   style={{ padding: "6px 8px", borderRadius: 4, border: "1px solid #10b981", background: "#10b981", color: "white", cursor: "pointer", fontSize: 11, fontWeight: 600 }}
                 >
                   💰 Add Credits
+                </button>
+                <button
+                  onClick={() => assignPlan(u.id, u.email)}
+                  style={{ padding: "4px 8px", borderRadius: 4, border: "1px solid #6366f1", background: "#6366f1", color: "white", cursor: "pointer", fontSize: 11 }}
+                >
+                  🧩 Plan
                 </button>
                 <button
                   onClick={() => resetPassword(u.id, u.email)}
@@ -673,6 +780,42 @@ useEffect(() => {
           WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
           flexShrink: 0,
         }}>⬡ Editor</div>
+
+          {/* Active Plan Badge */}
+          <div
+            style={{
+              minHeight: 36,
+              padding: "6px 12px",
+              borderRadius: 10,
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              border: `1px solid ${activePlanMeta.border}`,
+              background: activePlanMeta.bg,
+              color: "white",
+              lineHeight: 1.15,
+            }}
+          >
+            <div
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 999,
+                background: activePlanMeta.accent,
+                boxShadow: `0 0 10px ${activePlanMeta.accent}`,
+                flexShrink: 0,
+              }}
+            />
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              <span style={{ fontSize: 11, fontWeight: 900, color: activePlanMeta.accent }}>
+                PLAN · {activePlanMeta.label}
+              </span>
+              <span style={{ fontSize: 11, opacity: 0.8 }}>
+                {activePlanMeta.price} · {activePlanMeta.projects}
+              </span>
+            </div>
+          </div>
 
 
           {/* Cost Tracker */}
