@@ -320,6 +320,18 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
       }
     } catch {}
 
+    // Chrome localhost exemption fallback - use no-cors for mixed content
+    try {
+      await fetch("http://localhost:11434/api/tags", {
+        signal: AbortSignal.timeout(3000),
+        mode: "no-cors"
+      })
+      // If we get here, assume it worked (no-cors prevents reading response)
+      setOllamaStatus("running")
+      toast.success("Ollama läuft ✓ (Chrome localhost exemption)")
+      return
+    } catch {}
+
     // Fallback: server proxy (for cases where CORS is not configured)
     try {
       const r = await fetch("/api/ai/ollama-health", {
