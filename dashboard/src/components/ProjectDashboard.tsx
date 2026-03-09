@@ -306,32 +306,32 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
     
     // Try direct localhost first (browser → Ollama, no server needed)
     try {
-      const r = await fetch("http://localhost:11434/api/tags", {
-        signal: AbortSignal.timeout(3000),
-      })
-      if (r.ok) {
-        const d = await r.json()
-        const models = (d.models || []).map((m: any) => m.name) as string[]
-        setOllamaStatus("running")
-        if (models.length > 0) {
-          toast.success(`Ollama läuft ✓ · ${models.slice(0,3).join(", ")}`)
-        } else {
-          toast.warning(t("Ollama running but no models found. Run: ollama pull qwen2.5-coder:7b"))
-        }
-        return
-      }
+      // const r = await fetch("http://localhost:11434/api/tags", {
+      //         signal: AbortSignal.timeout(3000),
+      // })
+      // if (r.ok) {
+      //   const d = await r.json()
+      //   const models = (d.models || []).map((m: any) => m.name) as string[]
+      //   setOllamaStatus("running")
+      //   if (models.length > 0) {
+      //     toast.success(`Ollama läuft ✓ · ${models.slice(0,3).join(", ")}`)
+      //   } else {
+      //     toast.warning(t("Ollama running but no models found. Run: ollama pull qwen2.5-coder:7b"))
+      //   }
+      //   return
+      // }
     } catch {}
 
     // Chrome localhost exemption fallback - use no-cors for mixed content
     try {
-      await fetch("http://localhost:11434/api/tags", {
-        signal: AbortSignal.timeout(3000),
-        mode: "no-cors"
-      })
+      // await fetch("http://localhost:11434/api/tags", {
+      //         signal: AbortSignal.timeout(3000),
+      //         mode: "no-cors"
+      // })
       // If we get here, assume it worked (no-cors prevents reading response)
-      setOllamaStatus("running")
-      toast.success("Ollama läuft ✓ (Chrome localhost exemption)")
-      return
+      // setOllamaStatus("running")
+      // toast.success("Ollama läuft ✓ (Chrome localhost exemption)")
+      // return
     } catch {}
 
     // Fallback: server proxy (for cases where CORS is not configured)
