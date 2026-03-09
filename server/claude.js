@@ -151,7 +151,7 @@ export async function claudeGenerateLandingHtml({ name, description = "", audien
     },
     body: JSON.stringify({
       model,
-      max_tokens: 7000,
+      max_tokens: 16000,
       temperature: 0.8,
       system,
       messages: [{ role: "user", content: user }]
@@ -171,9 +171,13 @@ export async function claudeGenerateLandingHtml({ name, description = "", audien
     .replace(/^```html\s*/i, "")
     .replace(/^```\s*/i, "")
     .replace(/\s*```$/i, "")
-    .trim()
-
+  const isComplete = text.includes("</html>") || text.includes("</body>")
+  if (!isComplete) {
+    console.error("Claude HTML truncated, length:", text.length)
+    throw new Error("Generated HTML was truncated. Please try again.")
+  }
   return { html: text, usage: data.usage || null }
+
 }
 
 export async function claudeRewriteBlock({ html, instruction, systemHint = "", model = "claude-sonnet-4-6" }) {
