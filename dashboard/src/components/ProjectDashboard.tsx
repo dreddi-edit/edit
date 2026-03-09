@@ -176,7 +176,6 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   }
 
   const activePlanMeta = planMeta[demoPlan]
-  }, [])
 
   const takeScreenshot = async (projectId: number, url: string) => {
     if (!url) return
