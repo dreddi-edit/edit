@@ -2500,7 +2500,6 @@ const applyEdit = useCallback(() => {
 
     try {
       console.log("AI Layout: sending", sameLevel.length, "blocks");
-        const res = await fetch("/api/ai/rewrite-block", {
       const res = await fetch("/api/ai/rewrite-block", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
