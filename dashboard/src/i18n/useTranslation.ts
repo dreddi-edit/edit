@@ -16,6 +16,7 @@ export function useTranslation() {
   const setLang = (l: Language) => {
     localStorage.setItem("ui-language", l)
     setLangState(l)
+    window.location.reload()
   }
 
   return { t, lang, setLang }

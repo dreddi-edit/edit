@@ -448,7 +448,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
       action: () => setShowNew(true),
     },
     {
-      icon: "✨",
+      icon: "✦",
       title: t("Landing Page Generator"),
       desc: t("Generate new AI landing page"),
       action: () => setShowLandingGen(true),
@@ -460,7 +460,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
       action: () => toast.warning(t("SEO Optimizing is currently in beta")),
     },
     {
-      icon: "🌍",
+      icon: "◎",
       title: t("Language Optimizing"),
       desc: t("Beta · Language and localization optimization"),
       action: () => toast.warning(t("Language Optimizing is currently in beta")),

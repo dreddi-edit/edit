@@ -2951,7 +2951,7 @@ return (
         }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
             <div style={{ fontWeight: 900, fontSize: 13 }}>
-              {panelType === "button" ? "🔘 Button" : panelType === "heading-list" ? "📋 Heading + Liste" : "✏️ Text"} · {selectedId}
+              {panelType === "button" ? "◉ Button" : panelType === "heading-list" ? "≡ Heading + Liste" : "✐ Text"} · {selectedId}
             </div>
             <button onClick={() => { setSelectedId(null); setEditValue(""); }} style={{
               height: 28, padding: "0 10px", borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)",
@@ -3153,7 +3153,7 @@ return (
               height: 32, padding: "0 12px", borderRadius: 10, border: "1px solid rgba(168,85,247,0.4)",
               background: "linear-gradient(135deg, rgba(168,85,247,0.2), rgba(139,92,246,0.2))",
               color: "white", cursor: "pointer", fontWeight: 700, fontSize: 11, marginRight: 4,
-            }}>🤖 Layout</button>
+            }}>⬡ Layout</button>
 
             <button onClick={applyEdit} style={{
               flex: 1, height: 36, borderRadius: 12, border: "1px solid rgba(59,130,246,0.55)",
@@ -3177,7 +3177,7 @@ Delete
             <button onClick={() => aiRescan("block")} disabled={aiLoading} style={{
               height: 36, padding: "0 12px", borderRadius: 12, border: "1px solid rgba(168,85,247,0.55)",
               background: "rgba(168,85,247,0.2)", color: "white", cursor: aiLoading ? "wait" : "pointer", fontWeight: 900, fontSize: 12,
-            }}>🤖 Block</button>
+            }}>⬡ Block</button>
             <button onClick={scanFreePrecise} style={{
               height: 36, padding: "0 12px", borderRadius: 12, border: "1px solid rgba(245,158,11,0.45)",
               background: "rgba(245,158,11,0.15)", color: "white", cursor: "pointer", fontWeight: 900, fontSize: 13,

@@ -127,17 +127,17 @@ export const COMPONENT_LIBRARY = {
   <h2 class="wp-block-heading" style="text-align:center; margin-bottom:40px; font-size:2.5rem;">Powerful Features</h2>
   <div class="wp-block-columns" style="gap:30px; max-width:1200px; margin:0 auto;">
     <div class="wp-block-column" style="flex:1; text-align:center; padding:30px;">
-      <div style="width:80px; height:80px; margin:0 auto 20px; background:#667eea; border-radius:50%; display:flex; align-items:center; justify-content:center; color:white; font-size:2rem;">🚀</div>
+      <div style="width:80px; height:80px; margin:0 auto 20px; background:#667eea; border-radius:50%; display:flex; align-items:center; justify-content:center; color:white; font-size:2rem;">↗</div>
       <h3 style="font-size:1.5rem; margin-bottom:15px;">Lightning Fast</h3>
       <p style="color:#666; line-height:1.6;">Optimized performance that loads your content in milliseconds.</p>
     </div>
     <div class="wp-block-column" style="flex:1; text-align:center; padding:30px;">
-      <div style="width:80px; height:80px; margin:0 auto 20px; background:#764ba2; border-radius:50%; display:flex; align-items:center; justify-content:center; color:white; font-size:2rem;">🎨</div>
+      <div style="width:80px; height:80px; margin:0 auto 20px; background:#764ba2; border-radius:50%; display:flex; align-items:center; justify-content:center; color:white; font-size:2rem;">◈</div>
       <h3 style="font-size:1.5rem; margin-bottom:15px;">Beautiful Design</h3>
       <p style="color:#666; line-height:1.6;">Professional templates that make your content shine.</p>
     </div>
     <div class="wp-block-column" style="flex:1; text-align:center; padding:30px;">
-      <div style="width:80px; height:80px; margin:0 auto 20px; background:#f093fb; border-radius:50%; display:flex; align-items:center; justify-content:center; color:white; font-size:2rem;">📱</div>
+      <div style="width:80px; height:80px; margin:0 auto 20px; background:#f093fb; border-radius:50%; display:flex; align-items:center; justify-content:center; color:white; font-size:2rem;">▣</div>
       <h3 style="font-size:1.5rem; margin-bottom:15px;">Mobile Ready</h3>
       <p style="color:#666; line-height:1.6;">Perfect responsive design on all devices and screen sizes.</p>
     </div>
@@ -148,8 +148,8 @@ export const COMPONENT_LIBRARY = {
 };
 
 export const COMPONENT_CATEGORIES = {
-  layout: { name: "Layout", icon: "📐" },
-  business: { name: "Business", icon: "💼" },
-  social: { name: "Social", icon: "👥" },
-  forms: { name: "Forms", icon: "📝" }
+  layout: { name: "Layout", icon: "▣" },
+  business: { name: "Business", icon: "◈" },
+  social: { name: "Social", icon: "◉" },
+  forms: { name: "Forms", icon: "≡" }
 };

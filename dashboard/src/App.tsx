@@ -786,7 +786,7 @@ useEffect(() => {
                 cursor: "pointer",
                 lineHeight: 1.15,
               }}>
-              <span>💰 ${sessionCost.toFixed(4)}</span>
+              <span>◈ ${sessionCost.toFixed(4)}</span>
               <span style={{ opacity: 0.8 }}>•</span>
               <span>{sessionTokens.input.toLocaleString()} in / {sessionTokens.output.toLocaleString()} out</span>
             </div>
@@ -797,7 +797,7 @@ useEffect(() => {
           <div style={{
             position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)",
             fontSize: 13, color: "rgba(148,163,184,0.5)",
-          }}>🌐</div>
+          }}>◎</div>
           <input
             value={url} onChange={e => setUrl(e.target.value)}
             onKeyDown={e => e.key === "Enter" && load(true)}
@@ -876,7 +876,7 @@ useEffect(() => {
             ? "linear-gradient(135deg, rgba(239,68,68,0.25), rgba(220,38,38,0.25))"
             : "linear-gradient(135deg, rgba(34,197,94,0.2), rgba(16,185,129,0.2))",
           color: "white", cursor: "pointer", fontWeight: 700, fontSize: 13,
-        }}>{isEdit ? t("💾 Speichern") : t("✏️ Bearbeiten")}</button>
+        }}>{isEdit ? t("↓ Speichern") : t("✐ Bearbeiten")}</button>
 
           {/* AI Buttons – nur im Edit Mode */}
           {isEdit && (
@@ -1116,7 +1116,7 @@ useEffect(() => {
                 letterSpacing: 0.3,
                 color: "rgba(255,255,255,0.92)"
               }}>
-                📦 Components
+                ⬡ Components
               </div>
               
               <select
@@ -1244,7 +1244,7 @@ useEffect(() => {
                     cursor: "pointer"
                   }}
                 >
-                  📝 Headline
+                  ≡ Headline
                 </button>
                 <button
                   onClick={() => setLeftAiPrompt("Write professional marketing copy for this product/service")}
@@ -1258,7 +1258,7 @@ useEffect(() => {
                     cursor: "pointer"
                   }}
                 >
-                  🚀 Marketing Copy
+                  ↗ Marketing Copy
                 </button>
                 <button
                   onClick={() => setLeftAiPrompt("Create a clear call-to-action button text")}
@@ -1272,7 +1272,7 @@ useEffect(() => {
                     cursor: "pointer"
                   }}
                 >
-                  🎯 Call-to-Action
+                  ◎ Call-to-Action
                 </button>
               </div>
             </div>
