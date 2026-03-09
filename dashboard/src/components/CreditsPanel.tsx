@@ -96,7 +96,110 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
 
         <div style={{ padding: "24px 28px", overflowY: "auto", flex: 1 }}>
 
-          {/* Pakete */}
+          
+          {/* PLAN SELECTOR */}
+          <div style={{ marginBottom: 28 }}>
+            <div style={sectionTitle}>PLANS</div>
+
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+
+              <div style={{
+                padding:"16px",
+                borderRadius:12,
+                border:"1px solid rgba(99,102,241,0.5)",
+                background:"rgba(99,102,241,0.1)",
+              }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                  <div style={{ fontWeight:800, fontSize:16 }}>Basis</div>
+                  <div style={{ fontSize:12, fontWeight:800, color:"rgba(255,255,255,0.9)" }}>€9/mo</div>
+                </div>
+                <div style={{ fontSize:12, opacity:0.78, lineHeight:1.45 }}>
+                  Platform access with manual credit loading.
+                </div>
+                <div style={{ marginTop:10, fontSize:11, opacity:0.82, lineHeight:1.5 }}>
+                  • 1 user<br/>
+                  • 3 active projects<br/>
+                  • Team not included<br/>
+                  • Local Ollama allowed<br/>
+                  • Cloud AI via credits
+                </div>
+              </div>
+
+              <div style={{
+                padding:"16px",
+                borderRadius:12,
+                border:"1px solid rgba(34,197,94,0.45)",
+                background:"rgba(34,197,94,0.08)",
+              }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                  <div style={{ fontWeight:800, fontSize:16 }}>Starter</div>
+                  <div style={{ fontSize:12, fontWeight:800, color:"rgba(255,255,255,0.9)" }}>€29/mo</div>
+                </div>
+                <div style={{ fontSize:12, opacity:0.78, lineHeight:1.45 }}>
+                  Subscription with AI included for regular use.
+                </div>
+                <div style={{ marginTop:10, fontSize:11, opacity:0.82, lineHeight:1.5 }}>
+                  • 1 user<br/>
+                  • 10 active projects<br/>
+                  • Up to 2 team members<br/>
+                  • Priority AI queue<br/>
+                  • Full coverage fair use
+                </div>
+              </div>
+
+              <div style={{
+                padding:"16px",
+                borderRadius:12,
+                border:"1px solid rgba(168,85,247,0.5)",
+                background:"rgba(168,85,247,0.1)",
+                position:"relative",
+              }}>
+                <div style={{
+                  position:"absolute", top:-10, right:12,
+                  fontSize:10, fontWeight:800, padding:"2px 8px", borderRadius:6,
+                  background:"linear-gradient(135deg, #6366f1, #8b5cf6)", color:"white", letterSpacing:0.5,
+                }}>POPULAR</div>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                  <div style={{ fontWeight:800, fontSize:16 }}>Pro</div>
+                  <div style={{ fontSize:12, fontWeight:800, color:"rgba(255,255,255,0.9)" }}>€79/mo</div>
+                </div>
+                <div style={{ fontSize:12, opacity:0.78, lineHeight:1.45 }}>
+                  Best for freelancers and small agencies.
+                </div>
+                <div style={{ marginTop:10, fontSize:11, opacity:0.82, lineHeight:1.5 }}>
+                  • 3 users<br/>
+                  • 30 active projects<br/>
+                  • Up to 10 team members<br/>
+                  • Faster support<br/>
+                  • Full coverage fair use
+                </div>
+              </div>
+
+              <div style={{
+                padding:"16px",
+                borderRadius:12,
+                border:"1px solid rgba(245,158,11,0.5)",
+                background:"rgba(245,158,11,0.08)",
+              }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                  <div style={{ fontWeight:800, fontSize:16 }}>Scale</div>
+                  <div style={{ fontSize:12, fontWeight:800, color:"rgba(255,255,255,0.9)" }}>€149/mo</div>
+                </div>
+                <div style={{ fontSize:12, opacity:0.78, lineHeight:1.45 }}>
+                  For teams handling many websites in parallel.
+                </div>
+                <div style={{ marginTop:10, fontSize:11, opacity:0.82, lineHeight:1.5 }}>
+                  • 10 users<br/>
+                  • 100 active projects<br/>
+                  • Up to 50 team members<br/>
+                  • Highest limits<br/>
+                  • Full coverage fair use
+                </div>
+              </div>
+
+            </div>
+          </div>
+{/* Pakete */}
           <div style={{ marginBottom: 28 }}>
             <div style={sectionTitle}>GUTHABEN AUFLADEN</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
