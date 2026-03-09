@@ -6,7 +6,7 @@ export function registerProjectRoutes(app) {
   // Alle Projekte des Users
   app.get("/api/projects", authMiddleware, (req, res) => {
     const projects = db.prepare(
-      "SELECT id, name, url, thumbnail, updated_at, created_at FROM projects WHERE user_id = ? ORDER BY updated_at DESC"
+      "SELECT id, name, url, html, thumbnail, updated_at, created_at FROM projects WHERE user_id = ? ORDER BY updated_at DESC"
     ).all(req.user.id)
     res.json({ ok: true, projects })
   })
