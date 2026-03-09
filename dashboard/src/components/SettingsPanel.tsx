@@ -222,6 +222,41 @@ export default function SettingsPanel({ onClose, onThemeChange }: { onClose: () 
     openai: "rgba(16,163,127,0.8)",
   }
 
+  const toggleSection = (section: string) => {
+    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
+  };
+
+  const analyzeSEO = async () => {
+    setSeoLoading(true);
+    try {
+      const currentUrl = window.location.origin + "/preview/" + window.location.pathname.split('/').pop();
+      const data = await analyzePageSpeed(currentUrl);
+      setSeoData(data);
+    } catch (error) {
+      console.error("SEO analysis failed:", error);
+      toast.error("SEO analysis failed");
+    } finally {
+      setSeoLoading(false);
+    }
+  };
+
+  // Google AI Suite functions
+  const getCurrentUrl = () => window.location.origin + "/preview/" + window.location.pathname.split('/').pop();
+
+  const runGoogleApi = async (apiName: string, apiFunction: () => Promise<any>) => {
+    setGoogleLoading(apiName);
+    try {
+      const result = await apiFunction();
+      setGoogleResults(prev => ({ ...prev, [apiName]: result }));
+      toast.success(`${apiName} completed successfully`);
+    } catch (error: any) {
+      console.error(`${apiName} failed:`, error);
+      toast.error(`${apiName} failed: ${error.message}`);
+    } finally {
+      setGoogleLoading(null);
+    }
+  };
+
   return (
     <div style={{
       position: "fixed", inset: 0, zIndex: 9999,
@@ -780,41 +815,6 @@ export default function SettingsPanel({ onClose, onThemeChange }: { onClose: () 
     </div>
   )
 }
-
-  const analyzeSEO = async () => {
-    setSeoLoading(true);
-    try {
-      const currentUrl = window.location.origin + "/preview/" + window.location.pathname.split('/').pop();
-      const data = await analyzePageSpeed(currentUrl);
-      setSeoData(data);
-    } catch (error) {
-      console.error("SEO analysis failed:", error);
-      toast.error("SEO analysis failed");
-    } finally {
-      setSeoLoading(false);
-    }
-  };
-
-  // Google AI Suite functions
-  const getCurrentUrl = () => window.location.origin + "/preview/" + window.location.pathname.split('/').pop();
-
-  const runGoogleApi = async (apiName: string, apiFunction: () => Promise<any>) => {
-    setGoogleLoading(apiName);
-    try {
-      const result = await apiFunction();
-      setGoogleResults(prev => ({ ...prev, [apiName]: result }));
-      toast.success(`${apiName} completed successfully`);
-    } catch (error: any) {
-      console.error(`${apiName} failed:`, error);
-      toast.error(`${apiName} failed: ${error.message}`);
-    } finally {
-      setGoogleLoading(null);
-    }
-  };
-
-  const toggleSection = (section: string) => {
-    setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
-  };
 
 function Section({ title, children, collapsible = false, expanded = true, onToggle }: { 
   title: string; 
