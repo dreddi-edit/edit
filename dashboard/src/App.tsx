@@ -265,8 +265,8 @@ const loadAdminUsers = async () => {
       const plans: Record<number, any> = {}
       for (const u of d.users || []) { plans[u.id] = u.plan || "basis" }
       setAdminUserPlans(plans)
-    } else alert(d.error || "Admin load failed")
-  } catch { alert("Admin load failed") } finally { setAdminLoading(false) }
+    } else alert(d.error || t("Admin load failed"))
+  } catch { alert(t("Admin load failed")) } finally { setAdminLoading(false) }
 }
 const deleteUser = async (userId: number, userEmail: string) => {
   if (!confirm(`Are you sure you want to delete user "${userEmail}"? This will also delete all their projects.`)) {
@@ -283,17 +283,17 @@ const deleteUser = async (userId: number, userEmail: string) => {
       alert("User deleted successfully")
       loadAdminUsers()
     } else {
-      alert(d.error || "Delete failed")
+      alert(d.error || t("Delete failed"))
     }
   } catch {
-    alert("Delete failed")
+    alert(t("Delete failed"))
   }
 }
 
 const addCredits = async (userId: number, userEmail: string) => {
   const credits = prompt(`How many dollars in credits to add to "${userEmail}"?\n\nExample: 25 = $25.00 credits`)
   if (!credits || isNaN(Number(credits)) || Number(credits) <= 0) {
-    if (credits !== null) alert("Please enter a valid positive number")
+    if (credits !== null) alert(t("Please enter a valid positive number"))
     return
   }
   
@@ -612,7 +612,7 @@ useEffect(() => {
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => setShowCreateUser(true)} style={{ height: 36, padding: "0 16px", borderRadius: 8, border: "1px solid #1e293b", background: "#0f172a", color: "white", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>+ New User</button>
-              <button onClick={loadAdminUsers} style={{ height: 36, padding: "0 16px", borderRadius: 8, border: "1px solid #1e293b", background: "#0f172a", color: "#94a3b8", cursor: "pointer", fontSize: 13 }}>{adminLoading ? "Loading…" : "↻ Refresh"}</button>
+              <button onClick={loadAdminUsers} style={{ height: 36, padding: "0 16px", borderRadius: 8, border: "1px solid #1e293b", background: "#0f172a", color: "#94a3b8", cursor: "pointer", fontSize: 13 }}>{adminLoading ? "Loading…" : t("↻ Refresh")}</button>
               <button onClick={() => setView("dashboard")} style={{ height: 36, padding: "0 16px", borderRadius: 8, border: "1px solid #1e293b", background: "#0f172a", color: "#94a3b8", cursor: "pointer", fontSize: 13 }}>← Back</button>
             </div>
           </div>
@@ -656,7 +656,7 @@ useEffect(() => {
             <div style={{ background: "#0d1525", padding: 28, borderRadius: 14, border: "1px solid #1e293b", width: 400 }}>
               <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 20 }}>Create User</div>
               {["email","password","name"].map(f => (<input key={f} placeholder={f} type={f==="password"?"password":"text"} value={(newUser as any)[f]} onChange={e => setNewUser((p:any) => ({...p,[f]:e.target.value}))} style={{ display:"block", width:"100%", marginBottom:10, padding:"9px 12px", borderRadius:8, border:"1px solid #1e293b", background:"#060b14", color:"white", fontSize:13, boxSizing:"border-box" }} />))}
-              <input placeholder="credits (€)" type="number" value={newUser.credits} onChange={e => setNewUser((p:any) => ({...p,credits:Number(e.target.value)}))} style={{ display:"block", width:"100%", marginBottom:16, padding:"9px 12px", borderRadius:8, border:"1px solid #1e293b", background:"#060b14", color:"white", fontSize:13, boxSizing:"border-box" }} />
+              <input placeholder={t("credits (€)")} type="number" value={newUser.credits} onChange={e => setNewUser((p:any) => ({...p,credits:Number(e.target.value)}))} style={{ display:"block", width:"100%", marginBottom:16, padding:"9px 12px", borderRadius:8, border:"1px solid #1e293b", background:"#060b14", color:"white", fontSize:13, boxSizing:"border-box" }} />
               <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
                 <button onClick={() => setShowCreateUser(false)} style={{ padding:"8px 16px", borderRadius:8, border:"1px solid #1e293b", background:"transparent", color:"#94a3b8", cursor:"pointer", fontSize:13 }}>Cancel</button>
                 <button onClick={createUser} style={{ padding:"8px 16px", borderRadius:8, border:"none", background:"#6366f1", color:"white", cursor:"pointer", fontSize:13, fontWeight:700 }}>Create</button>
@@ -776,7 +776,7 @@ useEffect(() => {
           {(sessionCost > 0 || sessionTokens.input > 0 || sessionTokens.output > 0) && (
             <div
               title={`Input: ${sessionTokens.input.toLocaleString()} / Output: ${sessionTokens.output.toLocaleString()} tokens\nKlicken zum Zurücksetzen`}
-              onClick={() => { if(confirm("Session-Kosten zurücksetzen?")) { setSessionCost(0); setSessionTokens({input:0,output:0}); } }}
+              onClick={() => { if(confirm(t("Reset session costs?"))) { setSessionCost(0); setSessionTokens({input:0,output:0}); } }}
               style={{
                 minHeight: 36, padding: "6px 12px", borderRadius: 10, flexShrink: 0,
                 display: "flex", alignItems: "center", gap: 8,
@@ -876,7 +876,7 @@ useEffect(() => {
             ? "linear-gradient(135deg, rgba(239,68,68,0.25), rgba(220,38,38,0.25))"
             : "linear-gradient(135deg, rgba(34,197,94,0.2), rgba(16,185,129,0.2))",
           color: "white", cursor: "pointer", fontWeight: 700, fontSize: 13,
-        }}>{isEdit ? "💾 Speichern" : "✏️ Bearbeiten"}</button>
+        }}>{isEdit ? t("💾 Speichern") : t("✏️ Bearbeiten")}</button>
 
           {/* AI Buttons – nur im Edit Mode */}
           {isEdit && (
@@ -902,7 +902,7 @@ useEffect(() => {
                 transition: "transform 0.1s"
               }}
             >
-              {aiScanLoading ? <span style={{display:"inline-block",animation:"spin 0.7s linear infinite"}}>⟳</span> : "Refine Block"}
+              {aiScanLoading ? <span style={{display:"inline-block",animation:"spin 0.7s linear infinite"}}>⟳</span> : t("Refine Block")}
             </button>
           )}
 
@@ -1281,7 +1281,7 @@ useEffect(() => {
               data-left-ai-run="1"
               onClick={() => {
                 if (!leftAiPrompt.trim()) {
-                  toast.warning("Bitte zuerst einen KI Prompt eingeben")
+                  toast.warning(t("Please enter an AI prompt first"))
                   return
                 }
                 setLeftAiRunning(true)

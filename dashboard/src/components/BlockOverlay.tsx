@@ -1,3 +1,4 @@
+import { useTranslation } from "../i18n/useTranslation";
 import React, { useCallback, useEffect, useRef, 
 useState } from "react";
 import { toast } from "./Toast";
@@ -484,6 +485,7 @@ function renderBoxesInIframe(
 }
 export default function BlockOverlay({ iframeRef, enabled, canvasMode, onStatus, onHtmlChange }: Props) {
 
+  const { t } = useTranslation();
   const boApplyCanvasMode = (on: boolean) => {
     const iframe = iframeRef?.current
     const doc = iframe?.contentDocument || null
@@ -569,7 +571,7 @@ export default function BlockOverlay({ iframeRef, enabled, canvasMode, onStatus,
   const undoLastChange = useCallback(() => {
     const arr = historyRef.current;
     if (arr.length < 2) {
-      toast.error("Keine Rückgängig-History vorhanden.");
+      toast.error(t("No undo history available."));
       return;
     }
     arr.pop();
@@ -1295,7 +1297,7 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
         }
       } catch (dropError) {
         console.error("Error in onDrop handler:", dropError);
-        toast.error("Failed to add element");
+        toast.error(t("Failed to add element"));
       }
 
       // optional: rescan blocks so it becomes selectable
@@ -1728,7 +1730,7 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
               : (target.nextElementSibling as HTMLElement | null);
 
           if (!candidate) {
-            toast.error("Kein passender Nachbarblock gefunden.");
+            toast.error(t("No matching neighbor block found."));
             return;
           }
 
@@ -1763,7 +1765,7 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
           const matchesText = !quoted || txt.includes(quoted);
 
           if (!matchesType || !matchesText) {
-            toast.error("Nachbarblock passt nicht zur Lösch-Anweisung.");
+            toast.error(t("Neighbor block does not match delete instruction."));
             return;
           }
 
@@ -1805,7 +1807,7 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
             return;
           }
           if (source === target) {
-            toast.error("Quelle und Ziel sind identisch.");
+            toast.error(t("Source and target are identical."));
             return;
           }
 
@@ -1833,7 +1835,7 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
 
           const newNode = makeLocalNodeFromText(rest);
           if (!newNode) {
-            toast.error("Ersatz-Block konnte nicht erzeugt werden.");
+            toast.error(t("Replacement block could not be created."));
             return;
           }
 
@@ -1891,7 +1893,7 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
           wrap.innerHTML = html;
           const newNode = wrap.firstElementChild as HTMLElement | null;
           if (!newNode) {
-            toast.error("Neuer Block konnte nicht erzeugt werden.");
+            toast.error(t("New block could not be created."));
             return;
           }
 
@@ -2003,7 +2005,7 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
           wrap.innerHTML = html;
           const newNode = wrap.firstElementChild as HTMLElement | null;
           if (!newNode) {
-            toast.error("Neuer Block konnte nicht erzeugt werden.");
+            toast.error(t("New block could not be created."));
             return;
           }
 
@@ -2027,7 +2029,7 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
           /\bblock\s+\d+\b/i.test(localPrompt);
 
         if (looksLikeLocalDomCommand) {
-          toast.error("Lokaler DOM-Befehl wurde nicht eindeutig erkannt. Kein KI-Call wurde ausgeführt.");
+          toast.error(t("Local DOM command not clearly recognized. No AI call executed."));
           try { window.dispatchEvent(new CustomEvent("bo:left-ai-done")); } catch {}
           return;
         }
@@ -2084,7 +2086,7 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
             toast.warning(`Approval nötig: ${data.model} (~$${data.estCost})`)
             return
           }
-          if (!data?.ok || !data?.html) { toast.error("KI Fehler: " + (data?.error || "kein HTML")); return }
+          if (!data?.ok || !data?.html) { toast.error(t("AI Error: ") + (data?.error || "kein HTML")); return }
           if (targetEl && targetEl.parentElement) {
             const wrap = doc.createElement("div")
             wrap.innerHTML = data.html
