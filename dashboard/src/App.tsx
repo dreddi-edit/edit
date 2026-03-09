@@ -421,6 +421,14 @@ const autoSave = async (html: string) => {
       return
     }
 
+    if (p.html && p.html.length > 0) {
+      setUrl("")
+      setLoadedUrl("")
+      setCurrentHtml(p.html)
+      setStatus("ok")
+      return
+    }
+
     if (p.url) setUrl(p.url)
     if (!p.url && p.html) {
       setCurrentHtml(p.html)
