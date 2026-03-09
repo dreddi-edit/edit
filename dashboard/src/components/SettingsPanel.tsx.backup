@@ -2,7 +2,6 @@ import { useEffect, useState } from "react"
 import { toast } from "./Toast"
 import { getRequireApproval, setRequireApproval, getApprovalThreshold, setApprovalThreshold } from "../approval-settings"
 import { useTranslation } from "../i18n/useTranslation"
-import { analyzePageSpeed } from "../utils/api"
 
 const BASE = ""
 
@@ -10,7 +9,6 @@ type ApiKey = { id: number; provider: string; label: string; detected_models: { 
 type Org = { id: number; name: string; owner_id: number }
 type OrgMember = { id: number; invite_email: string; role: string; status: string; name?: string; email?: string }
 type Settings = { theme: string; disabled_models: string[] }
-type SeoData = { performance: number; accessibility: number; seo: number; fcp: string }
 
 const ALL_MODELS = [
   { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", provider: "anthropic" },
@@ -28,8 +26,6 @@ export default function SettingsPanel({ onClose, onThemeChange }: { onClose: () 
   const [approvalOn, setApprovalOn] = useState(getRequireApproval())
   const [approvalThreshold, setApprovalThresholdState] = useState(getApprovalThreshold())
   const [onlyOwnKey, setOnlyOwnKey] = useState(false)
-  const [seoData, setSeoData] = useState<SeoData | null>(null)
-  const [seoLoading, setSeoLoading] = useState(false)
 
   // API Keys
   const [myKeys, setMyKeys] = useState<ApiKey[]>([])
@@ -340,31 +336,6 @@ export default function SettingsPanel({ onClose, onThemeChange }: { onClose: () 
                 })}
               </div>
             </Section>
-
-            <Section title="SEO Analysis">
-              <button onClick={analyzeSEO} disabled={seoLoading} style={{
-                height: 36, padding: "0 16px", borderRadius: 8,
-                border: "1px solid var(--border)",
-                background: "var(--bg-card)",
-                color: "var(--text-primary)", cursor: "pointer", fontSize: 13,
-                opacity: seoLoading ? 0.6 : 1,
-              }}>
-                {seoLoading ? "Analyzing..." : "🔍 Analyze SEO"}
-              </button>
-              {seoData && (
-                <div style={{
-                  marginTop: 16, padding: 16, borderRadius: 8,
-                  background: "var(--bg-card)", border: "1px solid var(--border)",
-                }}>
-                  <div style={{ fontWeight: 700, marginBottom: 8 }}>
-                    Performance: {seoData.performance}/100 | SEO: {seoData.seo}/100
-                  </div>
-                  <div style={{ fontSize: 12, color: "var(--text-muted)" }}>
-                    First Contentful Paint: {seoData.fcp}
-                  </div>
-                </div>
-              )}
-            </Section>
           </>)}
 
           {/* API KEYS */}
@@ -621,21 +592,6 @@ export default function SettingsPanel({ onClose, onThemeChange }: { onClose: () 
     </div>
   )
 }
-
-  const analyzeSEO = async () => {
-    setSeoLoading(true);
-    try {
-      // Get current project URL from the editor
-      const currentUrl = window.location.origin + "/preview/" + window.location.pathname.split('/').pop();
-      const data = await analyzePageSpeed(currentUrl);
-      setSeoData(data);
-    } catch (error) {
-      console.error("SEO analysis failed:", error);
-      toast.error("SEO analysis failed");
-    } finally {
-      setSeoLoading(false);
-    }
-  };
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
