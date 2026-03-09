@@ -124,7 +124,6 @@ export default function App() {
     return aiApprovalQueue[0] || null
   }
 
-  const aiApproval = aiApprovalQueue.length ? aiApprovalQueue[0] : null
 
 
 async function sendResetPw(userId:number){
