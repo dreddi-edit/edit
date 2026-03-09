@@ -1,9 +1,19 @@
 import Database from "better-sqlite3"
 import { join, dirname } from "path"
 import { fileURLToPath } from "url"
+import { mkdirSync } from "fs"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const DB_PATH = process.env.DB_PATH || join(__dirname, "editor.db")
+const dataDir = join(__dirname, "data")
+
+// Ensure data directory exists
+try {
+  mkdirSync(dataDir, { recursive: true })
+} catch (error) {
+  console.log("Data directory created or already exists:", dataDir)
+}
+
+const DB_PATH = process.env.DB_PATH || join(dataDir, "editor.db")
 const db = new Database(DB_PATH)
 
 db.exec(`
