@@ -10,8 +10,10 @@ import { useRef, useState, useEffect } from 'react';
 import BlockOverlay from "./components/BlockOverlay";
 import { ENDPOINTS } from './config';
 import { COMPONENT_LIBRARY, COMPONENT_CATEGORIES } from './components/ComponentLibrary';
+import { useTranslation } from "./i18n/useTranslation"
 
 export default function App() {
+  const { t } = useTranslation();
   const AI_MODELS = [
     { value: "auto", label: "Auto" },
     { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
