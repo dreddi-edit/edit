@@ -154,11 +154,7 @@ export default function App() {
 
   const currentAiApproval = aiApprovalQueue.length ? aiApprovalQueue[0] : aiApproval
 
-  const currentAiApproval = aiApprovalQueue.length ? aiApprovalQueue[0] : aiApproval
-
-
-
-async function sendResetPw(userId:number){
+  async function sendResetPw(userId:number){
   await fetch("/api/admin/send-reset",{
     method:"POST",
     credentials:"include",
