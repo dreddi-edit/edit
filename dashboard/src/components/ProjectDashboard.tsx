@@ -302,9 +302,28 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
 
   const checkOllama = async () => {
     setOllamaStatus("checking")
-    // Try browser-direct first (no-cors just to check if port is open)
+
+    const isLocalPage =
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1"
+
+    if (!isLocalPage) {
+      try {
+        const r = await fetch(`${BASE}/api/ai/ollama-health`, {
+          credentials: "include",
+          signal: AbortSignal.timeout(3000),
+        })
+        const d = await r.json()
+        if (d?.ok) setOllamaStatus("running")
+        else setOllamaStatus("offline")
+      } catch {
+        setOllamaStatus("offline")
+      }
+      return
+    }
+
     try {
-      const r = await fetch("http://localhost:11434/api/tags", { 
+      const r = await fetch("http://localhost:11434/api/tags", {
         signal: AbortSignal.timeout(3000),
       })
       if (r.ok) {
@@ -319,17 +338,17 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
         return
       }
     } catch {}
-    // Fallback: no-cors ping (cannot read response but can detect if port open)
+
     try {
-      await fetch("http://localhost:11434", { 
+      await fetch("http://localhost:11434", {
         signal: AbortSignal.timeout(2000),
         mode: "no-cors"
       })
-      // If we get here without throwing, port is open
       setOllamaStatus("running")
       toast.success("Ollama läuft ✓")
       return
     } catch {}
+
     setOllamaStatus("offline")
   }
 
