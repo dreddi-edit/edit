@@ -393,7 +393,7 @@ const autoSave = async (html: string) => {
     iframe.srcdoc = html || "<!doctype html><html><head></head><body></body></html>";
   };
 
-  useEffect(() => { if (currentHtml) renderToIframe(currentHtml); }, [currentHtml]);
+  useEffect(() => { if (view === "editor" && currentHtml) renderToIframe(currentHtml); }, [currentHtml, view]);
 
   const load = async (forceReload = false) => {
     const u = url.trim();
