@@ -1037,9 +1037,6 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
               </div>
             )}
 
-          >
-            )}
-
             <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase", color: theme === "light" ? "#6366f1" : "rgba(129,140,248,0.9)", marginBottom: 8 }}>
               AI Generator
             </div>
