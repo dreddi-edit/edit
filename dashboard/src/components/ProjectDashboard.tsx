@@ -133,6 +133,14 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
     localStorage.getItem("ollama-card-collapsed") === "true"
   )
 
+  const inputStyle: React.CSSProperties = {
+    height: 38, borderRadius: 8,
+    border: "1px solid rgba(255,255,255,0.1)",
+    background: "rgba(0,0,0,0.3)",
+    color: "white", padding: "0 12px",
+    outline: "none", fontSize: 13, boxSizing: "border-box",
+  }
+
   const [showOnboarding, setShowOnboarding] = useState(
     !localStorage.getItem("se_onboarding_done")
   )
@@ -1351,14 +1359,6 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
       <style>{`@keyframes spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }`}</style>
     </div>
   )
-}
-
-const inputStyle: React.CSSProperties = {
-  height: 38, borderRadius: 8,
-  border: "1px solid rgba(255,255,255,0.1)",
-  background: "rgba(0,0,0,0.3)",
-  color: "white", padding: "0 12px",
-  outline: "none", fontSize: 13, boxSizing: "border-box",
 }
 
 /* loader fix */
