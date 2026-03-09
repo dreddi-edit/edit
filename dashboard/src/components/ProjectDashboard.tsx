@@ -999,7 +999,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
               background: theme === "light" ? "#ffffff" : "#0f1629",
               border: "1px solid rgba(99,102,241,0.25)",
               boxShadow: "0 24px 60px rgba(0,0,0,0.45)",
-            }}
+            }}>
               {landingGenerating && (
                 <div style={{
                   position: "absolute", inset: 0,
