@@ -4,19 +4,53 @@ import bcrypt from "bcryptjs"
 import crypto from "crypto"
 
 // --- Safe Mode Proxy - Strips broken JS and CSS ---
-function sanitizeHtmlForEditor(html) {
-  // Remove problematic script sources that cause 404s
+function sanitizeHtmlForEditor(html, baseUrl) {
+  // Parse base URL for rewriting relative URLs
+  let origin = "";
+  let basePath = "";
+  try {
+    const u = new URL(baseUrl || "");
+    origin = u.origin; // e.g. https://example.com
+    basePath = u.origin + u.pathname.replace(/\/[^\/]*$/, "/"); // e.g. https://example.com/path/
+  } catch {}
+
+  // Rewrite relative URLs to absolute for CSS, images, fonts
+  if (origin) {
+    // <link href="..."> - stylesheets
+    html = html.replace(/(<link[^>]*href=["'])(\/[^"\/][^"']*["'])/gi, (m, pre, url) => {
+      if (url.startsWith("//")) return pre + "https:" + url;
+      if (url.startsWith("/")) return pre + origin + url.slice(0, -1) + '"';
+      return m;
+    });
+
+    // <script src="...">
+    html = html.replace(/(<script[^>]*src=["'])(\/[^"']*["'])/gi, (m, pre, url) => {
+      if (url.startsWith("//")) return pre + "https:" + url;
+      if (url.startsWith("/")) return pre + origin + url.slice(0, -1) + '"';
+      return m;
+    });
+
+    // <img src="...">
+    html = html.replace(/(<img[^>]*src=["'])(\/[^"']*["'])/gi, (m, pre, url) => {
+      if (url.startsWith("//")) return pre + "https:" + url;
+      if (url.startsWith("/")) return pre + origin + url.slice(0, -1) + '"';
+      return m;
+    });
+
+    // url(...) in style tags/attributes
+    html = html.replace(/url\(["']?(\/[^)"']+)["']?\)/gi, (m, url) => {
+      return `url("${origin}${url}")`;
+    });
+
+    // Inject <base> tag so relative URLs in CSS/JS work automatically
+    html = html.replace(/<head([^>]*)>/i, `<head$1><base href="${origin}/">`);
+  }
+
+  // Remove only truly broken scripts (not all scripts)
   html = html.replace(/<script[^>]*src=["'][^"']*storefront[^"']*["'][^>]*><\/script>/gi, '');
-  html = html.replace(/<script[^>]*src=["'][^"']*\/js\/[^"']*["'][^>]*><\/script>/gi, '');
   
-  // Remove problematic CSS that causes CSP issues
-  html = html.replace(/<link[^>]*rel=["']stylesheet["'][^>]*href=["'][^"']*storefront[^"']*["'][^>]*>/gi, '');
-  
-  // Remove inline event handlers that might reference missing functions
+  // Remove inline event handlers
   html = html.replace(/\son\w+="[^"]*"/gi, '');
-  
-  // Add safe mode indicator
-  html = html.replace(/<head>/i, '<head><!-- SAFE MODE: Broken JS removed -->');
   
   return html;
 }
@@ -198,8 +232,8 @@ app.get("/proxy", async (req, res) => {
     }
     const html = await r.text()
     
-    // Apply safe mode sanitization
-    const safeHtml = sanitizeHtmlForEditor(html)
+    // Apply safe mode sanitization with base URL for relative URL rewriting
+    const safeHtml = sanitizeHtmlForEditor(html, url)
     
     res.send(safeHtml)
   } catch (e) {

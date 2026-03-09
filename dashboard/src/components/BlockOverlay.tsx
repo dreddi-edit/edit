@@ -1048,31 +1048,37 @@ const [aiLoading, setAiLoading] = useState(false);
       el.classList.contains("wp-block-group") || el.classList.contains("wp-block-columns") ||
       el.classList.contains("site-header") || el.classList.contains("site-nav");
 
-    // On second click of a container: find and highlight sub-blocks
-    if (isSameBlock && isContainer) {
-      // Scan sub-elements and add them as temporary blocks
-      const subEls = Array.from(el.querySelectorAll(
-        "a[href], button, img, h1, h2, h3, h4, p, input, [class*='btn']"
-      )) as HTMLElement[];
+        // On click of a container: expand into sub-blocks
+    if (isContainer) {
+      const SUB_QUERY = "h1,h2,h3,h4,p,button,a[href],img,figure,ul,ol,form,[class*='btn'],[class*='button'],.wp-block-button,.wp-block-heading,.wp-block-paragraph";
+      const subEls = Array.from(el.querySelectorAll(SUB_QUERY)) as HTMLElement[];
 
-      const subBlocks: BlockEntry[] = [];
-      subEls.forEach((subEl, i) => {
+      const directSubs = subEls.filter(subEl => {
+        if (subEl === el) return false;
         const r = subEl.getBoundingClientRect();
-        if (r.width < 8 || r.height < 8) return;
-        const subId = `${id}-sub-${i}`;
-        subEl.setAttribute("data-block-id", subId);
-        subBlocks.push({
-          id: subId,
-          label: pickLabel(subEl),
-          selector: `[data-block-id="${subId}"]`,
-          isButton: isButtonElement(subEl),
-          docTop: r.top + (doc.defaultView?.scrollY || 0),
-        });
+        if (r.width < 10 || r.height < 10) return false;
+        const p1 = subEl.parentElement;
+        const p2 = p1?.parentElement;
+        const p3 = p2?.parentElement;
+        return p1 === el || p2 === el || p3 === el;
       });
 
-      if (subBlocks.length > 0) {
-        // Replace current blocks with: all non-children blocks + new sub-blocks
-        // win and parentRect not needed here
+      if (directSubs.length > 0) {
+        const scrollY = doc.defaultView?.scrollY || 0;
+        const subBlocks: BlockEntry[] = [];
+        directSubs.forEach((subEl, i) => {
+          const r = subEl.getBoundingClientRect();
+          const subId = `${id}-sub-${i}`;
+          subEl.setAttribute("data-block-id", subId);
+          subBlocks.push({
+            id: subId,
+            label: pickLabel(subEl),
+            selector: `[data-block-id="${subId}"]`,
+            isButton: isButtonElement(subEl),
+            docTop: r.top + scrollY,
+          });
+        });
+
         setBlocks(prev => {
           const others = prev.filter(pb => {
             const pEl = doc.querySelector(pb.selector) as HTMLElement | null;
@@ -1080,10 +1086,16 @@ const [aiLoading, setAiLoading] = useState(false);
           });
           return [...others, ...subBlocks].sort((a, b) => a.docTop - b.docTop);
         });
-        setSelectedId(null);
-        toast.success(`${subBlocks.length} Sub-Elemente gefunden – klicke eins an`);
+        setSelectedId(id);
         return;
       }
+    }
+        // If clicking a DIFFERENT block than currently selected → reset to clean scan first
+    if (selectedId && selectedId !== id) {
+      // Trigger a fresh scan to collapse previous sub-blocks
+      setTimeout(() => {
+        try { window.dispatchEvent(new CustomEvent("blockoverlay:rescan", { detail: { mode: "page" } })); } catch {}
+      }, 10);
     }
 
     setSelectedId(id);
@@ -1371,14 +1383,16 @@ const [aiLoading, setAiLoading] = useState(false);
       "div[class*='carousel']", "div[class*='featured']",
     ];
 
-    // LEVEL 2: Specific elements that are important standalone
+    // LEVEL 2: Specific elements - always detected individually
     const SPECIFIC_SELECTORS = [
-      // Headings
-      "h1", "h2", "h3",
-      // Images outside containers
+      "h1", "h2", "h3", "h4",
+      "p", "span[class]",
       "figure.wp-block-image", ".wp-block-button",
-      // Standalone buttons NOT inside nav
       "a.wp-block-button__link",
+      "button", "a.btn", "[class*='btn-']",
+      "img",
+      "ul", "ol",
+      "form",
     ];
 
     for (const sel of CONTAINER_SELECTORS) {

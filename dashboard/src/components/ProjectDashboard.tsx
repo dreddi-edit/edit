@@ -245,11 +245,30 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
 
   const checkOllama = async () => {
     try {
-      const r = await fetch("/api/ai/ollama-health", { signal: AbortSignal.timeout(3000) })
-      const d = await r.json()
-      setOllamaStatus(d.ok ? "running" : "offline")
+      // Check directly from browser to localhost - works even when app is on Railway
+      const r = await fetch("http://localhost:11434/api/tags", { 
+        signal: AbortSignal.timeout(2000),
+        mode: "cors"
+      })
+      if (r.ok) {
+        const d = await r.json()
+        const models = (d.models || []).map((m: any) => m.name)
+        setOllamaStatus("running")
+        if (models.length > 0) {
+          toast.success(`Ollama läuft · Modelle: ${models.slice(0,3).join(", ")}`)
+        }
+      } else {
+        setOllamaStatus("offline")
+      }
     } catch {
-      setOllamaStatus("offline")
+      // Fallback: try server-side check
+      try {
+        const r = await fetch("/api/ai/ollama-health", { signal: AbortSignal.timeout(2000) })
+        const d = await r.json()
+        setOllamaStatus(d.ok ? "running" : "offline")
+      } catch {
+        setOllamaStatus("offline")
+      }
     }
   }
 
