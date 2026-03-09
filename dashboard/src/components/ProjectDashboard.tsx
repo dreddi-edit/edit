@@ -115,6 +115,12 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   const [templateUrl, setTemplateUrl] = useState("")
   const [templateName, setTemplateName] = useState("")
   const [templateExtracting, setTemplateExtracting] = useState(false)
+
+  const [showLandingGen, setShowLandingGen] = useState(false)
+  const [landingName, setLandingName] = useState("")
+  const [landingDesc, setLandingDesc] = useState("")
+  const [landingAudience, setLandingAudience] = useState("")
+  const [landingGenerating, setLandingGenerating] = useState(false)
   const [templates, setTemplates] = useState<any[]>([])
   const [ollamaStatus, setOllamaStatus] = useState<"checking"|"running"|"offline">("checking")
   const [ollamaOs, setOllamaOs] = useState<"mac"|"windows"|"linux">("mac")
@@ -331,12 +337,304 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
     onLogout()
   }
 
+  const generateLandingPage = async () => {
+    if (!landingName.trim()) { toast.warning("Produktname erforderlich"); return }
+    setLandingGenerating(true)
+    try {
+      const name = landingName.trim()
+      const desc = landingDesc.trim() || "AI-powered product"
+      const audience = landingAudience.trim() || "modern teams"
+
+      const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${name}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0b1020;
+      color: #ffffff;
+      line-height: 1.5;
+    }
+    .wrap { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
+    .hero {
+      padding: 96px 0 72px;
+      background:
+        radial-gradient(circle at top left, rgba(99,102,241,0.28), transparent 28%),
+        radial-gradient(circle at top right, rgba(168,85,247,0.22), transparent 24%),
+        linear-gradient(180deg, #0b1020 0%, #11182b 100%);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .badge {
+      display: inline-flex;
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: #c7d2fe;
+      background: rgba(99,102,241,0.14);
+      border: 1px solid rgba(99,102,241,0.28);
+    }
+    h1 {
+      margin: 18px 0 14px;
+      font-size: clamp(42px, 7vw, 72px);
+      line-height: .95;
+      letter-spacing: -0.04em;
+      max-width: 880px;
+    }
+    .sub {
+      max-width: 760px;
+      font-size: 18px;
+      color: rgba(255,255,255,0.72);
+    }
+    .hero-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 28px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      height: 48px;
+      padding: 0 18px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.1);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      text-decoration: none;
+    }
+    .btn-primary {
+      color: white;
+      background: linear-gradient(135deg, #6366f1, #8b5cf6);
+      border: none;
+    }
+    .btn-secondary {
+      color: rgba(255,255,255,0.85);
+      background: rgba(255,255,255,0.04);
+    }
+    .section {
+      padding: 72px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      background: #0f1629;
+    }
+    .section.alt { background: #0c1324; }
+    .eyebrow {
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: #a5b4fc;
+      margin-bottom: 12px;
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-size: clamp(28px, 4vw, 42px);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+    .muted {
+      color: rgba(255,255,255,0.68);
+      max-width: 760px;
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+      margin-top: 28px;
+    }
+    .card {
+      padding: 22px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 10px 30px rgba(0,0,0,0.16);
+    }
+    .card h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+    }
+    .pricing {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+      margin-top: 28px;
+    }
+    .price {
+      font-size: 42px;
+      font-weight: 900;
+      letter-spacing: -0.04em;
+      margin: 12px 0 4px;
+    }
+    .price small {
+      font-size: 14px;
+      color: rgba(255,255,255,0.62);
+      font-weight: 700;
+      margin-left: 6px;
+    }
+    ul {
+      padding-left: 18px;
+      color: rgba(255,255,255,0.72);
+    }
+    .cta {
+      padding: 82px 0;
+      text-align: center;
+      background:
+        radial-gradient(circle at top, rgba(99,102,241,0.18), transparent 32%),
+        #0b1020;
+    }
+    .cta .wrap { max-width: 820px; }
+    @media (max-width: 900px) {
+      .grid-3, .pricing { grid-template-columns: 1fr; }
+      .hero { padding-top: 72px; }
+    }
+  </style>
+</head>
+<body>
+  <section class="hero">
+    <div class="wrap">
+      <div class="badge">AI Landing Page</div>
+      <h1>${name} for ${audience}</h1>
+      <p class="sub">${desc}</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#pricing">Start Free Trial</a>
+        <a class="btn btn-secondary" href="#features">See Features</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="features" class="section">
+    <div class="wrap">
+      <div class="eyebrow">Features</div>
+      <h2>Built to help ${audience} move faster</h2>
+      <p class="muted">This demo landing page was generated instantly and can now be refined block-by-block inside the editor.</p>
+      <div class="grid-3">
+        <div class="card">
+          <h3>Fast setup</h3>
+          <p class="muted">Launch a polished website structure in minutes instead of starting from a blank canvas.</p>
+        </div>
+        <div class="card">
+          <h3>AI editing</h3>
+          <p class="muted">Rewrite sections, improve copy, and redesign layout with simple prompts.</p>
+        </div>
+        <div class="card">
+          <h3>Export ready</h3>
+          <p class="muted">Keep iterating in the editor and export once the page is ready to ship.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section alt">
+    <div class="wrap">
+      <div class="eyebrow">Why it works</div>
+      <h2>A modern page structure with clear conversion flow</h2>
+      <div class="grid-3">
+        <div class="card">
+          <h3>Clear message</h3>
+          <p class="muted">Immediate value proposition above the fold with focused calls-to-action.</p>
+        </div>
+        <div class="card">
+          <h3>Trust signals</h3>
+          <p class="muted">Feature blocks and structured layout create clarity and credibility.</p>
+        </div>
+        <div class="card">
+          <h3>Scalable design</h3>
+          <p class="muted">Easy to adapt for SaaS, agencies, tools, or digital products.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="pricing" class="section">
+    <div class="wrap">
+      <div class="eyebrow">Pricing</div>
+      <h2>Simple plans for different growth stages</h2>
+      <div class="pricing">
+        <div class="card">
+          <h3>Starter</h3>
+          <div class="price">€19<small>/mo</small></div>
+          <ul>
+            <li>Core access</li>
+            <li>Basic AI editing</li>
+            <li>Up to 3 projects</li>
+          </ul>
+        </div>
+        <div class="card" style="border-color: rgba(99,102,241,0.3); background: rgba(99,102,241,0.09);">
+          <h3>Pro</h3>
+          <div class="price">€49<small>/mo</small></div>
+          <ul>
+            <li>Full AI workflow</li>
+            <li>Advanced editing</li>
+            <li>Best for teams</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>Scale</h3>
+          <div class="price">€99<small>/mo</small></div>
+          <ul>
+            <li>Higher limits</li>
+            <li>Priority support</li>
+            <li>Built for growth</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta">
+    <div class="wrap">
+      <div class="eyebrow">Get started</div>
+      <h2>Launch ${name} with a page that already looks production-ready</h2>
+      <p class="muted" style="margin: 0 auto 24px;">Use this generated page as a starting point, then refine every block with AI inside the editor.</p>
+      <a class="btn btn-primary" href="#">Start now</a>
+    </div>
+  </section>
+</body>
+</html>`
+
+      const id = await apiCreateProject(name, "", html)
+      const project: Project = {
+        id,
+        name,
+        url: "",
+        html,
+        updated_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      }
+
+      toast.success("Landing Page erstellt")
+      setShowLandingGen(false)
+      setLandingName("")
+      setLandingDesc("")
+      setLandingAudience("")
+      await load()
+      onOpen(project)
+    } catch (e: any) {
+      toast.error(e.message || "Landing Page konnte nicht erstellt werden")
+    } finally {
+      setLandingGenerating(false)
+    }
+  }
+
   const QUICK_ACTIONS = [
     {
       icon: "+",
       title: "Neues Projekt",
       desc: "Projekt anlegen und URL laden",
       action: () => setShowNew(true),
+    },
+    {
+      icon: "✨",
+      title: "Landing Page Generator",
+      desc: "Neue AI Landing Page erzeugen",
+      action: () => setShowLandingGen(true),
     },
     {
       icon: "◎",
@@ -871,6 +1169,117 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
                   Start Tour
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showLandingGen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 1000,
+            background: "rgba(0,0,0,0.72)",
+            backdropFilter: "blur(6px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
+        >
+          <div
+            style={{
+              width: 560,
+              maxWidth: "100%",
+              borderRadius: 18,
+              padding: 26,
+              background: theme === "light" ? "#ffffff" : "#0f1629",
+              border: "1px solid rgba(99,102,241,0.25)",
+              boxShadow: "0 24px 60px rgba(0,0,0,0.45)",
+            }}
+          >
+            <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase", color: theme === "light" ? "#6366f1" : "rgba(129,140,248,0.9)", marginBottom: 8 }}>
+              AI Generator
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 900, marginBottom: 8, color: theme === "light" ? "#0f172a" : "white" }}>
+              Generate Landing Page
+            </div>
+            <div style={{ fontSize: 13, lineHeight: 1.6, color: theme === "light" ? "#475569" : "rgba(148,163,184,0.78)", marginBottom: 20 }}>
+              Create a complete landing page instantly and continue refining it inside the editor.
+            </div>
+
+            <label style={{ fontSize: 11, fontWeight: 800, display: "block", marginBottom: 6, color: theme === "light" ? "#475569" : "rgba(148,163,184,0.72)" }}>
+              PRODUCT NAME
+            </label>
+            <input
+              value={landingName}
+              onChange={e => setLandingName(e.target.value)}
+              placeholder="e.g. Chout, Arcana, AlphaFlow"
+              style={{ ...inputStyle, width: "100%", marginBottom: 12 }}
+            />
+
+            <label style={{ fontSize: 11, fontWeight: 800, display: "block", marginBottom: 6, color: theme === "light" ? "#475569" : "rgba(148,163,184,0.72)" }}>
+              DESCRIPTION
+            </label>
+            <textarea
+              value={landingDesc}
+              onChange={e => setLandingDesc(e.target.value)}
+              placeholder="What does the product do?"
+              style={{
+                ...inputStyle,
+                width: "100%",
+                minHeight: 92,
+                padding: 12,
+                resize: "vertical",
+                marginBottom: 12,
+              }}
+            />
+
+            <label style={{ fontSize: 11, fontWeight: 800, display: "block", marginBottom: 6, color: theme === "light" ? "#475569" : "rgba(148,163,184,0.72)" }}>
+              TARGET AUDIENCE
+            </label>
+            <input
+              value={landingAudience}
+              onChange={e => setLandingAudience(e.target.value)}
+              placeholder="e.g. creators, startups, agencies, ecommerce brands"
+              style={{ ...inputStyle, width: "100%", marginBottom: 20 }}
+            />
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
+              <button
+                onClick={() => setShowLandingGen(false)}
+                style={{
+                  height: 40,
+                  padding: "0 14px",
+                  borderRadius: 10,
+                  border: "1px solid rgba(148,163,184,0.18)",
+                  background: "transparent",
+                  color: theme === "light" ? "#475569" : "rgba(148,163,184,0.9)",
+                  cursor: "pointer",
+                  fontWeight: 700,
+                }}
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={generateLandingPage}
+                disabled={landingGenerating}
+                style={{
+                  height: 40,
+                  padding: "0 16px",
+                  borderRadius: 10,
+                  border: "none",
+                  background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                  color: "white",
+                  cursor: landingGenerating ? "wait" : "pointer",
+                  fontWeight: 800,
+                  opacity: landingGenerating ? 0.7 : 1,
+                }}
+              >
+                {landingGenerating ? "Generating..." : "Generate"}
+              </button>
             </div>
           </div>
         </div>
