@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Google APIs Test</title>
+    <style>
+        body { font-family: system-ui; padding: 20px; max-width: 800px; margin: 0 auto; }
+        .test-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 8px; }
+        .test-button { padding: 10px 20px; margin: 5px; background: #6366f1; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        .test-button:hover { background: #4f46e5; }
+        .result { margin: 10px 0; padding: 10px; background: #f5f5f5; border-radius: 5px; }
+        .error { background: #fee; border: 1px solid #fcc; }
+        .success { background: #efe; border: 1px solid #cfc; }
+    </style>
+</head>
+<body>
+    <h1>🚀 Google APIs Suite Test</h1>
+    
+    <div class="test-section">
+        <h3>📊 SEO & Performance</h3>
+        <button class="test-button" onclick="testPageSpeed()">⚡ Test PageSpeed</button>
+        <button class="test-button" onclick="testCrUX()">🔍 Test Chrome UX</button>
+        <button class="test-button" onclick="testSearch()">🔎 Test Search</button>
+        <div id="seo-results"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>🤖 AI Content</h3>
+        <button class="test-button" onclick="testGemini()">✨ Test Gemini</button>
+        <button class="test-button" onclick="testNLP()">📝 Test NLP</button>
+        <button class="test-button" onclick="testTranslation()">🌐 Test Translation</button>
+        <div id="ai-results"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>🎬 Images & Videos</h3>
+        <button class="test-button" onclick="testVision()">👁️ Test Vision</button>
+        <button class="test-button" onclick="testYouTube()">📺 Test YouTube</button>
+        <button class="test-button" onclick="testDevices()">📱 Test Devices</button>
+        <div id="media-results"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>🚀 Export & Deploy</h3>
+        <button class="test-button" onclick="testStorage()">☁️ Test Storage</button>
+        <button class="test-button" onclick="testBigQuery()">📊 Test BigQuery</button>
+        <div id="deploy-results"></div>
+    </div>
+
+    <script>
+        const API_KEY = 'AIzaSyCDZO-jaZCuH_VArDVeOcvqtMUuXBN9rFc';
+        const TEST_URL = 'https://perplexity.ai';
+
+        function showResult(elementId, result, isError = false) {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `<div class="result ${isError ? 'error' : 'success'}">${JSON.stringify(result, null, 2)}</div>`;
+        }
+
+        async function testPageSpeed() {
+            try {
+                const response = await fetch(`https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(TEST_URL)}&key=${API_KEY}&strategy=mobile`);
+                const data = await response.json();
+                const lighthouse = data.lighthouseResult;
+                showResult('seo-results', {
+                    performance: Math.round(lighthouse.categories.performance.score * 100),
+                    accessibility: Math.round(lighthouse.categories.accessibility.score * 100),
+                    seo: Math.round(lighthouse.categories.seo.score * 100),
+                    fcp: lighthouse.audits["first-contentful-paint"]?.displayValue || "N/A"
+                });
+            } catch (error) {
+                showResult('seo-results', { error: error.message }, true);
+            }
+        }
+
+        async function testCrUX() {
+            try {
+                const response = await fetch(`https://chromeuxreport.googleapis.com/v1/records:queryHistory?key=${API_KEY}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ request: { url: TEST_URL } })
+                });
+                const data = await response.json();
+                showResult('seo-results', {
+                    mobileP75: data.record?.metrics?.largest_contentful_paint?.percentiles?.p75 || 0,
+                    desktopP75: data.record?.metrics?.largest_contentful_paint?.percentiles?.p75 || 0,
+                    url: TEST_URL
+                });
+            } catch (error) {
+                showResult('seo-results', { error: error.message }, true);
+            }
+        }
+
+        async function testSearch() {
+            try {
+                const response = await fetch(`https://www.googleapis.com/customsearch/v1?key=${API_KEY}&cx=017576662512468239146:omuauf_lfve&q=${encodeURIComponent(TEST_URL)}`);
+                const data = await response.json();
+                showResult('seo-results', {
+                    results: data.items?.length || 0,
+                    firstResult: data.items?.[0]?.title || 'No results'
+                });
+            } catch (error) {
+                showResult('seo-results', { error: error.message }, true);
+            }
+        }
+
+        async function testGemini() {
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${API_KEY}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: "Generate a short marketing slogan for this website" }] }]
+                    })
+                });
+                const data = await response.json();
+                showResult('ai-results', {
+                    text: data.candidates?.[0]?.content?.parts?.[0]?.text || "No response",
+                    usage: data.usageMetadata || { promptTokens: 0, candidatesTokens: 0 }
+                });
+            } catch (error) {
+                showResult('ai-results', { error: error.message }, true);
+            }
+        }
+
+        async function testNLP() {
+            try {
+                const response = await fetch(`https://language.googleapis.com/v1/documents:analyzeEntities?key=${API_KEY}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        document: { content: "This is a test document about Google Cloud services.", type: 'PLAIN_TEXT' },
+                        encodingType: 'UTF8'
+                    })
+                });
+                const data = await response.json();
+                showResult('ai-results', {
+                    entities: data.entities?.length || 0,
+                    firstEntity: data.entities?.[0]?.name || 'No entities'
+                });
+            } catch (error) {
+                showResult('ai-results', { error: error.message }, true);
+            }
+        }
+
+        async function testTranslation() {
+            try {
+                const response = await fetch(`https://translation.googleapis.com/language/translate/v2?key=${API_KEY}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        q: "Hello world",
+                        target: "de"
+                    })
+                });
+                const data = await response.json();
+                showResult('ai-results', {
+                    original: "Hello world",
+                    translated: data.data?.translations?.[0]?.translatedText || "No translation",
+                    detectedLanguage: data.data?.translations?.[0]?.detectedSourceLanguage || "unknown"
+                });
+            } catch (error) {
+                showResult('ai-results', { error: error.message }, true);
+            }
+        }
+
+        async function testVision() {
+            // Test with a simple 1x1 red pixel
+            const testImage = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+            try {
+                const response = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${API_KEY}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        requests: [{
+                            image: { content: testImage.split(',')[1] },
+                            features: [{ type: 'LABEL_DETECTION', maxResults: 5 }]
+                        }]
+                    })
+                });
+                const data = await response.json();
+                showResult('media-results', {
+                    labels: data.responses?.[0]?.labelAnnotations?.length || 0,
+                    firstLabel: data.responses?.[0]?.labelAnnotations?.[0]?.description || 'No labels'
+                });
+            } catch (error) {
+                showResult('media-results', { error: error.message }, true);
+            }
+        }
+
+        async function testYouTube() {
+            try {
+                const response = await fetch(`https://www.googleapis.com/youtube/v3/search?key=${API_KEY}&part=snippet&type=video&maxResults=5&q=web%20development`);
+                const data = await response.json();
+                showResult('media-results', {
+                    videos: data.items?.length || 0,
+                    firstVideo: data.items?.[0]?.snippet?.title || 'No videos'
+                });
+            } catch (error) {
+                showResult('media-results', { error: error.message }, true);
+            }
+        }
+
+        async function testDevices() {
+            // Mock implementation
+            showResult('media-results', {
+                deviceSpecs: [
+                    { name: 'Mobile', type: 'phone', capabilities: ['touch', 'gps', 'camera'] },
+                    { name: 'Tablet', type: 'tablet', capabilities: ['touch', 'camera', 'large-screen'] },
+                    { name: 'Desktop', type: 'desktop', capabilities: ['mouse', 'keyboard', 'large-screen'] }
+                ]
+            });
+        }
+
+        async function testStorage() {
+            showResult('deploy-results', {
+                message: "Cloud Storage requires file upload - test in main application",
+                apiEndpoint: "https://storage.googleapis.com/upload/storage/v1/b/"
+            });
+        }
+
+        async function testBigQuery() {
+            showResult('deploy-results', {
+                message: "BigQuery requires project ID configuration",
+                apiEndpoint: "https://bigquery.googleapis.com/v2/projects/project-id/queries"
+            });
+        }
+    </script>
+</body>
+</html>
