@@ -5,6 +5,7 @@ import CreditsPanel from "./CreditsPanel"
 import SettingsPanel from "./SettingsPanel"
 import { apiLogout, type User } from "../api/auth"
 import { toast } from "./Toast"
+import { useTranslation } from "../i18n/useTranslation"
 
 
 const spinnerStyle = `@keyframes se-spin { to { transform: rotate(360deg) } }`
@@ -98,6 +99,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   onOpen: (p: Project) => void
   onLogout: () => void
 }) {
+  const { t, lang, setLang } = useTranslation()
   const [projects, setProjects] = useState<Project[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
@@ -542,7 +544,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
             border: "1px solid rgba(255,255,255,0.1)",
             background: "rgba(255,255,255,0.04)",
             color: "rgba(148,163,184,0.9)", cursor: "pointer", fontSize: 12, fontWeight: 700,
-          }}>Einstellungen</button>
+          }}>{t("Settings")}</button>
 
           <div style={{ width: 1, height: 20, background: "rgba(255,255,255,0.08)", margin: "0 4px" }} />
 
@@ -562,7 +564,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
             border: "1px solid rgba(255,255,255,0.08)",
             background: "transparent",
             color: theme === "light" ? "#94a3b8" : "rgba(148,163,184,0.4)", cursor: "pointer", fontSize: 12,
-          }}>Abmelden</button>
+          }}>{t("Sign out")}</button>
         </div>
       </div>
 
@@ -576,12 +578,12 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
           padding: "32px 28px", overflowY: "auto", height: "100%", boxSizing: "border-box",
         }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
-            <div style={{ fontSize: 15, fontWeight: 800, color: "rgba(255,255,255,0.9)" }}>Projekte</div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: "rgba(255,255,255,0.9)" }}>{t("Projects")}</div>
             <button onClick={() => setShowNew(true)} style={{
               height: 32, padding: "0 14px", borderRadius: 8, border: "none",
               background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
               color: "white", fontWeight: 700, fontSize: 12, cursor: "pointer",
-            }}>+ Neu</button>
+            }}>+ {t("New Section")}</button>
           </div>
 
           {/* Neues Projekt Form */}
@@ -592,7 +594,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
               background: theme === "light" ? "rgba(99,102,241,0.08)" : "rgba(99,102,241,0.15)",
             }}>
               <input value={newName} onChange={e => setNewName(e.target.value)}
-                placeholder="Projektname"
+                placeholder={t("Another item")}
                 style={{ ...inputStyle, width: "100%", marginBottom: 8 }} />
               <input value={newUrl} onChange={e => setNewUrl(e.target.value)}
                 placeholder="https://... (optional)"
@@ -602,18 +604,18 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
                   flex: 1, height: 36, borderRadius: 8, border: "none",
                   background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
                   color: "white", fontWeight: 700, cursor: creating ? "wait" : "pointer", fontSize: 13,
-                }}>{creating ? "..." : "Erstellen"}</button>
+                }}>{creating ? "..." : t("Create")}</button>
                 <button onClick={() => setShowNew(false)} style={{
                   height: 36, padding: "0 14px", borderRadius: 8,
                   border: "1px solid rgba(255,255,255,0.1)",
                   background: "transparent", color: theme === "light" ? "#475569" : "rgba(148,163,184,0.7)", cursor: "pointer", fontSize: 13,
-                }}>Abbrechen</button>
+                }}>{t("Cancel")}</button>
               </div>
             </div>
           )}
 
           {loading && (
-            <div style={{ textAlign: "center", padding: 48, color: "rgba(148,163,184,0.3)", fontSize: 13 }}>Laden...</div>
+            <div style={{ textAlign: "center", padding: 48, color: "rgba(148,163,184,0.3)", fontSize: 13 }}>{t("Loading...")}</div>
           )}
 
           {!loading && projects.length === 0 && !showNew && (
@@ -623,7 +625,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
               color: theme === "light" ? "#94a3b8" : "rgba(148,163,184,0.4)", fontSize: 13,
             }}>
               <div style={{ fontSize: 28, marginBottom: 12, opacity: 0.4 }}>◻</div>
-              Noch keine Projekte.<br />Erstelle dein erstes Projekt.
+              {t("No projects yet.")}<br />{t("Create your first project.")}
             </div>
           )}
 

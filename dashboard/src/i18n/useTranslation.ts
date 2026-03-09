@@ -1,20 +1,22 @@
-import { useState, useEffect } from 'react'
-import { translations } from './translations'
-import type { Language, TranslationKey } from './translations'
+import { useState } from "react"
+import { translations } from "./translations"
+
+export type Language = "en" | "de" | "es"
 
 export function useTranslation() {
-  const [language, setLanguage] = useState<Language>(() => {
-    const saved = localStorage.getItem('ui-language') as Language | null
-    return saved || 'en'
-  })
+  const [lang, setLangState] = useState<Language>(
+    () => (localStorage.getItem("ui-language") as Language) || "en"
+  )
 
-  useEffect(() => {
-    localStorage.setItem('ui-language', language)
-  }, [language])
+  const t = (key: string): string =>
+    (translations[lang] as any)[key] ??
+    (translations.en as any)[key] ??
+    key
 
-  const t = (key: TranslationKey) => {
-    return translations[language][key] || key
+  const setLang = (l: Language) => {
+    localStorage.setItem("ui-language", l)
+    setLangState(l)
   }
 
-  return { language, setLanguage, t }
+  return { t, lang, setLang }
 }
