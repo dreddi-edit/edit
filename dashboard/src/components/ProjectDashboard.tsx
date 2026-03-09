@@ -426,7 +426,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
       setLandingAudience("")
       setLandingLang("english")
       await load()
-      onOpen(project)
+      onOpen(project); setTimeout(()=>{},0)
     } catch (e: any) {
       toast.error(e.message || "Landing Page konnte nicht erstellt werden")
     } finally {
