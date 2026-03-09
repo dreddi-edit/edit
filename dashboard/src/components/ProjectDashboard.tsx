@@ -751,19 +751,18 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
                     ],
                   };
                   return (
-                    <div style={{ marginTop: 10, padding: "12px 14px", borderRadius: 8, background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.12)" }}>
-                      <div style={{ fontSize: 11, color: "rgba(239,68,68,0.7)", marginBottom: 10 }}>
-                        Ollama nicht erreichbar – folge der Checkliste:
+                    <div style={{ marginTop: 10, padding: "16px 20px", borderRadius: 8, background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.12)" }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: "rgba(239,68,68,0.9)", marginBottom: 8 }}>
+                        Use free AI on your computer
                       </div>
-                      <div style={{ fontSize: 10, color: "rgba(239,68,68,0.5)", marginBottom: 8, fontFamily: "monospace" }}>
-                        Wichtig: Starte Ollama mit CORS-Unterstützung:<br/>
-                        <code style={{ background: "rgba(0,0,0,0.2)", padding: "2px 4px", borderRadius: 3 }}>OLLAMA_ORIGINS="*" ollama serve</code>
+                      <div style={{ fontSize: 13, color: "rgba(239,68,68,0.7)", marginBottom: 16 }}>
+                        Ollama runs AI models locally – 100% free, no API key needed.
                       </div>
                       {/* OS Tabs */}
-                      <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
+                      <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
                         {(["mac","windows","linux"] as const).map(o => (
                           <button key={o} onClick={() => setOllamaOs(o)} style={{
-                            padding: "3px 10px", borderRadius: 5, fontSize: 10, fontWeight: 700,
+                            padding: "4px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600,
                             cursor: "pointer", border: "1px solid",
                             background: os === o ? "rgba(99,102,241,0.2)" : "transparent",
                             color: os === o ? "rgba(99,102,241,0.9)" : "rgba(148,163,184,0.5)",
@@ -771,39 +770,54 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
                           }}>{o === "mac" ? "macOS" : o === "windows" ? "Windows" : "Linux"}</button>
                         ))}
                       </div>
+                      
                       {/* Steps */}
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                         {steps[os].map((step, i) => (
-                          <div key={i} style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                          <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <div style={{
-                              minWidth: 18, height: 18, borderRadius: "50%", background: "rgba(99,102,241,0.15)",
-                              border: "1px solid rgba(99,102,241,0.25)", color: "rgba(99,102,241,0.8)",
-                              fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", marginTop: 1,
-                            }}>{i+1}</div>
-                            <div>
-                              <div style={{ fontSize: 11, color: "rgba(200,200,210,0.8)", marginBottom: 2 }}>{step.title}</div>
-                              {step.cmd && (
-                                <code style={{
-                                  display: "block", fontSize: 10, padding: "3px 8px", borderRadius: 4,
-                                  background: "rgba(0,0,0,0.35)", color: "rgba(180,220,180,0.9)",
-                                  fontFamily: "monospace", letterSpacing: 0.3,
-                                }}>{step.cmd}</code>
-                              )}
+                              width: 24, height: 24, borderRadius: 4,
+                              background: "rgba(99,102,241,0.1)", color: "rgba(99,102,241,0.8)",
+                              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700,
+                            }}>{i + 1}</div>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(239,68,68,0.8)", marginBottom: 2 }}>
+                                {step.title}
+                              </div>
                               {step.link && (
-                                <a href={step.link} target="_blank" rel="noopener noreferrer" style={{
-                                  fontSize: 10, color: "rgba(99,102,241,0.8)", textDecoration: "none",
-                                  padding: "2px 8px", borderRadius: 4, border: "1px solid rgba(99,102,241,0.25)",
-                                  background: "rgba(99,102,241,0.1)", display: "inline-block",
-                                }}>{step.linkLabel}</a>
+                                <div style={{ fontSize: 11, color: "rgba(148,163,184,0.6)", marginBottom: 4 }}>
+                                  <a href={step.link} target="_blank" rel="noopener noreferrer" style={{ color: "rgba(99,102,241,0.7)", textDecoration: "none" }}>
+                                    {step.linkLabel || "Download"}
+                                  </a>
+                                </div>
+                              )}
+                              {step.cmd && (
+                                <div style={{ fontSize: 11, color: "rgba(148,163,184,0.6)" }}>
+                                  <code style={{ 
+                                    background: "rgba(0,0,0,0.2)", 
+                                    padding: "2px 6px", 
+                                    borderRadius: 3, 
+                                    fontSize: 10,
+                                    cursor: "pointer"
+                                  }} onClick={() => {
+                                    navigator.clipboard.writeText(step.cmd || "")
+                                    toast.success("Befehl kopiert!")
+                                  }}>
+                                    {step.cmd}
+                                  </code>
+                                </div>
                               )}
                             </div>
                           </div>
                         ))}
                       </div>
+                      
                       <button onClick={checkOllama} style={{
-                        marginTop: 12, height: 28, padding: "0 12px", borderRadius: 6, width: "100%",
-                        border: "1px solid rgba(148,163,184,0.2)", background: "rgba(148,163,184,0.06)",
-                        color: "rgba(148,163,184,0.7)", fontSize: 11, cursor: "pointer", fontWeight: 600,
+                        marginTop: 12, height: 36, padding: "0 16px", borderRadius: 6, width: "100%",
+                        border: "1px solid rgba(148,163,184,0.2)", 
+                        background: "rgba(148,163,184,0.06)", 
+                        color: "rgba(148,163,184,0.7)",
+                        fontSize: 12, cursor: "pointer", fontWeight: 600,
                       }}>↺ Erneut prüfen</button>
                     </div>
                   );
