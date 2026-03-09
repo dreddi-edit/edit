@@ -104,9 +104,10 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   const [showCredits, setShowCredits] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [balance, setBalance] = useState<number | null>(null)
-  const [demoPlan, setDemoPlan] = useState<"basis"|"starter"|"pro"|"scale">(
-    ((localStorage.getItem("se_demo_plan") as "basis"|"starter"|"pro"|"scale") || "basis")
-  )
+  const [demoPlan, setDemoPlan] = useState<"basis"|"starter"|"pro"|"scale">("basis")
+
+
+
   const [theme, setTheme] = useState<"dark"|"light">(
     (localStorage.getItem("se_theme") as "dark"|"light") || "dark"
   )
@@ -130,10 +131,17 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
     !localStorage.getItem("se_onboarding_done")
   )
 
-  useEffect(() => { 
+  useEffect(() => {
     load()
     loadTemplates()
     checkOllama()
+    fetch("/api/user/plan", { credentials: "include" })
+      .then(r => r.json()).then(d => { if (d.ok && d.plan) setDemoPlan(d.plan as any) }).catch(() => {})
+  }, [])
+
+
+
+
   }, [])
 
   useEffect(() => {
@@ -172,14 +180,6 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   }
 
   const activePlanMeta = planMeta[demoPlan]
-
-  useEffect(() => {
-    const syncPlan = () => {
-      const p = (localStorage.getItem("se_demo_plan") as "basis"|"starter"|"pro"|"scale") || "basis"
-      setDemoPlan(p)
-    }
-    window.addEventListener("focus", syncPlan)
-    return () => window.removeEventListener("focus", syncPlan)
   }, [])
 
   const takeScreenshot = async (projectId: number, url: string) => {
@@ -519,7 +519,6 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
                 PLAN · {activePlanMeta.label}
               </span>
               <span style={{ fontSize: 10, opacity: 0.8 }}>
-                {activePlanMeta.price}
               </span>
             </div>
           </div>
