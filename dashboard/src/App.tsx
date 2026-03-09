@@ -124,6 +124,8 @@ export default function App() {
     return aiApprovalQueue[0] || null
   }
 
+  const currentAiApproval = aiApprovalQueue.length ? aiApprovalQueue[0] : aiApproval
+
 
 
 async function sendResetPw(userId:number){
@@ -838,7 +840,7 @@ useEffect(() => {
         <div style={{ height:"100%", width:"40%", background:"linear-gradient(90deg, #6366f1, #8b5cf6)", transform:"translateX(-120%)", animation:isLoading?"loadingbar 800ms ease-in-out infinite":"none" }} />
       </div>
 
-      {aiApproval && (
+      {currentAiApproval && (
         <div style={{
           position:"fixed",
           right:16,
@@ -860,10 +862,10 @@ useEffect(() => {
           </div>
 
           <div style={{ display:"grid", gridTemplateColumns:"92px 1fr", gap:6, fontSize:12, color:"rgba(255,255,255,0.82)" }}>
-            <div style={{ opacity:0.7 }}>Model</div><div style={{ fontWeight:700 }}>{aiApproval.model}</div>
-            <div style={{ opacity:0.7 }}>Scope</div><div style={{ fontWeight:700 }}>{aiApproval.scope}</div>
-            <div style={{ opacity:0.7 }}>Input est.</div><div style={{ fontWeight:700 }}>~{aiApproval.estInputTokens.toLocaleString()} tokens</div>
-            <div style={{ opacity:0.7 }}>Output est.</div><div style={{ fontWeight:700 }}>~{aiApproval.estOutputTokens.toLocaleString()} tokens</div>
+            <div style={{ opacity:0.7 }}>Model</div><div style={{ fontWeight:700 }}>{currentAiApproval.model}</div>
+            <div style={{ opacity:0.7 }}>Scope</div><div style={{ fontWeight:700 }}>{currentAiApproval.scope}</div>
+            <div style={{ opacity:0.7 }}>Input est.</div><div style={{ fontWeight:700 }}>~{currentAiApproval.estInputTokens.toLocaleString()} tokens</div>
+            <div style={{ opacity:0.7 }}>Output est.</div><div style={{ fontWeight:700 }}>~{currentAiApproval.estOutputTokens.toLocaleString()} tokens</div>
           </div>
 
           <div style={{
@@ -877,14 +879,14 @@ useEffect(() => {
             maxHeight:88,
             overflow:"auto"
           }}>
-            {aiApproval.prompt}
+            {currentAiApproval.prompt}
           </div>
 
           <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
             <button
               onClick={() => {
-                window.dispatchEvent(new CustomEvent("bo:ai-approval-response", { detail: { id: aiApproval.id, approved: false } }))
-                dequeue(aiApproval?.id ?? "")
+                window.dispatchEvent(new CustomEvent("bo:ai-approval-response", { detail: { id: currentAiApproval.id, approved: false } }))
+                dequeue(currentAiApproval?.id ?? "")
               }}
               style={{
                 height:36,
@@ -903,8 +905,8 @@ useEffect(() => {
 
             <button
               onClick={() => {
-                window.dispatchEvent(new CustomEvent("bo:ai-approval-response", { detail: { id: aiApproval.id, approved: true } }))
-                dequeue(aiApproval?.id ?? "")
+                window.dispatchEvent(new CustomEvent("bo:ai-approval-response", { detail: { id: currentAiApproval.id, approved: true } }))
+                dequeue(currentAiApproval?.id ?? "")
               }}
               style={{
                 height:36,
