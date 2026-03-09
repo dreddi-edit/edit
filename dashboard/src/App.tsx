@@ -74,11 +74,22 @@ export default function App() {
   useEffect(() => {
     fetch("/api/credits/balance", { credentials: "include" })
       .then(r => r.json()).then(d => { if (d.ok) setBalance(d.balance_eur) }).catch(() => {})
+    fetch("/api/user/plan", { credentials: "include" })
+      .then(r => r.json()).then(d => { if (d.ok && d.plan) setDemoPlan(d.plan as any) }).catch(() => {})
     apiMe().then(user => {
       if (user) { setAuthUser(user); setView("dashboard") }
       else { setAuthUser(null); setView("auth") }
     })
   }, [])
+
+
+
+
+
+
+
+
+
 
   const trackUsage = (payload: any) => {
     if (!payload) return;
@@ -327,32 +338,22 @@ const resetPassword = async (userId: number, userEmail: string) => {
     alert("Failed to send reset - network error")
   }
 }
-
 const assignPlan = async (userId: number, userEmail: string) => {
   const current = adminUserPlans[userId] || "basis"
-  const next = prompt(
-    `Assign demo plan to "${userEmail}"\n\nOptions: basis, starter, pro, scale`,
-    current
-  )
-
+  const next = prompt(`Assign plan to "${userEmail}"\n\nOptions: basis, starter, pro, scale`, current)
   if (!next) return
-
   const normalized = String(next).trim().toLowerCase()
-  if (!["basis", "starter", "pro", "scale"].includes(normalized)) {
-    alert("Invalid plan. Use: basis, starter, pro, scale")
-    return
-  }
-
+  if (!["basis", "starter", "pro", "scale"].includes(normalized)) { alert("Invalid plan"); return }
   const plan = normalized as "basis" | "starter" | "pro" | "scale"
-
   setAdminUserPlans(prev => ({ ...prev, [userId]: plan }))
-
-  if (authUser && authUser.email === userEmail) {
-    setDemoPlan(plan)
-    try { localStorage.setItem("se_demo_plan", plan) } catch {}
-  }
-
-  alert(`✅ Demo plan "${plan}" assigned to ${userEmail}`)
+  fetch(`/api/admin/users/${userId}/set-plan`, {
+    method: "POST", credentials: "include",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ plan })
+  }).then(r => r.json()).then(d => {
+    if (d.ok) { if (authUser && (authUser as any).id === userId) setDemoPlan(plan); alert(`✅ Plan "${plan}" saved`) }
+    else { alert("Failed: " + d.error) }
+  }).catch(() => alert("Network error"))
 }
 
 const createUser = async () => {
@@ -846,7 +847,7 @@ useEffect(() => {
                 PLAN · {activePlanMeta.label}
               </span>
               <span style={{ fontSize: 11, opacity: 0.8 }}>
-                {activePlanMeta.price} · {activePlanMeta.projects}
+                {activePlanMeta.projects}
               </span>
             </div>
           </div>

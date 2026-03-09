@@ -107,3 +107,7 @@ db.exec(`
 `)
 
 export default db
+
+try {
+  db.exec(`ALTER TABLE user_settings ADD COLUMN plan TEXT DEFAULT 'basis'`)
+} catch {}

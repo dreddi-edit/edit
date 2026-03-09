@@ -1145,3 +1145,25 @@ const PORT = process.env.PORT || 8787
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`site-editor-server running on ${PORT}`)
 })
+
+app.post("/api/admin/users/:id/set-plan", authMiddleware, ownerOnly, (req, res) => {
+  try {
+    const { plan } = req.body
+    const valid = ["basis", "starter", "pro", "scale"]
+    if (!valid.includes(plan)) return res.json({ ok: false, error: "Invalid plan" })
+    const uid = Number(req.params.id)
+    db.prepare(`INSERT INTO user_settings (user_id, plan) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET plan = excluded.plan`).run(uid, plan)
+    res.json({ ok: true, plan })
+  } catch (e) {
+    res.json({ ok: false, error: e.message })
+  }
+})
+
+app.get("/api/user/plan", authMiddleware, (req, res) => {
+  try {
+    const row = db.prepare(`SELECT plan FROM user_settings WHERE user_id = ?`).get(req.user.id)
+    res.json({ ok: true, plan: row?.plan || "basis" })
+  } catch (e) {
+    res.json({ ok: false, plan: "basis" })
+  }
+})

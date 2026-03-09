@@ -151,7 +151,7 @@ export async function claudeGenerateLandingHtml({ name, description = "", audien
     },
     body: JSON.stringify({
       model,
-      max_tokens: 16000,
+      max_tokens: 8000,
       temperature: 0.8,
       system,
       messages: [{ role: "user", content: user }]
