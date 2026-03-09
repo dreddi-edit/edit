@@ -1019,6 +1019,8 @@ useEffect(() => {
   const [editNavLinks, setEditNavLinks] = useState<NavLinkItem[]>([]);
   const [editFormFields, setEditFormFields] = useState<FormFieldItem[]>([]);
 const [aiLoading, setAiLoading] = useState(false);
+const [showCostModal, setShowCostModal] = useState(false);
+const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null);
 
   const blocksRef = useRef<BlockEntry[]>([]);
   const hoverIdRef = useRef<string | null>(null);
@@ -1349,6 +1351,9 @@ const [aiLoading, setAiLoading] = useState(false);
     const doc = getDoc();
     const win = getWin();
     if (!doc || !win) return;
+    // Don't rescan if sub-blocks are active - would collapse them
+    const currentSel = selectedIdRef.current;
+    if (currentSel && currentSel.includes("-sub-")) return;
     onStatus?.("blocked");
 
     type C = { el: Element; r: DOMRect; priority: number };
@@ -2260,15 +2265,12 @@ const aiRescan = useCallback(async (mode: "block" | "page") => {
   useEffect(() => {
     const handler = (e: Event) => {
       const mode = (e as CustomEvent).detail?.mode as "block" | "page";
+      if (selectedIdRef.current?.includes("-sub-")) return;
       if (mode) aiRescan(mode);
       else scanFreePrecise();
     };
     window.addEventListener("blockoverlay:rescan", handler);
-    
-
-  
-
-return () => window.removeEventListener("blockoverlay:rescan", handler);
+    return () => window.removeEventListener("blockoverlay:rescan", handler);
   }, [aiRescan, scanFreePrecise]);
 
   useEffect(() => {
@@ -2498,6 +2500,7 @@ const applyEdit = useCallback(() => {
 
     try {
       console.log("AI Layout: sending", sameLevel.length, "blocks");
+      setPendingAiAction(() => async () => {
       const res = await fetch("/api/ai/rewrite-block", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2771,6 +2774,47 @@ return (
       <div data-bo-place-overlay="1" style={{ position: "absolute", left: 0, top: 0, right: 0, bottom: 0, zIndex: 200, pointerEvents: boPickArmed ? "auto" : "none", cursor: boPickArmed ? "crosshair" : "default" }}
         onWheel={onOverlayWheel} />
 
+      {/* AI Cost Confirmation Modal */}
+      {showCostModal && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 99999,
+          background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }} onClick={() => setShowCostModal(false)}>
+          <div style={{
+            background: "rgba(15,20,35,0.98)", border: "1px solid rgba(99,102,241,0.3)",
+            borderRadius: 16, padding: 28, minWidth: 320, maxWidth: 400,
+            boxShadow: "0 20px 60px rgba(0,0,0,0.5)",
+          }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 18, fontWeight: 800, color: "white", marginBottom: 8 }}>✦ KI-Anfrage starten?</div>
+            <div style={{ fontSize: 13, color: "rgba(148,163,184,0.8)", marginBottom: 20, lineHeight: 1.6 }}>
+              Diese Anfrage verwendet Credits aus deinem Konto.
+            </div>
+            <div style={{
+              background: "rgba(99,102,241,0.1)", border: "1px solid rgba(99,102,241,0.2)",
+              borderRadius: 10, padding: "12px 16px", marginBottom: 20,
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+            }}>
+              <span style={{ fontSize: 12, color: "rgba(148,163,184,0.7)" }}>Geschätzte Kosten</span>
+              <span style={{ fontSize: 16, fontWeight: 800, color: "rgba(99,102,241,0.9)" }}>~€0.01 – 0.05</span>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setShowCostModal(false)} style={{
+                flex: 1, height: 40, borderRadius: 8, border: "1px solid rgba(148,163,184,0.2)",
+                background: "transparent", color: "rgba(148,163,184,0.6)", fontSize: 13, cursor: "pointer",
+              }}>Abbrechen</button>
+              <button onClick={() => {
+                setShowCostModal(false);
+                if (pendingAiAction) { pendingAiAction(); setPendingAiAction(null); }
+              }} style={{
+                flex: 2, height: 40, borderRadius: 8, border: "none",
+                background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                color: "white", fontSize: 13, fontWeight: 700, cursor: "pointer",
+              }}>✦ Jetzt starten</button>
+            </div>
+          </div>
+        </div>
+      )}
       {selectedId && (
         <div style={{
           position: "fixed", right: 14, bottom: 14, width: 380, zIndex: 500,
