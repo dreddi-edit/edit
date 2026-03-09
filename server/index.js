@@ -126,11 +126,19 @@ import { resolveModel } from "./autoRouter.js"
 import archiver from "archiver"
 import db from "./db.js"
 import path from "path"
+import dns from "node:dns"
 import { fileURLToPath } from "url"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const dashboardDist = path.join(__dirname, "..", "dashboard", "dist")
+
+try {
+  dns.setDefaultResultOrder("ipv4first")
+  console.log("DNS result order set to ipv4first")
+} catch (e) {
+  console.warn("Could not set DNS result order:", e?.message || e)
+}
 
 function extractJsonFromText(text) {
   if (!text) return text;
