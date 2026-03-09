@@ -119,6 +119,10 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   const [ollamaStatus, setOllamaStatus] = useState<"checking"|"running"|"offline">("checking")
   const [ollamaOs, setOllamaOs] = useState<"mac"|"windows"|"linux">("mac")
 
+  const [showOnboarding, setShowOnboarding] = useState(
+    !localStorage.getItem("se_onboarding_done")
+  )
+
   useEffect(() => { 
     load()
     loadTemplates()
@@ -713,6 +717,164 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
       </div>
 
       {showCredits && <CreditsPanel onClose={() => { setShowCredits(false); load() }} />}
+
+      {showOnboarding && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 9999,
+            background: "rgba(0,0,0,0.72)",
+            backdropFilter: "blur(8px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
+        >
+          <div
+            style={{
+              width: 620,
+              maxWidth: "100%",
+              borderRadius: 20,
+              border: "1px solid rgba(255,255,255,0.08)",
+              background: theme === "light" ? "#ffffff" : "rgba(8,12,24,0.98)",
+              boxShadow: "0 30px 100px rgba(0,0,0,0.45)",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                padding: "26px 28px 18px",
+                borderBottom: `1px solid ${theme === "light" ? "rgba(0,0,0,0.06)" : "rgba(255,255,255,0.06)"}`,
+                background: theme === "light"
+                  ? "linear-gradient(135deg, rgba(99,102,241,0.08), rgba(168,85,247,0.08))"
+                  : "linear-gradient(135deg, rgba(99,102,241,0.12), rgba(168,85,247,0.10))",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 900,
+                  letterSpacing: 1,
+                  textTransform: "uppercase",
+                  color: theme === "light" ? "#6366f1" : "rgba(129,140,248,0.95)",
+                  marginBottom: 10,
+                }}
+              >
+                Welcome
+              </div>
+              <div
+                style={{
+                  fontSize: 28,
+                  fontWeight: 900,
+                  lineHeight: 1.1,
+                  color: theme === "light" ? "#0f172a" : "white",
+                  marginBottom: 10,
+                }}
+              >
+                Edit any website with AI
+              </div>
+              <div
+                style={{
+                  fontSize: 14,
+                  lineHeight: 1.6,
+                  color: theme === "light" ? "#475569" : "rgba(148,163,184,0.88)",
+                  maxWidth: 520,
+                }}
+              >
+                Import a website, refine blocks with AI, and export the result in minutes.
+              </div>
+            </div>
+
+            <div style={{ padding: 28 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
+                <div style={{
+                  padding: "16px 18px",
+                  borderRadius: 14,
+                  border: "1px solid rgba(99,102,241,0.18)",
+                  background: theme === "light" ? "rgba(99,102,241,0.05)" : "rgba(99,102,241,0.10)",
+                }}>
+                  <div style={{ fontSize: 13, fontWeight: 900, marginBottom: 6, color: theme === "light" ? "#312e81" : "white" }}>
+                    1. Import Website
+                  </div>
+                  <div style={{ fontSize: 13, lineHeight: 1.5, color: theme === "light" ? "#475569" : "rgba(148,163,184,0.82)" }}>
+                    Paste a live URL and load the page into the editor.
+                  </div>
+                </div>
+
+                <div style={{
+                  padding: "16px 18px",
+                  borderRadius: 14,
+                  border: "1px solid rgba(168,85,247,0.18)",
+                  background: theme === "light" ? "rgba(168,85,247,0.05)" : "rgba(168,85,247,0.10)",
+                }}>
+                  <div style={{ fontSize: 13, fontWeight: 900, marginBottom: 6, color: theme === "light" ? "#581c87" : "white" }}>
+                    2. Refine Blocks with AI
+                  </div>
+                  <div style={{ fontSize: 13, lineHeight: 1.5, color: theme === "light" ? "#475569" : "rgba(148,163,184,0.82)" }}>
+                    Hover, select a block, and rewrite content or layout instantly.
+                  </div>
+                </div>
+
+                <div style={{
+                  padding: "16px 18px",
+                  borderRadius: 14,
+                  border: "1px solid rgba(34,197,94,0.18)",
+                  background: theme === "light" ? "rgba(34,197,94,0.05)" : "rgba(34,197,94,0.10)",
+                }}>
+                  <div style={{ fontSize: 13, fontWeight: 900, marginBottom: 6, color: theme === "light" ? "#166534" : "white" }}>
+                    3. Export or Continue Editing
+                  </div>
+                  <div style={{ fontSize: 13, lineHeight: 1.5, color: theme === "light" ? "#475569" : "rgba(148,163,184,0.82)" }}>
+                    Save projects, generate new pages, and export when you're ready.
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
+                <button
+                  onClick={() => {
+                    localStorage.setItem("se_onboarding_done", "1")
+                    setShowOnboarding(false)
+                  }}
+                  style={{
+                    height: 40,
+                    padding: "0 14px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(148,163,184,0.18)",
+                    background: "transparent",
+                    color: theme === "light" ? "#475569" : "rgba(148,163,184,0.9)",
+                    cursor: "pointer",
+                    fontWeight: 700,
+                  }}
+                >
+                  Skip
+                </button>
+
+                <button
+                  onClick={() => {
+                    localStorage.setItem("se_onboarding_done", "1")
+                    setShowOnboarding(false)
+                  }}
+                  style={{
+                    height: 40,
+                    padding: "0 16px",
+                    borderRadius: 10,
+                    border: "none",
+                    background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                    color: "white",
+                    cursor: "pointer",
+                    fontWeight: 800,
+                  }}
+                >
+                  Start Tour
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Template Extract Modal */}
       {showTemplateExtract && (
