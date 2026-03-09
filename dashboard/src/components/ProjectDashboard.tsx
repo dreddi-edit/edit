@@ -301,19 +301,35 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
 
   const checkOllama = async () => {
     setOllamaStatus("checking")
+    
+    // Try direct localhost first (browser → Ollama, no server needed)
     try {
-      const r = await fetch(`/api/ai/ollama-health`, {
+      const r = await fetch("http://localhost:11434/api/tags", {
+        signal: AbortSignal.timeout(3000),
+      })
+      if (r.ok) {
+        const d = await r.json()
+        const models = (d.models || []).map((m: any) => m.name) as string[]
+        setOllamaStatus("running")
+        if (models.length > 0) {
+          toast.success(`Ollama läuft ✓ · ${models.slice(0,3).join(", ")}`)
+        } else {
+          toast.warning("Ollama läuft aber keine Modelle gefunden. Führe: ollama pull qwen2.5-coder:7b aus")
+        }
+        return
+      }
+    } catch {}
+
+    // Fallback: server proxy (for cases where CORS is not configured)
+    try {
+      const r = await fetch("/api/ai/ollama-health", {
         credentials: "include",
         signal: AbortSignal.timeout(5000),
       })
       const d = await r.json()
       if (d?.ok) {
         setOllamaStatus("running")
-        if (d.models?.length > 0) {
-          toast.success(`Ollama läuft ✓ · ${d.models.slice(0,3).join(", ")}`)
-        } else {
-          toast.warning("Ollama läuft aber keine Modelle gefunden. Führe: ollama pull qwen2.5-coder:7b aus")
-        }
+        if (d.models?.length > 0) toast.success(`Ollama ✓ · ${d.models.slice(0,3).join(", ")}`)
       } else {
         setOllamaStatus("offline")
       }
@@ -720,7 +736,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
                   const steps: Record<"mac"|"windows"|"linux", {title: string, cmd?: string, link?: string, linkLabel?: string}[]> = {
                     mac: [
                       { title: "Installieren", link: "https://ollama.com/download/mac", linkLabel: "↓ ollama.com/download" },
-                      { title: "Terminal öffnen & starten", cmd: "ollama serve" },
+                      { title: "Terminal öffnen & starten", cmd: "OLLAMA_ORIGINS=\"*\" ollama serve" },
                       { title: "Modell laden", cmd: "ollama pull qwen2.5-coder:7b" },
                     ],
                     windows: [
@@ -738,6 +754,10 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
                     <div style={{ marginTop: 10, padding: "12px 14px", borderRadius: 8, background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.12)" }}>
                       <div style={{ fontSize: 11, color: "rgba(239,68,68,0.7)", marginBottom: 10 }}>
                         Ollama nicht erreichbar – folge der Checkliste:
+                      </div>
+                      <div style={{ fontSize: 10, color: "rgba(239,68,68,0.5)", marginBottom: 8, fontFamily: "monospace" }}>
+                        Wichtig: Starte Ollama mit CORS-Unterstützung:<br/>
+                        <code style={{ background: "rgba(0,0,0,0.2)", padding: "2px 4px", borderRadius: 3 }}>OLLAMA_ORIGINS="*" ollama serve</code>
                       </div>
                       {/* OS Tabs */}
                       <div style={{ display: "flex", gap: 4, marginBottom: 12 }}>
