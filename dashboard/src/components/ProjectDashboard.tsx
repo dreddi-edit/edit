@@ -6,6 +6,9 @@ import SettingsPanel from "./SettingsPanel"
 import { apiLogout, type User } from "../api/auth"
 import { toast } from "./Toast"
 
+
+const spinnerStyle = `@keyframes se-spin { to { transform: rotate(360deg) } }`
+
 const BASE = ""
 
 // Screenshot via proxy
@@ -356,6 +359,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   const generateLandingPage = async () => {
     if (!landingName.trim()) { toast.warning("Produktname erforderlich"); return }
     setLandingGenerating(true)
+
     try {
       const name = landingName.trim()
       const rawDesc = landingDesc.trim() || "AI-powered workflow platform"
@@ -997,6 +1001,31 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
               boxShadow: "0 24px 60px rgba(0,0,0,0.45)",
             }}
           >
+            {landingGenerating && (
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background: "rgba(15,23,42,0.82)",
+                  borderRadius: 18,
+                }}
+              >
+                <div
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: "50%",
+                    border: "3px solid rgba(148,163,184,0.35)",
+                    borderTopColor: "#6366f1",
+                    animation: "se-spin 0.8s linear infinite",
+                  }}
+                />
+              </div>
+            )}
+
             <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: 1, textTransform: "uppercase", color: theme === "light" ? "#6366f1" : "rgba(129,140,248,0.9)", marginBottom: 8 }}>
               AI Generator
             </div>
