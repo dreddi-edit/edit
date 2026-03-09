@@ -70,15 +70,15 @@ export const getCrUXMetrics = async (url: string): Promise<CrUXData> => {
 // 2. PageSpeed Insights API
 export const analyzePageSpeed = async (url: string): Promise<PageSpeedData> => {
   const data = await apiCall(
-    `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&key=${apiKey}&strategy=mobile`
+    `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&key=${apiKey}&strategy=mobile&category=accessibility&category=seo&category=performance&category=best-practices`
   );
   
-  const lighthouse = data.lighthouseResult;
+  const lighthouse = data?.lighthouseResult;
   return {
-    performance: Math.round((lighthouse.categories.performance.score || 0) * 100),
-    accessibility: Math.round((lighthouse.categories.accessibility.score || 0) * 100),
-    seo: Math.round((lighthouse.categories.seo.score || 0) * 100),
-    fcp: lighthouse.audits["first-contentful-paint"]?.displayValue || "N/A"
+    performance: Math.round((lighthouse?.categories?.performance?.score ?? 0) * 100),
+    accessibility: Math.round((lighthouse?.categories?.accessibility?.score ?? 0) * 100),
+    seo: Math.round((lighthouse?.categories?.seo?.score ?? 0) * 100),
+    fcp: lighthouse?.audits?.["first-contentful-paint"]?.displayValue || "N/A"
   };
 };
 
