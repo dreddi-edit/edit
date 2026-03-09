@@ -425,8 +425,15 @@ function renderBoxesInIframe(
     return { left, top };
   }
 
+  // Build map of all block elements for parent-child detection
+  const blockEls = new Map<string, HTMLElement>();
   for (const b of blocks) {
-    const target = doc.querySelector(b.selector) as HTMLElement | null;
+    const el = doc.querySelector(b.selector) as HTMLElement | null;
+    if (el) blockEls.set(b.id, el);
+  }
+
+  for (const b of blocks) {
+    const target = blockEls.get(b.id) || null;
     if (!target) continue;
     const rect = target.getBoundingClientRect();
     const docLeft = rect.left + win.scrollX;
@@ -434,7 +441,16 @@ function renderBoxesInIframe(
     const docBottom = docTop + rect.height;
     if (rect.width < 1 || rect.height < 1) continue;
 
-    // NUR sichtbare Blocks anzeigen (im aktuellen Viewport)
+    // Hide children of non-selected parent blocks
+    let isChildOfNonSelected = false;
+    for (const [otherId, otherEl] of blockEls) {
+      if (otherId === b.id) continue;
+      if (otherEl !== target && otherEl.contains(target)) {
+        if (otherId !== selectedId) { isChildOfNonSelected = true; break; }
+      }
+    }
+    if (isChildOfNonSelected) continue;
+
     const visibleTop = Math.max(docTop, viewTop);
     const visibleBottom = Math.min(docBottom, viewBottom);
     const isVisible = visibleBottom - visibleTop > 20;

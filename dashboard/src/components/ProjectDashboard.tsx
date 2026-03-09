@@ -108,8 +108,18 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
     (localStorage.getItem("se_theme") as "dark"|"light") || "dark"
   )
   const [orgName, setOrgName] = useState<string | null>(null)
+  const [showTemplateExtract, setShowTemplateExtract] = useState(false)
+  const [templateUrl, setTemplateUrl] = useState("")
+  const [templateName, setTemplateName] = useState("")
+  const [templateExtracting, setTemplateExtracting] = useState(false)
+  const [templates, setTemplates] = useState<any[]>([])
+  const [ollamaStatus, setOllamaStatus] = useState<"checking"|"running"|"offline">("checking")
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { 
+    load()
+    loadTemplates()
+    checkOllama()
+  }, [])
 
   useEffect(() => {
     localStorage.setItem("se_theme", theme)
@@ -182,6 +192,67 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
     } catch (e: any) { toast.error(e.message) }
   }
 
+  const extractTemplate = async () => {
+    if (!templateUrl.trim()) { toast.warning("URL erforderlich"); return }
+    setTemplateExtracting(true)
+    try {
+      const r = await fetch("/api/templates/extract", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: templateUrl.trim(), name: templateName.trim() || new URL(templateUrl).hostname })
+      })
+      const d = await r.json()
+      if (!d.ok) throw new Error(d.error || "Fehler beim Extrahieren")
+      toast.success("Template gespeichert!")
+      setShowTemplateExtract(false)
+      setTemplateUrl("")
+      setTemplateName("")
+      loadTemplates()
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setTemplateExtracting(false)
+    }
+  }
+
+  const loadTemplates = async () => {
+    try {
+      const r = await fetch("/api/templates", { credentials: "include" })
+      const d = await r.json()
+      if (d.ok) setTemplates(d.templates)
+    } catch {}
+  }
+
+  const applyTemplate = async (templateId: number) => {
+    const name = prompt("Projektname für dieses Template:")
+    if (!name) return
+    try {
+      const r = await fetch("/api/templates/apply", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ template_id: templateId, name })
+      })
+      const d = await r.json()
+      if (!d.ok) throw new Error(d.error || "Fehler")
+      toast.success("Projekt aus Template erstellt!")
+      await load()
+    } catch (e: any) {
+      toast.error(e.message)
+    }
+  }
+
+  const checkOllama = async () => {
+    try {
+      const r = await fetch("/api/ai/ollama-health", { signal: AbortSignal.timeout(3000) })
+      const d = await r.json()
+      setOllamaStatus(d.ok ? "running" : "offline")
+    } catch {
+      setOllamaStatus("offline")
+    }
+  }
+
   const logout = async () => {
     await apiLogout()
     onLogout()
@@ -218,6 +289,12 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
       title: "Guthaben",
       desc: "Aktuelles Guthaben & Aufladen",
       action: () => setShowCredits(true),
+    },
+    {
+      icon: "⬚",
+      title: "Template extrahieren",
+      desc: "Website-Struktur als Template speichern",
+      action: () => setShowTemplateExtract(true),
     },
   ]
 
@@ -383,10 +460,62 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
           <div style={{ marginBottom: 36 }}>
             <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 1, color: theme === "light" ? "#94a3b8" : "rgba(148,163,184,0.4)", marginBottom: 16, textTransform: "uppercase" }}>KI-Modelle</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {/* Ollama - dynamic status */}
+              <div style={{
+                padding: "12px 14px", borderRadius: 10,
+                border: `1px solid ${theme === "light" ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.07)"}`,
+                background: theme === "light" ? "#ffffff" : "rgba(15,20,35,0.9)",
+                fontSize: 12,
+              }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <div>
+                    <span style={{ fontWeight: 700, color: "rgba(255,255,255,0.85)" }}>Ollama (lokal)</span>
+                    <span style={{ color: "rgba(148,163,184,0.4)", marginLeft: 10 }}>kostenlos · läuft auf deinem PC</span>
+                  </div>
+                  <div style={{
+                    fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 6,
+                    background: ollamaStatus === "running" ? "rgba(34,197,94,0.12)" : ollamaStatus === "offline" ? "rgba(239,68,68,0.12)" : "rgba(148,163,184,0.08)",
+                    color: ollamaStatus === "running" ? "rgba(34,197,94,0.8)" : ollamaStatus === "offline" ? "rgba(239,68,68,0.7)" : "rgba(148,163,184,0.5)",
+                    border: ollamaStatus === "running" ? "1px solid rgba(34,197,94,0.2)" : ollamaStatus === "offline" ? "1px solid rgba(239,68,68,0.2)" : "1px solid rgba(148,163,184,0.15)",
+                  }}>
+                    {ollamaStatus === "checking" ? "PRÜFE..." : ollamaStatus === "running" ? "✓ LÄUFT" : "✕ OFFLINE"}
+                  </div>
+                </div>
+                {ollamaStatus === "offline" && (
+                  <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 8, background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.15)" }}>
+                    <div style={{ fontSize: 11, color: "rgba(239,68,68,0.7)", marginBottom: 8 }}>
+                      Ollama ist nicht installiert oder läuft nicht. Installiere es für kostenlose KI-Nutzung.
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <a href="https://ollama.com/download" target="_blank" rel="noopener noreferrer" style={{
+                        height: 28, padding: "0 12px", borderRadius: 6, border: "none",
+                        background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                        color: "white", fontWeight: 700, fontSize: 11, cursor: "pointer",
+                        display: "flex", alignItems: "center", gap: 5, textDecoration: "none",
+                      }}>↓ Ollama installieren</a>
+                      <button onClick={checkOllama} style={{
+                        height: 28, padding: "0 10px", borderRadius: 6,
+                        border: "1px solid rgba(148,163,184,0.2)",
+                        background: "transparent", color: "rgba(148,163,184,0.6)",
+                        fontSize: 11, cursor: "pointer",
+                      }}>↺ Erneut prüfen</button>
+                    </div>
+                    <div style={{ marginTop: 8, fontSize: 10, color: "rgba(148,163,184,0.4)", lineHeight: 1.5 }}>
+                      Nach der Installation: <code style={{ background: "rgba(0,0,0,0.3)", padding: "1px 5px", borderRadius: 3 }}>ollama pull llama3.1</code> ausführen
+                    </div>
+                  </div>
+                )}
+                {ollamaStatus === "running" && (
+                  <div style={{ marginTop: 6, fontSize: 11, color: "rgba(34,197,94,0.6)" }}>
+                    Ollama läuft lokal – KI-Anfragen sind kostenlos
+                  </div>
+                )}
+              </div>
+
+              {/* Cloud models */}
               {[
-                { name: "Ollama (lokal)", detail: "qwen2.5-coder:7b · kostenlos", status: "local" },
-                { name: "Gemini 2.5 Flash", detail: "Google · ab €0.09/1M tokens", status: "cloud" },
-                { name: "Claude Sonnet 4.6", detail: "Anthropic · ab €3.60/1M tokens", status: "cloud" },
+                { name: "Gemini 2.5 Flash", detail: "Google · ab €0.09/1M tokens" },
+                { name: "Claude Sonnet 4.6", detail: "Anthropic · ab €3.60/1M tokens" },
               ].map(m => (
                 <div key={m.name} style={{
                   display: "flex", alignItems: "center", justifyContent: "space-between",
@@ -397,15 +526,13 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
                 }}>
                   <div>
                     <span style={{ fontWeight: 700, color: "rgba(255,255,255,0.85)" }}>{m.name}</span>
-                    <span style={{ color: theme === "light" ? "#94a3b8" : "rgba(148,163,184,0.4)", marginLeft: 10 }}>{m.detail}</span>
+                    <span style={{ color: "rgba(148,163,184,0.4)", marginLeft: 10 }}>{m.detail}</span>
                   </div>
                   <div style={{
                     fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 6,
-                    background: m.status === "local" ? "rgba(34,197,94,0.12)" : "rgba(99,102,241,0.12)",
-                    color: m.status === "local" ? "rgba(34,197,94,0.8)" : "rgba(99,102,241,0.8)",
-                    border: m.status === "local" ? "1px solid rgba(34,197,94,0.2)" : "1px solid rgba(99,102,241,0.2)",
-                    letterSpacing: 0.5,
-                  }}>{m.status === "local" ? "LOKAL" : "CLOUD"}</div>
+                    background: "rgba(99,102,241,0.12)", color: "rgba(99,102,241,0.8)",
+                    border: "1px solid rgba(99,102,241,0.2)",
+                  }}>CLOUD</div>
                 </div>
               ))}
             </div>
@@ -438,6 +565,52 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
       </div>
 
       {showCredits && <CreditsPanel onClose={() => { setShowCredits(false); load() }} />}
+
+      {/* Template Extract Modal */}
+      {showTemplateExtract && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 1000,
+          background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{
+            width: 480, borderRadius: 16, padding: 28,
+            background: "#0f1629", border: "1px solid rgba(99,102,241,0.3)",
+            boxShadow: "0 24px 48px rgba(0,0,0,0.5)",
+          }}>
+            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 6, color: "white" }}>⬚ Template extrahieren</div>
+            <div style={{ fontSize: 12, color: "rgba(148,163,184,0.6)", marginBottom: 20, lineHeight: 1.5 }}>
+              Lädt die Website und speichert die Struktur ohne Inhalte als wiederverwendbares Template.
+            </div>
+            <label style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", fontWeight: 700, display: "block", marginBottom: 4 }}>WEBSITE URL</label>
+            <input
+              value={templateUrl}
+              onChange={e => setTemplateUrl(e.target.value)}
+              placeholder="https://example.com"
+              style={{ ...inputStyle, width: "100%", marginBottom: 12, boxSizing: "border-box" }}
+            />
+            <label style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", fontWeight: 700, display: "block", marginBottom: 4 }}>TEMPLATE NAME (optional)</label>
+            <input
+              value={templateName}
+              onChange={e => setTemplateName(e.target.value)}
+              placeholder="z.B. E-Commerce Header"
+              style={{ ...inputStyle, width: "100%", marginBottom: 20, boxSizing: "border-box" }}
+            />
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={extractTemplate} disabled={templateExtracting} style={{
+                flex: 1, height: 40, borderRadius: 10, border: "none",
+                background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                color: "white", fontWeight: 700, cursor: templateExtracting ? "wait" : "pointer", fontSize: 13,
+              }}>{templateExtracting ? "Extrahiere..." : "Template speichern"}</button>
+              <button onClick={() => setShowTemplateExtract(false)} style={{
+                height: 40, padding: "0 16px", borderRadius: 10,
+                border: "1px solid rgba(255,255,255,0.1)",
+                background: "transparent", color: "rgba(148,163,184,0.7)", cursor: "pointer", fontSize: 13,
+              }}>Abbrechen</button>
+            </div>
+          </div>
+        </div>
+      )}
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} onThemeChange={(t) => setTheme(t as "dark"|"light")} />}
       <style>{`@keyframes spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }`}</style>
     </div>
