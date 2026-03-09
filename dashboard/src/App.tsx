@@ -80,13 +80,41 @@ export default function App() {
     })
   }, [])
 
-  const trackUsage = (usage: any) => {
-    if (!usage) return;
-    const inp = usage.input_tokens || 0;
-    const out = usage.output_tokens || 0;
-    const cost = (inp / 1_000_000) * 3 + (out / 1_000_000) * 15;
-    setSessionTokens(prev => ({ input: prev.input + inp, output: prev.output + out }));
-    setSessionCost(prev => prev + cost);
+  const trackUsage = (payload: any) => {
+    if (!payload) return;
+
+    const usage = payload?.usage || payload || null
+    const inp = Number(usage?.input_tokens || 0)
+    const out = Number(usage?.output_tokens || 0)
+    const explicitCost = Number(payload?.cost_eur || 0)
+
+    let fallbackCost = 0
+    const model = String(payload?.model || "")
+
+    const pricing: Record<string, { input: number; output: number }> = {
+      "claude-sonnet-4-6": { input: 3.6, output: 18 },
+      "claude-sonnet-4-5-20250929": { input: 3.6, output: 18 },
+      "claude-haiku-4-5-20251001": { input: 0.3, output: 1.5 },
+      "gemini-2.5-flash": { input: 0.09, output: 0.36 },
+      "gemini-2.5-flash-lite": { input: 0.06, output: 0.24 },
+      "gemini-2.5-pro": { input: 1.44, output: 4.32 },
+      "groq:llama-3.1-8b-instant": { input: 0.12, output: 0.24 },
+      "groq:llama-3.3-70b-versatile": { input: 0.9, output: 1.8 },
+      "ollama:qwen2.5-coder:7b": { input: 0, output: 0 },
+    }
+
+    const c = pricing[model] || pricing["claude-sonnet-4-6"]
+    const raw = ((inp / 1_000_000) * c.input) + ((out / 1_000_000) * c.output)
+    if (raw > 0) fallbackCost = Math.max(0.01, raw)
+
+    const finalCost = explicitCost > 0 ? explicitCost : fallbackCost
+
+    if (inp > 0 || out > 0) {
+      setSessionTokens(prev => ({ input: prev.input + inp, output: prev.output + out }))
+    }
+    if (finalCost > 0) {
+      setSessionCost(prev => prev + finalCost)
+    }
   };
 
 
@@ -123,6 +151,8 @@ export default function App() {
     setAiApprovalQueue((prev: any[]) => prev.slice(1))
     return aiApprovalQueue[0] || null
   }
+
+  const currentAiApproval = aiApprovalQueue.length ? aiApprovalQueue[0] : aiApproval
 
   const currentAiApproval = aiApprovalQueue.length ? aiApprovalQueue[0] : aiApproval
 
@@ -348,7 +378,7 @@ const handleAiRescan = (mode: "block" | "page") => {
   };
 
   useEffect(() => {
-    const handler = (e: any) => trackUsage(e?.detail?.usage)
+    const handler = (e: any) => trackUsage(e?.detail || null)
     window.addEventListener("bo:ai-usage", handler as any)
     return () => window.removeEventListener("bo:ai-usage", handler as any)
   }, [])
@@ -649,22 +679,25 @@ useEffect(() => {
         }}>⬡ Editor</div>
 
 
-        {/* Cost Tracker */}
-        {sessionCost > 0 && (
-          <div
-            title={`Input: ${sessionTokens.input.toLocaleString()} / Output: ${sessionTokens.output.toLocaleString()} tokens\nKlicken zum Zurücksetzen`}
-            onClick={() => { if(confirm("Session-Kosten zurücksetzen?")) { setSessionCost(0); setSessionTokens({input:0,output:0}); }}}
-            style={{
-              height: 36, padding: "0 12px", borderRadius: 10, flexShrink: 0,
-              display: "flex", alignItems: "center", gap: 5,
-              border: "1px solid rgba(234,179,8,0.35)",
-              background: "rgba(234,179,8,0.1)",
-              fontSize: 12, fontWeight: 800, color: "rgba(234,179,8,0.95)",
-              cursor: "pointer",
-            }}>
-            💰 ${sessionCost.toFixed(4)}
-          </div>
-        )}
+          {/* Cost Tracker */}
+          {(sessionCost > 0 || sessionTokens.input > 0 || sessionTokens.output > 0) && (
+            <div
+              title={`Input: ${sessionTokens.input.toLocaleString()} / Output: ${sessionTokens.output.toLocaleString()} tokens\nKlicken zum Zurücksetzen`}
+              onClick={() => { if(confirm("Session-Kosten zurücksetzen?")) { setSessionCost(0); setSessionTokens({input:0,output:0}); } }}
+              style={{
+                minHeight: 36, padding: "6px 12px", borderRadius: 10, flexShrink: 0,
+                display: "flex", alignItems: "center", gap: 8,
+                border: "1px solid rgba(234,179,8,0.35)",
+                background: "rgba(234,179,8,0.1)",
+                fontSize: 12, fontWeight: 800, color: "rgba(234,179,8,0.95)",
+                cursor: "pointer",
+                lineHeight: 1.15,
+              }}>
+              <span>💰 ${sessionCost.toFixed(4)}</span>
+              <span style={{ opacity: 0.8 }}>•</span>
+              <span>{sessionTokens.input.toLocaleString()} in / {sessionTokens.output.toLocaleString()} out</span>
+            </div>
+          )}
 
         {/* URL Input */}
         <div style={{ flex: "0 1 360px", minWidth: 200, position: "relative" }}>

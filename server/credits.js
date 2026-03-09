@@ -15,6 +15,23 @@ export function getBalance(userId) {
   return row?.balance_eur ?? 0
 }
 
+export function estimateCreditCost(model, inputTokens, outputTokens) {
+  const costs = COSTS_EUR[model] || COSTS_EUR["claude-sonnet-4-6"]
+  const raw = ((inputTokens / 1_000_000) * costs.input) + ((outputTokens / 1_000_000) * costs.output)
+  if (raw <= 0) return 0
+  return Math.max(0.01, raw)
+}
+
+export function hasEnoughCredits(userId, model, inputTokens, outputTokens) {
+  const needed = estimateCreditCost(model, inputTokens, outputTokens)
+  const balance = getBalance(userId)
+  return {
+    ok: balance >= needed,
+    balance,
+    needed
+  }
+}
+
 export function deductCredits(userId, model, inputTokens, outputTokens) {
   const costs = COSTS_EUR[model] || COSTS_EUR["claude-sonnet-4-6"]
   const amount = ((inputTokens / 1_000_000) * costs.input) + ((outputTokens / 1_000_000) * costs.output)

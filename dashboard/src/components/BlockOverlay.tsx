@@ -2114,7 +2114,7 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
             try {
               const evt = JSON.parse(line.slice(6))
               if (evt.type === "token") { streamedHtml += evt.token; if (liveEl) liveEl.innerHTML = streamedHtml }
-              if (evt.type === "usage") { window.dispatchEvent(new CustomEvent("bo:ai-usage", { detail: { usage: evt.usage } })) }
+              if (evt.type === "usage") { window.dispatchEvent(new CustomEvent("bo:ai-usage", { detail: { usage: evt.usage, cost_eur: evt.cost_eur || 0 } })) }
               if (evt.type === "error") { toast.error("Stream Fehler: " + evt.error); liveEl?.remove(); return }
               if (evt.type === "done") {
                 streamedHtml = evt.html || streamedHtml
@@ -2172,7 +2172,129 @@ const aiRescan = useCallback(async (mode: "block" | "page") => {
         const data = await resp.json();
         console.log("AI response:", data);
 
-        if (data.usage) window.dispatchEvent(new CustomEvent("bo:ai-usage", { detail: { usage: data.usage } }));
+        if (data?.needsApproval) {
+          const approvalId = `approve_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+          const approved = await new Promise<boolean>((resolve) => {
+            const handler = (ev: any) => {
+              if (String(ev?.detail?.id || "") !== approvalId) return
+              window.removeEventListener("bo:ai-approval-response", handler as any)
+              resolve(!!ev?.detail?.approved)
+            }
+            window.addEventListener("bo:ai-approval-response", handler as any)
+            window.dispatchEvent(new CustomEvent("bo:ai-approval-request", {
+              detail: {
+                id: approvalId,
+                model: String(data.model || "claude-sonnet-4-6"),
+                scope: mode === "block" ? "block-refine" : "page-refine",
+                estInputTokens: Number(data.estInputTokens || 0),
+                estOutputTokens: Number(data.estOutputTokens || 0),
+                prompt: "Refine Block / Analyze and rebuild"
+              }
+            }))
+          })
+
+          if (!approved) {
+            setAiLoading(false);
+            onStatus?.("ok");
+            return;
+          }
+
+          const rerunResp = await fetch(`/api/ai/analyze-and-rebuild?ai=1&approved=1`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ html: htmlToSend, approved: 1 }),
+          });
+          const rerunData = await rerunResp.json();
+          console.log("AI response (approved rerun):", rerunData);
+
+          if (rerunData.usage || rerunData.cost_eur != null) window.dispatchEvent(new CustomEvent("bo:ai-usage", { detail: { usage: rerunData.usage || null, cost_eur: Number(rerunData.cost_eur || 0), model: String(rerunData.model || "claude-sonnet-4-6") } }));
+          if (rerunData.ok && rerunData.blocks?.length) {
+            const scope = rootEl || doc.body;
+
+            const matched: Array<{el: HTMLElement, label: string, type: string}> = [];
+            for (const b of rerunData.blocks) {
+              let el: HTMLElement | null = null;
+              if (b.selector) {
+                try { el = scope.querySelector(b.selector) as HTMLElement | null; } catch {}
+                if (!el) { try { el = doc.querySelector(b.selector) as HTMLElement | null; } catch {} }
+              }
+              if (!el) continue;
+              const r = el.getBoundingClientRect();
+              if (r.width < 20 || r.height < 10) continue;
+              matched.push({ el, label: b.label || pickLabel(el), type: b.type || "" });
+            }
+
+            if (matched.length > 0) {
+              scope.querySelectorAll("[data-block-id]").forEach(el => el.removeAttribute("data-block-id"));
+              if (rootEl) rootEl.removeAttribute("data-block-id");
+
+              matched.sort((a, b) => a.el.getBoundingClientRect().top - b.el.getBoundingClientRect().top);
+
+              const newBlocks: BlockEntry[] = matched.map(({ el, label }, i) => {
+                const id = `block-${i + 1}`;
+                el.setAttribute("data-block-id", id);
+                const r = el.getBoundingClientRect();
+                return {
+                  id, label,
+                  selector: `[data-block-id="${id}"]`,
+                  isButton: isButtonElement(el),
+                  docTop: r.top + win.scrollY,
+                };
+              });
+
+              if (mode === "block" && sid) {
+                const prevBlocks = blocksRef.current;
+
+                const othersEl: Array<{ el: HTMLElement; label: string }> = [];
+                for (const pb of prevBlocks) {
+                  const pel = doc.querySelector(pb.selector) as HTMLElement | null;
+                  if (!pel) continue;
+                  if (rootEl && (pel === rootEl || rootEl.contains(pel))) continue;
+                  othersEl.push({ el: pel, label: pb.label });
+                }
+
+                const combinedEl: Array<{ el: HTMLElement; label: string }> = [
+                  ...othersEl,
+                  ...matched.map(m => ({ el: m.el, label: m.label })),
+                ];
+
+                combinedEl.sort((a, b) => a.el.getBoundingClientRect().top - b.el.getBoundingClientRect().top);
+
+                const renumbered: BlockEntry[] = combinedEl.map((x, i) => {
+                  const newId = `block-${i + 1}`;
+                  x.el.setAttribute("data-block-id", newId);
+                  const r = x.el.getBoundingClientRect();
+                  return {
+                    id: newId,
+                    label: x.label || pickLabel(x.el),
+                    selector: `[data-block-id="${newId}"]`,
+                    isButton: isButtonElement(x.el),
+                    docTop: r.top + win.scrollY,
+                  };
+                });
+
+                setBlocks(renumbered);
+              } else {
+                setBlocks(newBlocks);
+              }
+
+              setSelectedId(null);
+              setEditValue("");
+              console.log(`AI scan: ${newBlocks.length} new blocks, mode: ${mode}`);
+            } else {
+              console.warn("AI scan: no blocks matched DOM, falling back");
+              scanFreePrecise();
+            }
+          } else {
+            scanFreePrecise();
+          }
+
+          setAiLoading(false);
+          onStatus?.("ok");
+          return;
+        }
+
+        if (data.usage || data.cost_eur != null) window.dispatchEvent(new CustomEvent("bo:ai-usage", { detail: { usage: data.usage || null, cost_eur: Number(data.cost_eur || 0), model: String(data.model || "unknown") } }));
         if (data.ok && data.blocks?.length) {
           const scope = rootEl || doc.body;
 
@@ -2510,7 +2632,7 @@ const applyEdit = useCallback(() => {
       });
       const data = await res.json();
       console.log("AI Layout response:", data, "html length:", data?.html?.length, "keys:", Object.keys(data));
-      if (data.usage) window.dispatchEvent(new CustomEvent("bo:ai-usage", { detail: { usage: data.usage } }));
+      if (data.usage || data.cost_eur != null) window.dispatchEvent(new CustomEvent("bo:ai-usage", { detail: { usage: data.usage || null, cost_eur: Number(data.cost_eur || 0), model: String(data.model || "unknown") } }));
       if (!data.ok || !data.html) { toast.error("AI Layout fehlgeschlagen: " + (data.error || "kein HTML")); return; }
 
       console.log("sameLevel selectors:", sameLevel.map(b => b.selector + " -> " + !!doc.querySelector(b.selector)));

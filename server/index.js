@@ -108,7 +108,7 @@ import { rewriteHtmlAssets, rewriteCssUrls } from './rewriteAssets.js';
 import express from "express"
 import cookieParser from "cookie-parser"
 import { registerAuthRoutes, authMiddleware } from "./auth.js"
-import { registerCreditRoutes, getBalance, deductCredits } from "./credits.js"
+import { registerCreditRoutes, getBalance, deductCredits, hasEnoughCredits, estimateCreditCost } from "./credits.js"
 import { registerSettingsRoutes } from "./settings.js"
 import { registerOrgRoutes } from "./organisations.js"
 import { registerStripeRoutes } from "./stripe.js"
@@ -246,7 +246,7 @@ app.get("/health", (_req, res) => {
   res.status(200).json({ ok: true, port: process.env.PORT || 8787 })
 })
 
-app.post("/api/ai/analyze-and-rebuild", async (req, res) => {
+app.post("/api/ai/analyze-and-rebuild", authMiddleware, async (req, res) => {
   try {
     const { html } = req.body
     if (!html) {
@@ -255,6 +255,7 @@ app.post("/api/ai/analyze-and-rebuild", async (req, res) => {
 
     const cheap = localRebuild(html);
     const useAI = String(req.query.ai || "") === "1";
+    const approved = String(req.query.approved || req.body?.approved || "") === "1";
 
     // Nur Struktur senden statt volles HTML
     function extractStructure(el, depth) {
@@ -276,6 +277,36 @@ app.post("/api/ai/analyze-and-rebuild", async (req, res) => {
     const system = "You are a website block analyzer. Return ONLY raw JSON, no markdown, no backticks. Format: {blocks:[{selector:string,label:string,type:string}]}";
     const user = "Identify main editable blocks. Return JSON only. Structure:\n" + structureStr;
 
+
+    const estInputTokens = Math.max(120, Math.ceil((structureStr.length + user.length + system.length + 400) / 4))
+    const estOutputTokens = 4000
+    const estCost = estimateCreditCost("claude-sonnet-4-6", estInputTokens, estOutputTokens)
+
+    if (useAI && !approved) {
+      return res.json({
+        ok: false,
+        needsApproval: true,
+        model: "claude-sonnet-4-6",
+        provider: "claude",
+        estInputTokens,
+        estOutputTokens,
+        estCost,
+        reason: "AI refine block requires approval"
+      })
+    }
+
+    if (useAI && approved && req.user?.id) {
+      const creditCheck = hasEnoughCredits(req.user.id, "claude-sonnet-4-6", estInputTokens, estOutputTokens)
+      if (!creditCheck.ok) {
+        return res.status(402).json({
+          ok: false,
+          error: "Nicht genug Credits",
+          code: "INSUFFICIENT_CREDITS",
+          balance_eur: creditCheck.balance,
+          needed_eur: creditCheck.needed
+        })
+      }
+    }
 
     const resp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -324,7 +355,7 @@ app.get("/api/ai/ollama-health", async (_req, res) => {
   }
 })
 
-app.post("/api/ai/rewrite-block", async (req, res) => {
+app.post("/api/ai/rewrite-block", authMiddleware, async (req, res) => {
   try {
     const { html, instruction, systemHint, model } = req.body
     if (!html || !instruction) {
@@ -351,6 +382,39 @@ app.post("/api/ai/rewrite-block", async (req, res) => {
       }
 
       chosenModel = routing.model
+    } else {
+      // Check approval for non-auto models (except Ollama)
+      if (!chosenModel.startsWith("ollama:")) {
+        const { estimateTokens } = await import("./autoRouter.js")
+        const { inputTokens, outputTokens } = estimateTokens(html, instruction)
+        const estCost = estimateCreditCost(chosenModel, inputTokens, outputTokens)
+        
+        return res.json({
+          ok: false,
+          needsApproval: true,
+          model: chosenModel,
+          provider: chosenModel.startsWith("gemini-") ? "gemini" : chosenModel.startsWith("groq:") ? "groq" : "claude",
+          estInputTokens: inputTokens,
+          estOutputTokens: outputTokens,
+          estCost: estCost.toFixed(4),
+          reason: "Explicit model selection requires approval"
+        })
+      }
+    }
+
+    if (!chosenModel.startsWith("ollama:") && req.user?.id) {
+      const { estimateTokens } = await import("./autoRouter.js")
+      const { inputTokens, outputTokens } = estimateTokens(html, instruction)
+      const creditCheck = hasEnoughCredits(req.user.id, chosenModel, inputTokens, outputTokens)
+      if (!creditCheck.ok) {
+        return res.status(402).json({
+          ok: false,
+          error: "Nicht genug Credits",
+          code: "INSUFFICIENT_CREDITS",
+          balance_eur: creditCheck.balance,
+          needed_eur: creditCheck.needed
+        })
+      }
     }
 
     const useGemini = chosenModel.startsWith("gemini-")
@@ -389,7 +453,7 @@ app.post("/api/ai/rewrite-block", async (req, res) => {
 
 
 // Streaming Endpoint für BlockOverlay
-app.post("/api/ai/rewrite-block-stream", async (req, res) => {
+app.post("/api/ai/rewrite-block-stream", authMiddleware, async (req, res) => {
   try {
     const { html, instruction, systemHint, model } = req.body
     if (!html || !instruction) {
@@ -413,6 +477,39 @@ app.post("/api/ai/rewrite-block-stream", async (req, res) => {
         })
       }
       chosenModel = routing.model
+    } else {
+      // Check approval for non-auto models (except Ollama)
+      if (!chosenModel.startsWith("ollama:")) {
+        const { estimateTokens } = await import("./autoRouter.js")
+        const { inputTokens, outputTokens } = estimateTokens(html, instruction)
+        const estCost = estimateCreditCost(chosenModel, inputTokens, outputTokens)
+        
+        return res.json({
+          ok: false,
+          needsApproval: true,
+          model: chosenModel,
+          provider: chosenModel.startsWith("gemini-") ? "gemini" : chosenModel.startsWith("groq:") ? "groq" : "claude",
+          estInputTokens: inputTokens,
+          estOutputTokens: outputTokens,
+          estCost: estCost.toFixed(4),
+          reason: "Explicit model selection requires approval"
+        })
+      }
+    }
+
+    if (!chosenModel.startsWith("ollama:") && req.user?.id) {
+      const { estimateTokens } = await import("./autoRouter.js")
+      const { inputTokens, outputTokens } = estimateTokens(html, instruction)
+      const creditCheck = hasEnoughCredits(req.user.id, chosenModel, inputTokens, outputTokens)
+      if (!creditCheck.ok) {
+        return res.status(402).json({
+          ok: false,
+          error: "Nicht genug Credits",
+          code: "INSUFFICIENT_CREDITS",
+          balance_eur: creditCheck.balance,
+          needed_eur: creditCheck.needed
+        })
+      }
     }
 
     // Ollama & Groq – kein natives Streaming über unseren Stack, fallback zu normal
@@ -433,7 +530,12 @@ app.post("/api/ai/rewrite-block-stream", async (req, res) => {
 
     if (isGemini) {
       const result = await geminiRewriteBlock({ html, instruction, systemHint, model: chosenModel })
-      res.write(`data: ${JSON.stringify({ type: "done", html: result?.html ?? result, usage: result?.usage || null })}\n\n`)
+      const usage = result?.usage || null
+      let deducted = 0
+      if (req.user?.id && usage) {
+        try { deducted = deductCredits(req.user.id, chosenModel, usage.input_tokens || 0, usage.output_tokens || 0) } catch {}
+      }
+      res.write(`data: ${JSON.stringify({ type: "done", html: result?.html ?? result, usage, cost_eur: deducted })}\n\n`)
       return res.end()
     }
 
@@ -470,6 +572,9 @@ app.post("/api/ai/rewrite-block-stream", async (req, res) => {
     }
 
     let fullText = ""
+    let latestUsage = null
+    let lastInputTokens = 0
+    let lastOutputTokens = 0
     const reader = claudeResp.body.getReader()
     const decoder = new TextDecoder()
 
@@ -492,13 +597,38 @@ app.post("/api/ai/rewrite-block-stream", async (req, res) => {
             res.write(`data: ${JSON.stringify({ type: "token", token })}\n\n`)
           }
           if (evt.type === "message_delta" && evt.usage) {
-            res.write(`data: ${JSON.stringify({ type: "usage", usage: evt.usage })}\n\n`)
+            latestUsage = evt.usage
+
+            const currentInput = Number(evt.usage?.input_tokens || 0)
+            const currentOutput = Number(evt.usage?.output_tokens || 0)
+
+            const deltaInput = Math.max(0, currentInput - lastInputTokens)
+            const deltaOutput = Math.max(0, currentOutput - lastOutputTokens)
+
+            lastInputTokens = currentInput
+            lastOutputTokens = currentOutput
+
+            if (deltaInput > 0 || deltaOutput > 0) {
+              res.write(`data: ${JSON.stringify({
+                type: "usage",
+                usage: {
+                  input_tokens: deltaInput,
+                  output_tokens: deltaOutput,
+                  total_tokens: deltaInput + deltaOutput
+                }
+              })}\n\n`)
+            }
           }
         } catch {}
       }
     }
 
-    res.write(`data: ${JSON.stringify({ type: "done", html: fullText })}\n\n`)
+    let deducted = 0
+    if (req.user?.id && latestUsage) {
+      try { deducted = deductCredits(req.user.id, chosenModel, latestUsage.input_tokens || 0, latestUsage.output_tokens || 0) } catch {}
+    }
+
+    res.write(`data: ${JSON.stringify({ type: "done", html: fullText, usage: latestUsage, cost_eur: deducted })}\n\n`)
     res.end()
 
   } catch (error) {
