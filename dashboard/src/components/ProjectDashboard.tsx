@@ -129,6 +129,9 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   const [templates, setTemplates] = useState<any[]>([])
   const [ollamaStatus, setOllamaStatus] = useState<"checking"|"running"|"offline">("checking")
   const [ollamaOs, setOllamaOs] = useState<"mac"|"windows"|"linux">("mac")
+  const [ollamaCardCollapsed, setOllamaCardCollapsed] = useState(() => 
+    localStorage.getItem("ollama-card-collapsed") === "true"
+  )
 
   const [showOnboarding, setShowOnboarding] = useState(
     !localStorage.getItem("se_onboarding_done")
@@ -146,6 +149,10 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
   useEffect(() => {
     localStorage.setItem("se_theme", theme)
   }, [theme])
+
+  useEffect(() => {
+    localStorage.setItem("ollama-card-collapsed", ollamaCardCollapsed.toString())
+  }, [ollamaCardCollapsed])
 
   const planMeta: Record<"basis"|"starter"|"pro"|"scale", { label: string; price: string; border: string; bg: string; accent: string }> = {
     basis: {
@@ -754,142 +761,193 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
                 background: theme === "light" ? "#ffffff" : "rgba(15,20,35,0.9)",
                 fontSize: 12,
               }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <div>
-                    <span style={{ fontWeight: 700, color: "rgba(255,255,255,0.85)" }}>Ollama (lokal)</span>
-                    <span style={{ color: "rgba(148,163,184,0.4)", marginLeft: 10 }}>kostenlos · läuft auf deinem PC</span>
-                  </div>
-                  <div style={{
-                    fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 6,
-                    background: ollamaStatus === "running" ? "rgba(34,197,94,0.12)" : ollamaStatus === "offline" ? "rgba(239,68,68,0.12)" : "rgba(148,163,184,0.08)",
-                    color: ollamaStatus === "running" ? "rgba(34,197,94,0.8)" : ollamaStatus === "offline" ? "rgba(239,68,68,0.7)" : "rgba(148,163,184,0.5)",
-                    border: ollamaStatus === "running" ? "1px solid rgba(34,197,94,0.2)" : ollamaStatus === "offline" ? "1px solid rgba(239,68,68,0.2)" : "1px solid rgba(148,163,184,0.15)",
-                  }}>
-                    {ollamaStatus === "checking" ? "PRÜFE..." : ollamaStatus === "running" ? "✓ LÄUFT" : "✕ OFFLINE"}
-                  </div>
-                </div>
-                {ollamaStatus === "offline" && (() => {
-                  // Browser detection for warning
-                  const isChrome = /Chrome/.test(navigator.userAgent) && !/Edg/.test(navigator.userAgent)
-                  const isEdge = /Edg/.test(navigator.userAgent)
-                  const isFirefox = /Firefox/.test(navigator.userAgent)
-                  const isSafari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent)
-                  const supportsLocalhost = isChrome || isEdge
-                  
-                  const os = ollamaOs;
-                  const steps: Record<"mac"|"windows"|"linux", {title: string, cmd?: string, link?: string, linkLabel?: string}[]> = {
-                    mac: [
-                      { title: "Download Ollama", link: "https://ollama.com/download/mac", linkLabel: "↓ ollama.com/download" },
-                      { title: "Start Ollama", cmd: "OLLAMA_ORIGINS=\"*\" ollama serve" },
-                      { title: "Load AI model", cmd: "ollama pull qwen2.5-coder:7b" },
-                    ],
-                    windows: [
-                      { title: "Download Ollama", link: "https://ollama.com/download/windows", linkLabel: "↓ ollama.com/download" },
-                      { title: "Start Ollama", cmd: "set OLLAMA_ORIGINS=* && ollama serve" },
-                      { title: "Load AI model", cmd: "ollama pull qwen2.5-coder:7b" },
-                    ],
-                    linux: [
-                      { title: "Download Ollama", link: "https://ollama.com/download/linux", linkLabel: "↓ ollama.com/download" },
-                      { title: "Start Ollama", cmd: "OLLAMA_ORIGINS=\"*\" ollama serve" },
-                      { title: "Load AI model", cmd: "ollama pull qwen2.5-coder:7b" },
-                    ],
-                  };
-                  return (
-                    <div style={{ marginTop: 10, padding: "16px 20px", borderRadius: 8, background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.12)" }}>
-                      
-                      {/* Browser compatibility warning */}
-                      {!supportsLocalhost && (
-                        <div style={{ marginBottom: 16, padding: "12px 16px", borderRadius: 6, background: "rgba(255,193,7,0.1)", border: "1px solid rgba(255,193,7,0.3)" }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,193,7,0.9)", marginBottom: 4 }}>
-                            ⚠️ Browser Compatibility Issue
-                          </div>
-                          <div style={{ fontSize: 11, color: "rgba(255,193,7,0.7)", lineHeight: 1.4 }}>
-                            Local Ollama doesn't work in {isFirefox ? "Firefox" : "Safari"} due to browser security restrictions. 
-                            Please open this app in Chrome or Edge to use Ollama.
-                          </div>
-                        </div>
-                      )}
-                      
-                      <div style={{ fontSize: 14, fontWeight: 700, color: "rgba(239,68,68,0.9)", marginBottom: 8 }}>
-                        Use free AI on your computer
-                      </div>
-                      <div style={{ fontSize: 13, color: "rgba(239,68,68,0.7)", marginBottom: 16 }}>
-                        Ollama runs AI models locally – 100% free, no API key needed.
-                      </div>
-                      
-                      {/* OS Tabs */}
-                      <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
-                        {(["mac","windows","linux"] as const).map(o => (
-                          <button key={o} onClick={() => setOllamaOs(o)} style={{
-                            padding: "4px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600,
-                            cursor: "pointer", border: "1px solid",
-                            background: os === o ? "rgba(99,102,241,0.2)" : "transparent",
-                            color: os === o ? "rgba(99,102,241,0.9)" : "rgba(148,163,184,0.5)",
-                            borderColor: os === o ? "rgba(99,102,241,0.3)" : "rgba(148,163,184,0.15)",
-                          }}>{o === "mac" ? "macOS" : o === "windows" ? "Windows" : "Linux"}</button>
-                        ))}
-                      </div>
-                      
-                      {/* Steps */}
-                      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                        {steps[os].map((step, i) => (
-                          <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                            <div style={{
-                              width: 24, height: 24, borderRadius: 4,
-                              background: "rgba(99,102,241,0.1)", color: "rgba(99,102,241,0.8)",
-                              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700,
-                            }}>{i + 1}</div>
-                            <div style={{ flex: 1 }}>
-                              <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(239,68,68,0.8)", marginBottom: 2 }}>
-                                {step.title}
-                              </div>
-                              {step.link && (
-                                <div style={{ fontSize: 11, color: "rgba(148,163,184,0.6)", marginBottom: 4 }}>
-                                  <a href={step.link} target="_blank" rel="noopener noreferrer" style={{ color: "rgba(99,102,241,0.7)", textDecoration: "none" }}>
-                                    {step.linkLabel || "Download"}
-                                  </a>
-                                </div>
-                              )}
-                              {step.cmd && (
-                                <div style={{ fontSize: 11, color: "rgba(148,163,184,0.6)" }}>
-                                  <code style={{ 
-                                    background: "rgba(0,0,0,0.2)", 
-                                    padding: "2px 6px", 
-                                    borderRadius: 3, 
-                                    fontSize: 10,
-                                    cursor: "pointer"
-                                  }} onClick={() => {
-                                    navigator.clipboard.writeText(step.cmd || "")
-                                    toast.success("Befehl kopiert!")
-                                  }}>
-                                    {step.cmd}
-                                  </code>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                      
-                      {/* Retry button - only show for Chrome/Edge users */}
-                      {supportsLocalhost && (
-                        <button onClick={checkOllama} style={{
-                          marginTop: 12, height: 36, padding: "0 16px", borderRadius: 6, width: "100%",
-                          border: "1px solid rgba(148,163,184,0.2)", 
-                          background: "rgba(148,163,184,0.06)", 
-                          color: "rgba(148,163,184,0.7)",
-                          fontSize: 12, cursor: "pointer", fontWeight: 600,
-                        }}>↺ Erneut prüfen</button>
-                      )}
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontWeight: 700, color: "rgba(255,255,255,0.85)" }}>Ollama (lokal)</span>
+                      <span style={{ color: "rgba(148,163,184,0.4)", marginLeft: 10 }}>
+                        {ollamaStatus === "running" ? "kostenlos · läuft auf deinem PC" : "kostenlos · läuft auf deinem PC"}
+                      </span>
                     </div>
-                  );
-                })()}
-                {ollamaStatus === "running" && (
-                  <div style={{ marginTop: 6, fontSize: 11, color: "rgba(34,197,94,0.6)" }}>
-                    Ollama läuft lokal – KI-Anfragen sind kostenlos
+                    <div style={{
+                      fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 6,
+                      background: ollamaStatus === "running" ? "rgba(34,197,94,0.12)" : ollamaStatus === "offline" ? "rgba(239,68,68,0.12)" : "rgba(148,163,184,0.08)",
+                      color: ollamaStatus === "running" ? "rgba(34,197,94,0.8)" : ollamaStatus === "offline" ? "rgba(239,68,68,0.7)" : "rgba(148,163,184,0.5)",
+                      border: ollamaStatus === "running" ? "1px solid rgba(34,197,94,0.2)" : ollamaStatus === "offline" ? "1px solid rgba(239,68,68,0.2)" : "1px solid rgba(148,163,184,0.15)",
+                    }}>
+                      {ollamaStatus === "checking" ? "PRÜFE..." : ollamaStatus === "running" ? "✓ LÄUFT" : "✕ OFFLINE"}
+                    </div>
                   </div>
-                )}
-              </div>
+                  
+                  {/* Running state - always compact */}
+                  {ollamaStatus === "running" && (
+                    <div style={{ marginTop: 6, fontSize: 11, color: "rgba(34,197,94,0.6)" }}>
+                      Ollama läuft lokal – KI-Anfragen sind kostenlos
+                    </div>
+                  )}
+                  
+                  {/* Offline/Browser warning state - collapsible */}
+                  {(ollamaStatus === "offline" || ollamaStatus === "checking") && (
+                    <>
+                      {ollamaCardCollapsed ? (
+                        <div style={{ 
+                          display: "flex", 
+                          alignItems: "center", 
+                          justifyContent: "space-between",
+                          padding: "8px 12px",
+                          borderRadius: 6,
+                          background: "rgba(239,68,68,0.05)",
+                          border: "1px solid rgba(239,68,68,0.12)",
+                          cursor: "pointer"
+                        }} onClick={() => setOllamaCardCollapsed(false)}>
+                          <span style={{ fontSize: 12, color: "rgba(239,68,68,0.8)" }}>
+                            Ollama (lokal) · OFFLINE
+                          </span>
+                          <span style={{ fontSize: 10, color: "rgba(239,68,68,0.6)" }}>
+                            ▼
+                          </span>
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{ 
+                            display: "flex", 
+                            alignItems: "center", 
+                            justifyContent: "space-between",
+                            padding: "8px 12px",
+                            borderRadius: 6,
+                            background: "rgba(239,68,68,0.05)",
+                            border: "1px solid rgba(239,68,68,0.12)",
+                            cursor: "pointer"
+                          }} onClick={() => setOllamaCardCollapsed(true)}>
+                          <span style={{ fontSize: 12, color: "rgba(239,68,68,0.8)" }}>
+                            Ollama Setup Guide
+                          </span>
+                          <span style={{ fontSize: 10, color: "rgba(239,68,68,0.6)" }}>
+                            ▲
+                          </span>
+                        </div>
+                            
+                            {ollamaStatus === "offline" && (() => {
+                              // Browser detection for warning
+                              const isChrome = /Chrome/.test(navigator.userAgent) && !/Edg/.test(navigator.userAgent)
+                              const isEdge = /Edg/.test(navigator.userAgent)
+                              const isFirefox = /Firefox/.test(navigator.userAgent)
+                              const isSafari = /Safari/.test(navigator.userAgent) && !/Chrome/.test(navigator.userAgent)
+                              const supportsLocalhost = isChrome || isEdge
+                              
+                              const os = ollamaOs;
+                              const steps: Record<"mac"|"windows"|"linux", {title: string, cmd?: string, link?: string, linkLabel?: string}[]> = {
+                                mac: [
+                                  { title: "Download Ollama", link: "https://ollama.com/download/mac", linkLabel: "↓ ollama.com/download" },
+                                  { title: "Start Ollama", cmd: "OLLAMA_ORIGINS=\"*\" ollama serve" },
+                                  { title: "Load AI model", cmd: "ollama pull qwen2.5-coder:7b" },
+                                ],
+                                windows: [
+                                  { title: "Download Ollama", link: "https://ollama.com/download/windows", linkLabel: "↓ ollama.com/download" },
+                                  { title: "Start Ollama", cmd: "set OLLAMA_ORIGINS=* && ollama serve" },
+                                  { title: "Load AI model", cmd: "ollama pull qwen2.5-coder:7b" },
+                                ],
+                                linux: [
+                                  { title: "Download Ollama", link: "https://ollama.com/download/linux", linkLabel: "↓ ollama.com/download" },
+                                  { title: "Start Ollama", cmd: "OLLAMA_ORIGINS=\"*\" ollama serve" },
+                                  { title: "Load AI model", cmd: "ollama pull qwen2.5-coder:7b" },
+                                ],
+                              };
+                              return (
+                                <div style={{ marginTop: 8, padding: "16px 20px", borderRadius: 8, background: "rgba(239,68,68,0.05)", border: "1px solid rgba(239,68,68,0.12)" }}>
+                                  
+                                  {/* Browser compatibility warning */}
+                                  {!supportsLocalhost && (
+                                    <div style={{ marginBottom: 16, padding: "12px 16px", borderRadius: 6, background: "rgba(255,193,7,0.1)", border: "1px solid rgba(255,193,7,0.3)" }}>
+                                      <div style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,193,7,0.9)", marginBottom: 4 }}>
+                                        ⚠️ Browser Compatibility Issue
+                                      </div>
+                                      <div style={{ fontSize: 11, color: "rgba(255,193,7,0.7)", lineHeight: 1.4 }}>
+                                        Local Ollama doesn't work in {isFirefox ? "Firefox" : "Safari"} due to browser security restrictions. 
+                                        Please open this app in Chrome or Edge to use Ollama.
+                                      </div>
+                                    </div>
+                                  )}
+                                  
+                                  <div style={{ fontSize: 14, fontWeight: 700, color: "rgba(239,68,68,0.9)", marginBottom: 8 }}>
+                                    Use free AI on your computer
+                                  </div>
+                                  <div style={{ fontSize: 13, color: "rgba(239,68,68,0.7)", marginBottom: 16 }}>
+                                    Ollama runs AI models locally – 100% free, no API key needed.
+                                  </div>
+                                  
+                                  {/* OS Tabs */}
+                                  <div style={{ display: "flex", gap: 4, marginBottom: 16 }}>
+                                    {(["mac","windows","linux"] as const).map(o => (
+                                      <button key={o} onClick={() => setOllamaOs(o)} style={{
+                                        padding: "4px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600,
+                                        cursor: "pointer", border: "1px solid",
+                                        background: os === o ? "rgba(99,102,241,0.2)" : "transparent",
+                                        color: os === o ? "rgba(99,102,241,0.9)" : "rgba(148,163,184,0.5)",
+                                        borderColor: os === o ? "rgba(99,102,241,0.3)" : "rgba(148,163,184,0.15)",
+                                      }}>{o === "mac" ? "macOS" : o === "windows" ? "Windows" : "Linux"}</button>
+                                    ))}
+                                  </div>
+                                  
+                                  {/* Steps */}
+                                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                                    {steps[os].map((step, i) => (
+                                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                        <div style={{
+                                          width: 24, height: 24, borderRadius: 4,
+                                          background: "rgba(99,102,241,0.1)", color: "rgba(99,102,241,0.8)",
+                                          display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700,
+                                        }}>{i + 1}</div>
+                                        <div style={{ flex: 1 }}>
+                                          <div style={{ fontSize: 13, fontWeight: 600, color: "rgba(239,68,68,0.8)", marginBottom: 2 }}>
+                                            {step.title}
+                                          </div>
+                                          {step.link && (
+                                            <div style={{ fontSize: 11, color: "rgba(148,163,184,0.6)", marginBottom: 4 }}>
+                                              <a href={step.link} target="_blank" rel="noopener noreferrer" style={{ color: "rgba(99,102,241,0.7)", textDecoration: "none" }}>
+                                                {step.linkLabel || "Download"}
+                                              </a>
+                                            </div>
+                                          )}
+                                          {step.cmd && (
+                                            <div style={{ fontSize: 11, color: "rgba(148,163,184,0.6)" }}>
+                                              <code style={{ 
+                                                background: "rgba(0,0,0,0.2)", 
+                                                padding: "2px 6px", 
+                                                borderRadius: 3, 
+                                                fontSize: 10,
+                                                cursor: "pointer"
+                                              }} onClick={() => {
+                                                navigator.clipboard.writeText(step.cmd || "")
+                                                toast.success("Befehl kopiert!")
+                                              }}>
+                                                {step.cmd}
+                                              </code>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                  
+                                  {/* Retry button - only show for Chrome/Edge users */}
+                                  {supportsLocalhost && (
+                                    <button onClick={checkOllama} style={{
+                                      marginTop: 12, height: 36, padding: "0 16px", borderRadius: 6, width: "100%",
+                                      border: "1px solid rgba(148,163,184,0.2)", 
+                                      background: "rgba(148,163,184,0.06)", 
+                                      color: "rgba(148,163,184,0.7)",
+                                      fontSize: 12, cursor: "pointer", fontWeight: 600,
+                                    }}>↺ Erneut prüfen</button>
+                                  )}
+                                </div>
+                              );
+                            })()}
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
 
               {/* Cloud models */}
               {[
