@@ -209,6 +209,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
       else if (o?.ok && o.member[0]) setOrgName(o.member[0].name)
       setProjects(projects_data.map((p: any) => ({
         ...p,
+        html: p.html || localStorage.getItem(`se_project_html_${p.id}`) || "",
         thumbnail: p.thumbnail ? (p.thumbnail.startsWith("http") ? p.thumbnail : `${BASE}${p.thumbnail}`) : null
       })))
       // Screenshots nachholen für Projekte ohne Thumbnail
@@ -399,6 +400,8 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
       const html = String(data.html || "")
 
       const id = await apiCreateProject(name, "", html)
+      try { localStorage.setItem(`se_project_html_${id}`, html) } catch {}
+
       const project: Project = {
         id,
         name,
@@ -407,6 +410,14 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
         updated_at: new Date().toISOString(),
         created_at: new Date().toISOString(),
       }
+
+      setProjects(prev => [
+        {
+          ...project,
+          thumbnail: null,
+        } as any,
+        ...prev.filter((p: any) => p.id !== id)
+      ])
 
       toast.success("Landing Page erstellt")
       setShowLandingGen(false)
