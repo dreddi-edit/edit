@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { toast } from "./Toast"
 import { getRequireApproval, setRequireApproval, getApprovalThreshold, setApprovalThreshold } from "../approval-settings"
+import { useTranslation } from "../i18n/useTranslation"
 
 const BASE = ""
 
@@ -19,6 +20,7 @@ const ALL_MODELS = [
 ]
 
 export default function SettingsPanel({ onClose, onThemeChange }: { onClose: () => void; onThemeChange: (t: string) => void }) {
+  const { t, language, setLanguage } = useTranslation()
   const [tab, setTab] = useState<"general" | "apikeys" | "org">("general")
   const [settings, setSettings] = useState<Settings | null>(null)
   const [approvalOn, setApprovalOn] = useState(getRequireApproval())
@@ -260,6 +262,22 @@ export default function SettingsPanel({ onClose, onThemeChange }: { onClose: () 
                   }}>
                     {t.label}
                     {settings.theme === t.value && <div style={{ fontSize: 10, color: "rgba(99,102,241,0.8)", marginTop: 4 }}>Aktiv</div>}
+                  </div>
+                ))}
+              </div>
+            </Section>
+
+            <Section title="Sprache">
+              <div style={{ display: "flex", gap: 10 }}>
+                {[{ value: "en", label: "EN" }, { value: "de", label: "DE" }].map(t => (
+                  <div key={t.value} onClick={() => setLanguage(t.value as any)} style={{
+                    flex: 1, padding: "14px 16px", borderRadius: 10, cursor: "pointer", textAlign: "center",
+                    border: language === t.value ? "1px solid rgba(99,102,241,0.6)" : "1px solid rgba(255,255,255,0.07)",
+                    background: language === t.value ? "rgba(99,102,241,0.12)" : "rgba(255,255,255,0.02)",
+                    fontSize: 13, fontWeight: 700,
+                  }}>
+                    {t.label}
+                    {language === t.value && <div style={{ fontSize: 10, color: "rgba(99,102,241,0.8)", marginTop: 4 }}>Aktiv</div>}
                   </div>
                 ))}
               </div>
