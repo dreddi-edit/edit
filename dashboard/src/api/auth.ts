@@ -35,3 +35,23 @@ export async function apiMe(): Promise<User | null> {
     return d.ok ? d.user : null
   } catch { return null }
 }
+
+export async function apiForgotPassword(email: string): Promise<void> {
+  const r = await fetch(`${BASE}/api/auth/forgot-password`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email })
+  })
+  const d = await r.json()
+  if (!d.ok) throw new Error(d.error)
+}
+
+export async function apiResetPassword(token: string, password: string): Promise<void> {
+  const r = await fetch(`${BASE}/api/auth/reset-password`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ token, password })
+  })
+  const d = await r.json()
+  if (!d.ok) throw new Error(d.error)
+}

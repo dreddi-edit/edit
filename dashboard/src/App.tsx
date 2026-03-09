@@ -1,6 +1,7 @@
 import { apiMe, apiLogout, type User } from "./api/auth"
 import { apiSaveProject, apiCreateProject, type Project } from "./api/projects"
 import AuthScreen from "./components/AuthScreen"
+import ResetPasswordScreen from "./components/ResetPasswordScreen"
 import ProjectDashboard from "./components/ProjectDashboard"
 import { toast, ToastContainer } from "./components/Toast"
 import CreditsPanel from "./components/CreditsPanel"
@@ -546,6 +547,9 @@ useEffect(() => {
   }, [isLoading]);
 
   // Auth loading
+  const resetToken = new URLSearchParams(window.location.search).get("token")
+  if (resetToken) return <ResetPasswordScreen token={resetToken} onDone={() => window.location.replace("/")} />
+
   if (authUser === "loading") return (
     <div style={{ height: "100vh", background: "#080c18", display: "flex", alignItems: "center", justifyContent: "center" }}>
       <div style={{ color: "rgba(148,163,184,0.5)", fontSize: 16 }}>⟳ Laden...</div>

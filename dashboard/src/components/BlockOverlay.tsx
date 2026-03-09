@@ -2173,6 +2173,8 @@ const aiRescan = useCallback(async (mode: "block" | "page") => {
         console.log("AI response:", data);
 
         if (data?.needsApproval) {
+        onStatus?.("ok");
+
           const approvalId = `approve_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
           const approved = await new Promise<boolean>((resolve) => {
             const handler = (ev: any) => {
@@ -2194,9 +2196,10 @@ const aiRescan = useCallback(async (mode: "block" | "page") => {
           })
 
           if (!approved) {
-            setAiLoading(false);
             onStatus?.("ok");
             return;
+      onStatus?.("ok");
+
           }
 
           const rerunResp = await fetch(`/api/ai/analyze-and-rebuild?ai=1&approved=1`, {
@@ -2205,6 +2208,9 @@ const aiRescan = useCallback(async (mode: "block" | "page") => {
             body: JSON.stringify({ html: htmlToSend, approved: 1 }),
           });
           const rerunData = await rerunResp.json();
+      setAiLoading(false);
+      onStatus?.("ok");
+
           console.log("AI response (approved rerun):", rerunData);
 
           if (rerunData.usage || rerunData.cost_eur != null) window.dispatchEvent(new CustomEvent("bo:ai-usage", { detail: { usage: rerunData.usage || null, cost_eur: Number(rerunData.cost_eur || 0), model: String(rerunData.model || "claude-sonnet-4-6") } }));
@@ -2289,7 +2295,6 @@ const aiRescan = useCallback(async (mode: "block" | "page") => {
             scanFreePrecise();
           }
 
-          setAiLoading(false);
           onStatus?.("ok");
           return;
         }
@@ -2379,7 +2384,6 @@ const aiRescan = useCallback(async (mode: "block" | "page") => {
         console.error("AI Rescan failed:", e);
         scanFreePrecise();
       } finally {
-        setAiLoading(false);
         onStatus?.("ok");
       }
     }, [getDoc, getWin, onHtmlChange, scanFreePrecise, onStatus]);

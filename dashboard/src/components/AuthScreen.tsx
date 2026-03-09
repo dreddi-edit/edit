@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { apiLogin, apiRegister, type User } from "../api/auth"
+import { apiLogin, apiRegister, apiForgotPassword, type User } from "../api/auth"
 import { toast } from "./Toast"
 
 export default function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
@@ -11,6 +11,19 @@ export default function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
   const [loading, setLoading] = useState(false)
 
   const handle = async () => {
+    if (mode === "forgot") {
+      if (!email) { toast.warning("Email erforderlich"); return }
+      setLoading(true)
+      try {
+        await apiForgotPassword(email)
+        setResetSent(true)
+      } catch (e: any) {
+        toast.error(e.message)
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
     if (!email || !password) { toast.warning("Email und Passwort erforderlich"); return }
     setLoading(true)
     try {
@@ -56,7 +69,7 @@ export default function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
             marginBottom: 8,
           }}>⬡ Site Editor</div>
           <div style={{ color: "rgba(148,163,184,0.7)", fontSize: 14 }}>
-            {mode === "login" ? "Willkommen zurück" : "Konto erstellen"}
+            {mode === "login" ? "Willkommen zurück" : mode === "forgot" ? "Passwort zurücksetzen" : "Konto erstellen"}
           </div>
         </div>
 
@@ -76,13 +89,15 @@ export default function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
             type="email"
             style={inputStyle}
           />
-          <input
-            value={password} onChange={e => setPassword(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && handle()}
-            placeholder="Passwort"
-            type="password"
-            style={inputStyle}
-          />
+          {mode !== "forgot" && (
+            <input
+              value={password} onChange={e => setPassword(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handle()}
+              placeholder="Passwort"
+              type="password"
+              style={inputStyle}
+            />
+          )}
         </div>
 
         {/* Submit */}
@@ -101,19 +116,37 @@ export default function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
             transition: "opacity 0.2s",
           }}
         >
-          {loading ? "⟳ Bitte warten..." : mode === "login" ? "Einloggen" : "Registrieren"}
+          {loading ? "⟳ Bitte warten..." : mode === "login" ? "Einloggen" : mode === "forgot" ? "Link senden" : "Registrieren"}
         </button>
 
         {/* Toggle */}
-        <div style={{ textAlign: "center", marginTop: 20, fontSize: 13, color: "rgba(148,163,184,0.7)" }}>
-          {mode === "login" ? "Noch kein Konto?" : "Bereits registriert?"}{" "}
-          <span
-            onClick={() => setMode(mode === "login" ? "register" : "login")}
-            style={{ color: "#6366f1", fontWeight: 700, cursor: "pointer" }}
-          >
-            {mode === "login" ? "Registrieren" : "Einloggen"}
-          </span>
-        </div>
+        {resetSent ? (
+          <div style={{ textAlign: "center", marginTop: 20, fontSize: 13, color: "#22c55e" }}>
+            ✅ Link gesendet! Bitte prüfe deine Emails.
+          </div>
+        ) : (
+          <div style={{ textAlign: "center", marginTop: 20, fontSize: 13, color: "rgba(148,163,184,0.7)" }}>
+            {mode === "forgot" ? (
+              <span onClick={() => setMode("login")} style={{ color: "#6366f1", fontWeight: 700, cursor: "pointer" }}>
+                ← Zurück zum Login
+              </span>
+            ) : (
+              <>
+                {mode === "login" ? "Noch kein Konto?" : "Bereits registriert?"}{" "}
+                <span onClick={() => setMode(mode === "login" ? "register" : "login")} style={{ color: "#6366f1", fontWeight: 700, cursor: "pointer" }}>
+                  {mode === "login" ? "Registrieren" : "Einloggen"}
+                </span>
+                {mode === "login" && (
+                  <div style={{ marginTop: 8 }}>
+                    <span onClick={() => setMode("forgot")} style={{ color: "rgba(148,163,184,0.5)", cursor: "pointer" }}>
+                      Passwort vergessen?
+                    </span>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
