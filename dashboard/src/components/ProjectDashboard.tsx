@@ -342,211 +342,495 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
     setLandingGenerating(true)
     try {
       const name = landingName.trim()
-      const desc = landingDesc.trim() || "AI-powered product"
+      const desc = landingDesc.trim() || "AI-powered workflow platform for modern teams"
       const audience = landingAudience.trim() || "modern teams"
+      const safeName = name.replace(/`/g, "")
+      const safeDesc = desc.replace(/`/g, "")
+      const safeAudience = audience.replace(/`/g, "")
 
       const html = `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>${name}</title>
+  <title>${safeName}</title>
   <style>
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #0b1020;
-      color: #ffffff;
-      line-height: 1.5;
+    :root{
+      --bg:#0a0f1f;
+      --bg-2:#0f172d;
+      --panel:rgba(255,255,255,0.05);
+      --panel-2:rgba(255,255,255,0.03);
+      --line:rgba(255,255,255,0.08);
+      --text:#ffffff;
+      --muted:rgba(255,255,255,0.68);
+      --muted-2:rgba(255,255,255,0.5);
+      --brand:#7c3aed;
+      --brand-2:#4f46e5;
+      --brand-3:#22c55e;
+      --shadow:0 30px 80px rgba(0,0,0,0.35);
+      --radius:22px;
+      --wrap:min(1180px, calc(100% - 40px));
     }
-    .wrap { width: min(1120px, calc(100% - 40px)); margin: 0 auto; }
-    .hero {
-      padding: 96px 0 72px;
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{
+      margin:0;
+      font-family:Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color:var(--text);
       background:
-        radial-gradient(circle at top left, rgba(99,102,241,0.28), transparent 28%),
-        radial-gradient(circle at top right, rgba(168,85,247,0.22), transparent 24%),
-        linear-gradient(180deg, #0b1020 0%, #11182b 100%);
-      border-bottom: 1px solid rgba(255,255,255,0.08);
+        radial-gradient(circle at top left, rgba(124,58,237,0.22), transparent 22%),
+        radial-gradient(circle at top right, rgba(79,70,229,0.20), transparent 20%),
+        linear-gradient(180deg, #0a0f1f 0%, #0c1324 100%);
+      line-height:1.5;
     }
-    .badge {
-      display: inline-flex;
-      padding: 6px 12px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 800;
-      letter-spacing: .04em;
-      text-transform: uppercase;
-      color: #c7d2fe;
-      background: rgba(99,102,241,0.14);
-      border: 1px solid rgba(99,102,241,0.28);
+    a{text-decoration:none;color:inherit}
+    .wrap{width:var(--wrap);margin:0 auto}
+    .nav{
+      position:sticky;top:0;z-index:30;
+      backdrop-filter:blur(16px);
+      background:rgba(10,15,31,0.72);
+      border-bottom:1px solid rgba(255,255,255,0.06);
     }
-    h1 {
-      margin: 18px 0 14px;
-      font-size: clamp(42px, 7vw, 72px);
-      line-height: .95;
-      letter-spacing: -0.04em;
-      max-width: 880px;
+    .nav-inner{
+      width:var(--wrap);margin:0 auto;height:74px;
+      display:flex;align-items:center;justify-content:space-between;gap:20px;
     }
-    .sub {
-      max-width: 760px;
-      font-size: 18px;
-      color: rgba(255,255,255,0.72);
+    .brand{
+      display:flex;align-items:center;gap:12px;font-weight:900;font-size:18px;letter-spacing:-0.03em;
     }
-    .hero-actions {
-      display: flex;
-      gap: 12px;
-      margin-top: 28px;
-      flex-wrap: wrap;
+    .brand-mark{
+      width:34px;height:34px;border-radius:11px;
+      background:linear-gradient(135deg,var(--brand-2),var(--brand));
+      box-shadow:0 12px 30px rgba(99,102,241,0.35);
     }
-    .btn {
-      height: 48px;
-      padding: 0 18px;
-      border-radius: 12px;
-      border: 1px solid rgba(255,255,255,0.1);
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 800;
-      text-decoration: none;
+    .nav-links{
+      display:flex;align-items:center;gap:18px;color:var(--muted);font-size:14px;font-weight:600;
     }
-    .btn-primary {
-      color: white;
-      background: linear-gradient(135deg, #6366f1, #8b5cf6);
-      border: none;
+    .nav-cta{
+      height:42px;padding:0 16px;border-radius:12px;border:none;
+      background:linear-gradient(135deg,var(--brand-2),var(--brand));
+      color:white;font-weight:800;cursor:pointer;
+      box-shadow:0 14px 34px rgba(99,102,241,0.32);
     }
-    .btn-secondary {
-      color: rgba(255,255,255,0.85);
-      background: rgba(255,255,255,0.04);
+    .hero{
+      padding:48px 0 40px;
     }
-    .section {
-      padding: 72px 0;
-      border-bottom: 1px solid rgba(255,255,255,0.06);
-      background: #0f1629;
+    .badge{
+      display:inline-flex;align-items:center;gap:8px;
+      padding:8px 12px;border-radius:999px;
+      border:1px solid rgba(129,140,248,0.25);
+      background:rgba(99,102,241,0.12);
+      color:#c7d2fe;font-size:12px;font-weight:900;letter-spacing:.04em;text-transform:uppercase;
     }
-    .section.alt { background: #0c1324; }
-    .eyebrow {
-      font-size: 12px;
-      font-weight: 900;
-      letter-spacing: .08em;
-      text-transform: uppercase;
-      color: #a5b4fc;
-      margin-bottom: 12px;
+    .hero-grid{
+      display:grid;grid-template-columns:1.05fr .95fr;gap:36px;align-items:center;
+      padding:42px 0 18px;
     }
-    h2 {
-      margin: 0 0 12px;
-      font-size: clamp(28px, 4vw, 42px);
-      line-height: 1.05;
-      letter-spacing: -0.03em;
+    h1{
+      margin:18px 0 16px;
+      font-size:clamp(48px, 8vw, 82px);
+      line-height:0.94;
+      letter-spacing:-0.055em;
+      max-width:820px;
     }
-    .muted {
-      color: rgba(255,255,255,0.68);
-      max-width: 760px;
+    .sub{
+      font-size:18px;
+      color:var(--muted);
+      max-width:700px;
     }
-    .grid-3 {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 18px;
-      margin-top: 28px;
+    .hero-actions{
+      display:flex;gap:12px;flex-wrap:wrap;margin-top:28px;
     }
-    .card {
-      padding: 22px;
-      border-radius: 18px;
-      background: rgba(255,255,255,0.04);
-      border: 1px solid rgba(255,255,255,0.08);
-      box-shadow: 0 10px 30px rgba(0,0,0,0.16);
+    .btn{
+      height:50px;padding:0 18px;border-radius:14px;display:inline-flex;align-items:center;justify-content:center;
+      font-size:14px;font-weight:800;cursor:pointer;transition:transform .15s ease, opacity .15s ease;
     }
-    .card h3 {
-      margin: 0 0 8px;
-      font-size: 18px;
+    .btn:hover{transform:translateY(-1px)}
+    .btn-primary{
+      border:none;color:white;background:linear-gradient(135deg,var(--brand-2),var(--brand));
+      box-shadow:0 16px 40px rgba(99,102,241,0.35);
     }
-    .pricing {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 18px;
-      margin-top: 28px;
+    .btn-secondary{
+      border:1px solid rgba(255,255,255,0.10);color:white;background:rgba(255,255,255,0.04);
     }
-    .price {
-      font-size: 42px;
-      font-weight: 900;
-      letter-spacing: -0.04em;
-      margin: 12px 0 4px;
+    .hero-stats{
+      display:flex;gap:24px;flex-wrap:wrap;margin-top:26px;
     }
-    .price small {
-      font-size: 14px;
-      color: rgba(255,255,255,0.62);
-      font-weight: 700;
-      margin-left: 6px;
+    .hero-stat .num{font-size:24px;font-weight:900;letter-spacing:-0.04em}
+    .hero-stat .label{font-size:12px;color:var(--muted-2)}
+    .hero-card{
+      position:relative;
+      border:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.03));
+      border-radius:26px;
+      overflow:hidden;
+      box-shadow:var(--shadow);
     }
-    ul {
-      padding-left: 18px;
-      color: rgba(255,255,255,0.72);
+    .window-top{
+      display:flex;align-items:center;gap:8px;padding:16px 18px;border-bottom:1px solid var(--line);
+      background:rgba(255,255,255,0.03);
     }
-    .cta {
-      padding: 82px 0;
-      text-align: center;
+    .dot{width:10px;height:10px;border-radius:999px;background:rgba(255,255,255,0.18)}
+    .hero-preview{
+      padding:22px;
+      display:grid;
+      gap:18px;
       background:
-        radial-gradient(circle at top, rgba(99,102,241,0.18), transparent 32%),
-        #0b1020;
+        radial-gradient(circle at top right, rgba(124,58,237,0.16), transparent 28%),
+        linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));
     }
-    .cta .wrap { max-width: 820px; }
-    @media (max-width: 900px) {
-      .grid-3, .pricing { grid-template-columns: 1fr; }
-      .hero { padding-top: 72px; }
+    .mini-nav,.mini-panel,.mini-chart,.mini-cta{
+      border:1px solid rgba(255,255,255,0.08);
+      background:rgba(255,255,255,0.04);
+      border-radius:16px;
+    }
+    .mini-nav{height:54px;display:flex;align-items:center;justify-content:space-between;padding:0 16px}
+    .mini-logo{width:92px;height:12px;border-radius:999px;background:linear-gradient(90deg,#818cf8,#c084fc)}
+    .mini-links{display:flex;gap:8px}
+    .mini-links span{width:54px;height:10px;border-radius:999px;background:rgba(255,255,255,0.08);display:block}
+    .mini-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:16px}
+    .mini-panel{padding:18px}
+    .mini-kicker{width:120px;height:11px;border-radius:999px;background:rgba(129,140,248,0.65);margin-bottom:14px}
+    .mini-head{width:100%;height:74px;border-radius:18px;background:linear-gradient(135deg,rgba(99,102,241,0.24),rgba(168,85,247,0.18));margin-bottom:12px}
+    .mini-line{height:12px;border-radius:999px;background:rgba(255,255,255,0.08);margin-bottom:10px}
+    .mini-line.short{width:72%}
+    .mini-chart{padding:16px;height:100%}
+    .bars{display:flex;align-items:flex-end;gap:10px;height:120px}
+    .bar{flex:1;border-radius:12px 12px 6px 6px;background:linear-gradient(180deg,#8b5cf6,#4f46e5)}
+    .bar:nth-child(1){height:45%}
+    .bar:nth-child(2){height:64%}
+    .bar:nth-child(3){height:78%}
+    .bar:nth-child(4){height:58%}
+    .bar:nth-child(5){height:88%}
+    .mini-cta{padding:16px;display:flex;align-items:center;justify-content:space-between}
+    .mini-pill{width:120px;height:12px;border-radius:999px;background:rgba(255,255,255,0.08)}
+    .mini-btn{width:90px;height:34px;border-radius:10px;background:linear-gradient(135deg,#6366f1,#8b5cf6)}
+    .logo-strip{
+      padding:18px 0 6px;
+    }
+    .logos{
+      display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;
+    }
+    .logo{
+      height:62px;border-radius:16px;border:1px solid var(--line);
+      background:rgba(255,255,255,0.03);
+      display:flex;align-items:center;justify-content:center;
+      color:rgba(255,255,255,0.52);font-size:13px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
+    }
+    .section{
+      padding:88px 0;
+      border-top:1px solid rgba(255,255,255,0.05);
+    }
+    .section-head{
+      max-width:760px;margin-bottom:28px;
+    }
+    .eyebrow{
+      font-size:12px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:#a5b4fc;margin-bottom:10px;
+    }
+    h2{
+      margin:0 0 12px;
+      font-size:clamp(32px,5vw,52px);
+      line-height:1.02;
+      letter-spacing:-0.05em;
+    }
+    .muted{color:var(--muted);font-size:16px}
+    .feature-grid{
+      display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;
+    }
+    .feature{
+      padding:22px;border-radius:20px;border:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.03));
+      box-shadow:0 10px 30px rgba(0,0,0,0.15);
+    }
+    .feature-icon{
+      width:44px;height:44px;border-radius:14px;margin-bottom:16px;
+      display:flex;align-items:center;justify-content:center;
+      background:linear-gradient(135deg, rgba(99,102,241,0.22), rgba(168,85,247,0.18));
+      border:1px solid rgba(129,140,248,0.22);
+      font-size:18px;font-weight:900;color:#e9d5ff;
+    }
+    .feature h3,.use-card h3,.price-card h3{margin:0 0 8px;font-size:18px;letter-spacing:-0.03em}
+    .demo{
+      display:grid;grid-template-columns:.95fr 1.05fr;gap:22px;align-items:center;
+    }
+    .demo-copy{display:grid;gap:14px}
+    .bullet{
+      display:flex;gap:12px;align-items:flex-start;
+      padding:14px 16px;border-radius:16px;border:1px solid var(--line);background:rgba(255,255,255,0.03);
+    }
+    .bullet-mark{
+      width:28px;height:28px;border-radius:10px;background:rgba(34,197,94,0.16);
+      color:#86efac;display:flex;align-items:center;justify-content:center;font-weight:900;flex-shrink:0;
+    }
+    .demo-shot{
+      border-radius:24px;border:1px solid var(--line);overflow:hidden;
+      background:linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.03));
+      box-shadow:var(--shadow);
+    }
+    .shot-top{
+      height:58px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 18px
+    }
+    .shot-sidebar{
+      display:grid;grid-template-columns:180px 1fr;min-height:360px
+    }
+    .side{
+      border-right:1px solid var(--line);padding:18px;background:rgba(255,255,255,0.02)
+    }
+    .side-row,.main-row{
+      height:12px;border-radius:999px;background:rgba(255,255,255,0.08);margin-bottom:12px
+    }
+    .side-row:nth-child(1){width:75%}
+    .side-row:nth-child(2){width:60%}
+    .side-row:nth-child(3){width:82%}
+    .main{padding:18px}
+    .canvas{
+      height:110px;border-radius:18px;background:linear-gradient(135deg, rgba(99,102,241,0.22), rgba(168,85,247,0.16));margin-bottom:16px
+    }
+    .main-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .mini-box{height:88px;border-radius:16px;background:rgba(255,255,255,0.04);border:1px solid var(--line)}
+    .use-grid,.pricing{
+      display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;
+    }
+    .use-card,.price-card{
+      padding:22px;border-radius:20px;border:1px solid var(--line);background:rgba(255,255,255,0.04);
+    }
+    .price-card.featured{
+      background:linear-gradient(180deg, rgba(99,102,241,0.16), rgba(168,85,247,0.10));
+      border-color:rgba(129,140,248,0.24);
+      transform:translateY(-4px);
+      box-shadow:0 20px 40px rgba(99,102,241,0.18);
+    }
+    .top-tag{
+      display:inline-flex;padding:6px 10px;border-radius:999px;font-size:11px;font-weight:900;
+      background:rgba(99,102,241,0.16);color:#c7d2fe;border:1px solid rgba(129,140,248,0.25);margin-bottom:12px;
+    }
+    .price{
+      font-size:48px;font-weight:900;letter-spacing:-0.05em;line-height:1;margin:12px 0 6px;
+    }
+    .price small{font-size:14px;color:var(--muted-2);font-weight:700;margin-left:6px}
+    ul{padding-left:18px;margin:16px 0 0;color:var(--muted)}
+    li+li{margin-top:8px}
+    .cta{
+      padding:92px 0 104px;
+      text-align:center;
+      background:
+        radial-gradient(circle at top, rgba(99,102,241,0.18), transparent 30%),
+        linear-gradient(180deg, rgba(255,255,255,0.01), rgba(255,255,255,0.00));
+    }
+    .cta-box{
+      padding:36px;border-radius:28px;border:1px solid var(--line);
+      background:linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.03));
+      box-shadow:var(--shadow);
+    }
+    .footer{
+      padding:24px 0 48px;color:var(--muted-2);font-size:13px;text-align:center;
+    }
+    @media (max-width: 980px){
+      .hero-grid,.demo,.shot-sidebar{grid-template-columns:1fr}
+      .feature-grid,.use-grid,.pricing,.logos,.main-grid{grid-template-columns:1fr}
+      .nav-links{display:none}
+      h1{font-size:54px}
     }
   </style>
 </head>
 <body>
+  <header class="nav">
+    <div class="nav-inner">
+      <div class="brand">
+        <div class="brand-mark"></div>
+        <span>${safeName}</span>
+      </div>
+      <nav class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#product">Product</a>
+        <a href="#use-cases">Use Cases</a>
+        <a href="#pricing">Pricing</a>
+      </nav>
+      <button class="nav-cta">Start Free Trial</button>
+    </div>
+  </header>
+
   <section class="hero">
     <div class="wrap">
-      <div class="badge">AI Landing Page</div>
-      <h1>${name} for ${audience}</h1>
-      <p class="sub">${desc}</p>
-      <div class="hero-actions">
-        <a class="btn btn-primary" href="#pricing">Start Free Trial</a>
-        <a class="btn btn-secondary" href="#features">See Features</a>
+      <span class="badge">AI workflow platform</span>
+
+      <div class="hero-grid">
+        <div>
+          <h1>${safeName} for ${safeAudience}</h1>
+          <p class="sub">${safeDesc}</p>
+
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="#pricing">Start Free Trial</a>
+            <a class="btn btn-secondary" href="#product">See Product</a>
+          </div>
+
+          <div class="hero-stats">
+            <div class="hero-stat">
+              <div class="num">10x faster</div>
+              <div class="label">than traditional workflows</div>
+            </div>
+            <div class="hero-stat">
+              <div class="num">72%</div>
+              <div class="label">faster launch cycles</div>
+            </div>
+            <div class="hero-stat">
+              <div class="num">24/7</div>
+              <div class="label">AI-assisted execution</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hero-card">
+          <div class="window-top">
+            <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+          </div>
+          <div class="hero-preview">
+            <div class="mini-nav">
+              <div class="mini-logo"></div>
+              <div class="mini-links"><span></span><span></span><span></span></div>
+            </div>
+            <div class="mini-grid">
+              <div class="mini-panel">
+                <div class="mini-kicker"></div>
+                <div class="mini-head"></div>
+                <div class="mini-line"></div>
+                <div class="mini-line short"></div>
+              </div>
+              <div class="mini-chart">
+                <div class="bars">
+                  <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+                </div>
+              </div>
+            </div>
+            <div class="mini-cta">
+              <div class="mini-pill"></div>
+              <div class="mini-btn"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="logo-strip">
+        <div class="logos">
+          <div class="logo">Notion</div>
+          <div class="logo">Linear</div>
+          <div class="logo">Stripe</div>
+          <div class="logo">Figma</div>
+          <div class="logo">Vercel</div>
+        </div>
       </div>
     </div>
   </section>
 
   <section id="features" class="section">
     <div class="wrap">
-      <div class="eyebrow">Features</div>
-      <h2>Built to help ${audience} move faster</h2>
-      <p class="muted">This demo landing page was generated instantly and can now be refined block-by-block inside the editor.</p>
-      <div class="grid-3">
-        <div class="card">
-          <h3>Fast setup</h3>
-          <p class="muted">Launch a polished website structure in minutes instead of starting from a blank canvas.</p>
+      <div class="section-head">
+        <div class="eyebrow">Features</div>
+        <h2>Everything ${safeAudience} need to move faster</h2>
+        <div class="muted">A premium structure designed for conversion, clarity and modern product storytelling.</div>
+      </div>
+
+      <div class="feature-grid">
+        <div class="feature">
+          <div class="feature-icon">✦</div>
+          <h3>AI-assisted workflows</h3>
+          <div class="muted">Turn repetitive work into high-quality output with a faster, cleaner operating model.</div>
         </div>
-        <div class="card">
-          <h3>AI editing</h3>
-          <p class="muted">Rewrite sections, improve copy, and redesign layout with simple prompts.</p>
+        <div class="feature">
+          <div class="feature-icon">◎</div>
+          <h3>Built for execution</h3>
+          <div class="muted">Structured sections, clear hierarchy and modern product design that already looks launch-ready.</div>
         </div>
-        <div class="card">
-          <h3>Export ready</h3>
-          <p class="muted">Keep iterating in the editor and export once the page is ready to ship.</p>
+        <div class="feature">
+          <div class="feature-icon">↗</div>
+          <h3>Conversion-first layout</h3>
+          <div class="muted">A flow built to communicate value quickly, create trust and drive action.</div>
         </div>
       </div>
     </div>
   </section>
 
-  <section class="section alt">
+  <section id="product" class="section">
     <div class="wrap">
-      <div class="eyebrow">Why it works</div>
-      <h2>A modern page structure with clear conversion flow</h2>
-      <div class="grid-3">
-        <div class="card">
-          <h3>Clear message</h3>
-          <p class="muted">Immediate value proposition above the fold with focused calls-to-action.</p>
+      <div class="demo">
+        <div class="demo-copy">
+          <div class="eyebrow">Product</div>
+          <h2>A polished page structure that feels ready on day one</h2>
+          <div class="muted">Use this as your launch base and refine every section later. The layout is intentionally premium, minimal and flexible.</div>
+
+          <div class="bullet">
+            <div class="bullet-mark">1</div>
+            <div>
+              <strong>Clear positioning</strong>
+              <div class="muted">Headline, supporting copy and CTAs are placed where users expect them.</div>
+            </div>
+          </div>
+
+          <div class="bullet">
+            <div class="bullet-mark">2</div>
+            <div>
+              <strong>Strong visual hierarchy</strong>
+              <div class="muted">Spacing, cards and section rhythm are tuned for modern SaaS presentation.</div>
+            </div>
+          </div>
+
+          <div class="bullet">
+            <div class="bullet-mark">3</div>
+            <div>
+              <strong>Easy to customize</strong>
+              <div class="muted">Swap copy, pricing, screenshots and use cases without rebuilding the structure.</div>
+            </div>
+          </div>
         </div>
-        <div class="card">
-          <h3>Trust signals</h3>
-          <p class="muted">Feature blocks and structured layout create clarity and credibility.</p>
+
+        <div class="demo-shot">
+          <div class="shot-top">
+            <div class="mini-logo" style="width:110px"></div>
+            <div class="mini-pill" style="width:88px"></div>
+          </div>
+          <div class="shot-sidebar">
+            <div class="side">
+              <div class="side-row"></div>
+              <div class="side-row"></div>
+              <div class="side-row"></div>
+              <div class="side-row" style="width:64%"></div>
+            </div>
+            <div class="main">
+              <div class="canvas"></div>
+              <div class="main-row" style="width:82%"></div>
+              <div class="main-row" style="width:62%"></div>
+              <div class="main-grid">
+                <div class="mini-box"></div>
+                <div class="mini-box"></div>
+                <div class="mini-box"></div>
+                <div class="mini-box"></div>
+              </div>
+            </div>
+          </div>
         </div>
-        <div class="card">
-          <h3>Scalable design</h3>
-          <p class="muted">Easy to adapt for SaaS, agencies, tools, or digital products.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="use-cases" class="section">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">Use Cases</div>
+        <h2>Designed to work across multiple go-to-market scenarios</h2>
+      </div>
+
+      <div class="use-grid">
+        <div class="use-card">
+          <h3>For SaaS</h3>
+          <div class="muted">Explain product value, differentiate your workflow and drive demos with a cleaner landing page structure.</div>
+        </div>
+        <div class="use-card">
+          <h3>For agencies</h3>
+          <div class="muted">Pitch services, show transformation and package offers inside a strong premium-looking shell.</div>
+        </div>
+        <div class="use-card">
+          <h3>For AI tools</h3>
+          <div class="muted">Combine product explanation, trust building and pricing in one fast, modern narrative.</div>
         </div>
       </div>
     </div>
@@ -554,34 +838,44 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
 
   <section id="pricing" class="section">
     <div class="wrap">
-      <div class="eyebrow">Pricing</div>
-      <h2>Simple plans for different growth stages</h2>
+      <div class="section-head">
+        <div class="eyebrow">Pricing</div>
+        <h2>Simple pricing that scales with your growth</h2>
+        <div class="muted">Use these cards as a starting point and customize the offers to your actual business model.</div>
+      </div>
+
       <div class="pricing">
-        <div class="card">
+        <div class="price-card">
           <h3>Starter</h3>
           <div class="price">€19<small>/mo</small></div>
+          <div class="muted">Best for trying the product and getting initial results quickly.</div>
           <ul>
-            <li>Core access</li>
-            <li>Basic AI editing</li>
-            <li>Up to 3 projects</li>
+            <li>Core workflow access</li>
+            <li>Basic team collaboration</li>
+            <li>Up to 3 active projects</li>
           </ul>
         </div>
-        <div class="card" style="border-color: rgba(99,102,241,0.3); background: rgba(99,102,241,0.09);">
+
+        <div class="price-card featured">
+          <div class="top-tag">Most Popular</div>
           <h3>Pro</h3>
           <div class="price">€49<small>/mo</small></div>
+          <div class="muted">Built for teams that want speed, quality and better conversion outcomes.</div>
           <ul>
-            <li>Full AI workflow</li>
-            <li>Advanced editing</li>
-            <li>Best for teams</li>
+            <li>Advanced workflow automation</li>
+            <li>Full editing flexibility</li>
+            <li>Priority support and scaling</li>
           </ul>
         </div>
-        <div class="card">
+
+        <div class="price-card">
           <h3>Scale</h3>
           <div class="price">€99<small>/mo</small></div>
+          <div class="muted">For bigger teams managing more launches, pages and internal processes.</div>
           <ul>
-            <li>Higher limits</li>
-            <li>Priority support</li>
-            <li>Built for growth</li>
+            <li>Higher usage limits</li>
+            <li>Team-level collaboration</li>
+            <li>Premium onboarding support</li>
           </ul>
         </div>
       </div>
@@ -590,12 +884,23 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
 
   <section class="cta">
     <div class="wrap">
-      <div class="eyebrow">Get started</div>
-      <h2>Launch ${name} with a page that already looks production-ready</h2>
-      <p class="muted" style="margin: 0 auto 24px;">Use this generated page as a starting point, then refine every block with AI inside the editor.</p>
-      <a class="btn btn-primary" href="#">Start now</a>
+      <div class="cta-box">
+        <div class="eyebrow">Get Started</div>
+        <h2>Launch ${safeName} with a page that already looks premium</h2>
+        <div class="muted" style="max-width:760px;margin:0 auto 26px;">
+          This page is designed to be an excellent starting point for product marketing. Replace the copy, adjust the blocks and keep refining from here.
+        </div>
+        <div class="hero-actions" style="justify-content:center;">
+          <a class="btn btn-primary" href="#">Start Free Trial</a>
+          <a class="btn btn-secondary" href="#features">Explore Features</a>
+        </div>
+      </div>
     </div>
   </section>
+
+  <div class="footer">
+    Built for ${safeAudience} · ${safeName}
+  </div>
 </body>
 </html>`
 
