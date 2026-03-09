@@ -1131,7 +1131,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: {
                   opacity: landingGenerating ? 0.7 : 1,
                 }}
               >
-                {landingGenerating ? "Generating..." : "Generate"}
+                {landingGenerating ? "⏳ Loading..." : "Generate"}
               </button>
             </div>
           </div>
