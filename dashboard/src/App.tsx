@@ -417,6 +417,7 @@ const autoSave = async (html: string) => {
       setUrl("")
       setLoadedUrl("")
       setCurrentHtml(inlineHtml)
+      renderToIframe(inlineHtml)
       setStatus("ok")
       return
     }
@@ -425,6 +426,7 @@ const autoSave = async (html: string) => {
       setUrl("")
       setLoadedUrl("")
       setCurrentHtml(p.html)
+      renderToIframe(p.html)
       setStatus("ok")
       return
     }
@@ -432,11 +434,13 @@ const autoSave = async (html: string) => {
     if (p.url) setUrl(p.url)
     if (!p.url && p.html) {
       setCurrentHtml(p.html)
+      renderToIframe(p.html)
       setStatus("ok")
       return
     }
     if (p.html) {
       setCurrentHtml(p.html)
+      renderToIframe(p.html)
       setLoadedUrl(p.url || "")
       setStatus("ok")
     } else if (p.url) {
