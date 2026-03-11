@@ -824,7 +824,9 @@ const autoSave = async (html: string) => {
     const syncTheme = () => {
       const nextTheme = readSavedTheme()
       setTheme((prev) => (prev === nextTheme ? prev : nextTheme))
-      document.body.setAttribute("data-theme", nextTheme)
+      if (document.body.getAttribute("data-theme") !== nextTheme) {
+        document.body.setAttribute("data-theme", nextTheme)
+      }
     }
 
     syncTheme()
