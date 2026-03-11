@@ -27,7 +27,13 @@ type ExportFilter = "all" | "wp-placeholder" | "html-clean" | "ready" | "guarded
 type AIStudioFilter = "all" | "creation" | "optimization" | "growth" | "autonomy"
 type SpendRange = "1h" | "24h" | "7d" | "30d"
 type UsageMode = "model" | "task"
-type StudioTool = "cro-agent" | "self-healing" | "global-expansion"
+type StudioTool =
+  | "cro-agent"
+  | "self-healing"
+  | "global-expansion"
+  | "brand-brain"
+  | "war-room"
+  | "personalization"
 type Template = { id: number; name: string; url?: string; platform?: SitePlatform; thumbnail?: string; created_at: string }
 type ChecklistItem = { id: string; label: string; done: boolean }
 type NoteItem = { id: string; text: string; done: boolean }
@@ -59,6 +65,22 @@ type StudioResult = {
   sections: StudioSection[]
   markets?: StudioMarketPlan[]
   audit?: StudioAudit
+}
+type StudioToolMeta = {
+  eyebrow: string
+  title: string
+  description: string
+  actionLabel: string
+  goalLabel: string
+  audienceLabel: string
+  notePlaceholder: string
+  outcomes: string[]
+  systems: string[]
+  goalPresets: string[]
+  audiencePresets: string[]
+  extraFieldLabel?: string
+  extraFieldPlaceholder?: string
+  extraFieldPresets?: string[]
 }
 
 const DEFAULT_CHECKLIST: ChecklistItem[] = [
@@ -205,24 +227,96 @@ const AI_STUDIO_SERVICES: AIStudioService[] = [
   },
 ]
 
-const STUDIO_TOOL_META: Record<StudioTool, { eyebrow: string; title: string; description: string; actionLabel: string }> = {
+const STUDIO_TOOL_META: Record<StudioTool, StudioToolMeta> = {
   "cro-agent": {
     eyebrow: "Optimization",
     title: "Autonomous CRO Agent",
     description: "Audit a live page, detect conversion friction, and return a queue of experiments and quick wins.",
     actionLabel: "Run CRO analysis",
+    goalLabel: "Primary goal",
+    audienceLabel: "Visitor segment / client",
+    notePlaceholder: "Share known friction points, conversion goals, or current hypotheses.",
+    outcomes: ["Conversion risks ranked by impact", "Experiment queue you can run next", "Immediate copy and UX wins"],
+    systems: ["SEO audit", "PageSpeed signals", "Gemini strategy"],
+    goalPresets: ["Lift demo bookings", "Increase quote requests", "Improve trial starts"],
+    audiencePresets: ["Cold paid traffic", "High-intent search visitors", "Returning prospects"],
   },
   "self-healing": {
     eyebrow: "Reliability",
     title: "Self-Healing Website",
     description: "Scan the site for performance and SEO regressions, then generate a repair plan ranked by urgency.",
     actionLabel: "Run health scan",
+    goalLabel: "Protection goal",
+    audienceLabel: "Owner / team",
+    notePlaceholder: "Mention recent issues, risky releases, or parts of the site that break often.",
+    outcomes: ["Fragile areas to watch", "Low-risk fixes to make now", "Monitoring routine for future changes"],
+    systems: ["SEO audit", "PageSpeed signals", "Gemini repair planner"],
+    goalPresets: ["Stabilize page speed", "Reduce release risk", "Catch regressions earlier"],
+    audiencePresets: ["Marketing team", "Growth team", "Ops owner"],
   },
   "global-expansion": {
     eyebrow: "Growth",
     title: "One-Click Global Expansion",
     description: "Generate a market entry plan with localized angles, offers, and rollout priorities for new regions.",
     actionLabel: "Build expansion plan",
+    goalLabel: "Expansion goal",
+    audienceLabel: "Base audience / client",
+    notePlaceholder: "Mention current geography, pricing, positioning, or rollout constraints.",
+    outcomes: ["Priority markets in launch order", "Localized angles and offers", "Rollout sequence by market"],
+    systems: ["SEO audit", "Gemini strategy", "Localization planning"],
+    goalPresets: ["Find the best next DACH markets", "Choose the fastest-win expansion path", "Adapt the offer for higher-value regions"],
+    audiencePresets: ["SMB owners", "Consumers researching online", "Enterprise buyers"],
+    extraFieldLabel: "Target markets",
+    extraFieldPlaceholder: "Germany, Austria, Switzerland",
+    extraFieldPresets: ["Germany, Austria, Switzerland", "UK, Ireland, Netherlands", "US, Canada, Australia"],
+  },
+  "brand-brain": {
+    eyebrow: "Memory",
+    title: "Brand Brain",
+    description: "Extract the company voice, proof, positioning rules, and reusable messaging into one operating memory.",
+    actionLabel: "Build brand brain",
+    goalLabel: "Memory goal",
+    audienceLabel: "Brand / client",
+    notePlaceholder: "Mention must-keep phrases, taboo language, or positioning constraints.",
+    outcomes: ["Brand pillars and claims", "Voice rules future agents should follow", "Reusable messaging and proof blocks"],
+    systems: ["Project HTML", "Gemini extraction", "Optional live URL context"],
+    goalPresets: ["Capture brand voice", "Define proof and claims", "Create reusable messaging rules"],
+    audiencePresets: ["Premium B2B buyers", "Local service customers", "Founder-led brand"],
+    extraFieldLabel: "Brand surfaces",
+    extraFieldPlaceholder: "Homepage, pricing, offers, proof",
+    extraFieldPresets: ["Homepage, pricing, offers, proof", "About, case studies, onboarding", "Ads, landing pages, emails"],
+  },
+  "war-room": {
+    eyebrow: "Intel",
+    title: "Competitor War Room",
+    description: "Turn a live site into a market watchlist with competitive signals, threat patterns, and counter-moves.",
+    actionLabel: "Build war room",
+    goalLabel: "Intel goal",
+    audienceLabel: "Category / business",
+    notePlaceholder: "List known rivals, pricing pressure, or channels where competitors are beating you.",
+    outcomes: ["Competitive watchlist", "Signals and threats to monitor", "Counter-moves and review cadence"],
+    systems: ["SEO audit", "Gemini intel planner", "Market watch framing"],
+    goalPresets: ["Track the most dangerous rivals", "Spot messaging gaps early", "Build a weekly competitor loop"],
+    audiencePresets: ["Local service category", "SaaS buyers", "Ecommerce shoppers"],
+    extraFieldLabel: "Competitor set",
+    extraFieldPlaceholder: "Direct rivals, category leaders, local incumbents",
+    extraFieldPresets: ["Direct rivals, category leaders, local incumbents", "Premium challengers, fast movers, low-cost players", "SEO leaders, paid leaders, local brands"],
+  },
+  personalization: {
+    eyebrow: "Realtime",
+    title: "Personalized Site per Visitor",
+    description: "Map the best visitor segments, triggers, copy shifts, and offer variations for dynamic personalization.",
+    actionLabel: "Design personalization",
+    goalLabel: "Personalization goal",
+    audienceLabel: "Primary audience",
+    notePlaceholder: "Mention traffic sources, funnel stages, or offers that should change per visitor.",
+    outcomes: ["Priority visitor segments", "Experience variants by segment", "Trigger rules and measurement plan"],
+    systems: ["SEO audit", "Gemini segmentation", "On-page personalization design"],
+    goalPresets: ["Match copy to visitor intent", "Lift conversion by traffic source", "Create clearer journeys by funnel stage"],
+    audiencePresets: ["SMB buyers", "Consumers comparing options", "High-intent decision makers"],
+    extraFieldLabel: "Visitor segments",
+    extraFieldPlaceholder: "Cold paid traffic, branded search, returning visitors",
+    extraFieldPresets: ["Cold paid traffic, branded search, returning visitors", "New visitors, demo-ready leads, existing customers", "Mobile traffic, desktop researchers, retargeted visitors"],
   },
 }
 
@@ -376,6 +470,15 @@ function escapeHtml(value: string) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
+}
+
+function plainTextFromHtml(html?: string | null) {
+  return String(html || "")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
 }
 
 function wrapLocalMarkup(filename: string, text: string) {
@@ -1010,6 +1113,12 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
   const selectedStudioProject =
     typeof studioProjectId === "number" ? normalizedProjects.find(project => project.id === studioProjectId) : undefined
   const studioToolMeta = activeStudioTool ? STUDIO_TOOL_META[activeStudioTool] : null
+  const selectedStudioProjectText = plainTextFromHtml(selectedStudioProject?.html)
+  const effectiveStudioUrl = (studioUrl.trim() || selectedStudioProject?.url || "").trim()
+  const studioNeedsLiveUrl = activeStudioTool !== "brand-brain"
+  const studioSourceReady = studioNeedsLiveUrl
+    ? /^https?:\/\//i.test(effectiveStudioUrl)
+    : Boolean(selectedStudioProjectText || /^https?:\/\//i.test(effectiveStudioUrl))
   const filteredProjects = normalizedProjects.filter(project => {
     const query = projectSearch.trim().toLowerCase()
     const matchesQuery =
@@ -1194,35 +1303,57 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
         ? "Increase qualified conversions on the main landing page."
         : tool === "self-healing"
         ? "Keep the site healthy, fast, and conversion-safe after every content change."
-        : "Launch the site into high-value nearby markets with localized positioning."
+        : tool === "global-expansion"
+        ? "Launch the site into high-value nearby markets with localized positioning."
+        : tool === "brand-brain"
+        ? "Codify the brand voice, messaging rules, and proof into reusable memory."
+        : tool === "war-room"
+        ? "Track the most dangerous competitors and define fast counter-moves."
+        : "Adapt the site by visitor intent, traffic source, and funnel stage."
     )
-    setStudioMarkets("Germany, Austria, Switzerland")
+    setStudioMarkets(
+      tool === "global-expansion"
+        ? "Germany, Austria, Switzerland"
+        : tool === "war-room"
+        ? "Direct rivals, category leaders, local incumbents"
+        : tool === "personalization"
+        ? "Cold paid traffic, branded search, returning visitors"
+        : "Homepage, pricing, offers, proof"
+    )
     setStudioNotes("")
     setStudioResult(null)
   }
 
   const runStudioTool = async () => {
     if (!activeStudioTool) return
-    const resolvedUrl = (studioUrl.trim() || selectedStudioProject?.url || "").trim()
-    if (!/^https?:\/\//i.test(resolvedUrl)) {
+    const resolvedUrl = effectiveStudioUrl
+    const projectText = selectedStudioProjectText.slice(0, 5000)
+    const needsUrl = activeStudioTool !== "brand-brain"
+    if (needsUrl && !/^https?:\/\//i.test(resolvedUrl)) {
       toast.warning("A full website URL is required for this workflow.")
+      return
+    }
+    if (activeStudioTool === "brand-brain" && !projectText && !/^https?:\/\//i.test(resolvedUrl)) {
+      toast.warning("Brand Brain needs either a project with content or a full website URL.")
       return
     }
 
     setStudioRunning(true)
     try {
-      const auditResponse = await apiFetch<StudioAudit & { ok: boolean; error?: string }>("/api/seo/audit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: resolvedUrl }),
-      })
-      if (!auditResponse.ok) throw new Error(auditResponse.error || "Audit failed")
-
-      const audit: StudioAudit = {
-        url: auditResponse.url,
-        scores: auditResponse.scores,
-        metrics: auditResponse.metrics,
-        opportunities: auditResponse.opportunities,
+      let audit: StudioAudit | undefined
+      if (/^https?:\/\//i.test(resolvedUrl)) {
+        const auditResponse = await apiFetch<StudioAudit & { ok: boolean; error?: string }>("/api/seo/audit", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: resolvedUrl }),
+        })
+        if (!auditResponse.ok) throw new Error(auditResponse.error || "Audit failed")
+        audit = {
+          url: auditResponse.url,
+          scores: auditResponse.scores,
+          metrics: auditResponse.metrics,
+          opportunities: auditResponse.opportunities,
+        }
       }
 
       const prompt =
@@ -1252,7 +1383,8 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
               `Audit JSON: ${JSON.stringify(audit)}`,
               "Focus on regressions, fragile areas, and quick repairs that reduce future breakage.",
             ].join("\n")
-          : [
+          : activeStudioTool === "global-expansion"
+          ? [
               "You are a global market expansion strategist.",
               "Return JSON only. No markdown, no prose outside JSON.",
               'Schema: {"headline":"string","summary":"string","sections":[{"label":"Priority Markets","items":["..."]},{"label":"Localization Moves","items":["..."]},{"label":"Launch Sequence","items":["..."]}],"markets":[{"market":"string","language":"string","angle":"string","offer":"string"}]}',
@@ -1264,6 +1396,48 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
               `Notes: ${studioNotes.trim() || "None"}`,
               `Audit JSON: ${JSON.stringify(audit)}`,
               "Propose the best launch order, language, positioning angle, and offer for each market.",
+            ].join("\n")
+          : activeStudioTool === "brand-brain"
+          ? [
+              "You are a brand strategist building a reusable company memory layer.",
+              "Return JSON only. No markdown, no prose outside JSON.",
+              'Schema: {"headline":"string","summary":"string","sections":[{"label":"Brand Pillars","items":["..."]},{"label":"Voice Rules","items":["..."]},{"label":"Reusable Messaging","items":["..."]},{"label":"Proof and Trust Signals","items":["..."]}]}',
+              `Site URL: ${resolvedUrl || "Not provided"}`,
+              `Project: ${selectedStudioProject?.name || "Unknown"}`,
+              `Client: ${selectedStudioProject?.clientName || studioAudience || "Unknown"}`,
+              `Brain goal: ${studioGoal.trim() || "Capture the brand voice and positioning system."}`,
+              `Focus surfaces: ${studioMarkets.trim() || "Homepage, pricing, offers, proof"}`,
+              `Notes: ${studioNotes.trim() || "None"}`,
+              `Visible page copy: ${projectText || "No local HTML content provided."}`,
+              "Extract the core voice, positioning, promises, proof, and reusable copy guidance for future agents.",
+            ].join("\n")
+          : activeStudioTool === "war-room"
+          ? [
+              "You are a competitor intelligence operator.",
+              "Return JSON only. No markdown, no prose outside JSON.",
+              'Schema: {"headline":"string","summary":"string","sections":[{"label":"Watchlist","items":["..."]},{"label":"Signals to Track","items":["..."]},{"label":"Counter Moves","items":["..."]},{"label":"Weekly Ops Loop","items":["..."]}]}',
+              `Site URL: ${resolvedUrl}`,
+              `Project: ${selectedStudioProject?.name || "Unknown"}`,
+              `Business context: ${studioAudience.trim() || selectedStudioProject?.clientName || "Unknown"}`,
+              `Intel goal: ${studioGoal.trim() || "Track market threats and move faster than competitors."}`,
+              `Competitor set: ${studioMarkets.trim() || "Direct rivals, category leaders, local incumbents"}`,
+              `Notes: ${studioNotes.trim() || "None"}`,
+              `Audit JSON: ${JSON.stringify(audit)}`,
+              "Define the competitive watchlist, the metrics/signals to monitor, and the best response plays.",
+            ].join("\n")
+          : [
+              "You are a conversion personalization strategist.",
+              "Return JSON only. No markdown, no prose outside JSON.",
+              'Schema: {"headline":"string","summary":"string","sections":[{"label":"Priority Segments","items":["..."]},{"label":"Experience Variants","items":["..."]},{"label":"Trigger Rules","items":["..."]},{"label":"Measurement Plan","items":["..."]}]}',
+              `Site URL: ${resolvedUrl}`,
+              `Project: ${selectedStudioProject?.name || "Unknown"}`,
+              `Audience: ${studioAudience.trim() || selectedStudioProject?.clientName || "Unknown"}`,
+              `Personalization goal: ${studioGoal.trim() || "Adapt the site by visitor intent and funnel stage."}`,
+              `Target segments: ${studioMarkets.trim() || "Cold paid traffic, branded search, returning visitors"}`,
+              `Notes: ${studioNotes.trim() || "None"}`,
+              `Audit JSON: ${JSON.stringify(audit)}`,
+              `Visible page copy: ${projectText || "No local HTML content provided."}`,
+              "Design dynamic segments, experiences, and measurement rules for per-visitor personalization.",
             ].join("\n")
 
       const geminiResponse = await apiFetch<{ ok: boolean; error?: string; data?: { text?: string } }>("/api/google/gemini/generate", {
@@ -1617,7 +1791,10 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
     if (
       service.id === "cro-agent" ||
       service.id === "self-healing" ||
-      service.id === "global-expansion"
+      service.id === "global-expansion" ||
+      service.id === "brand-brain" ||
+      service.id === "war-room" ||
+      service.id === "personalization"
     ) {
       openStudioTool(service.id)
       return
@@ -2183,160 +2360,272 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
               <button className="pd-modal-close" type="button" onClick={resetStudioTool}>X</button>
             </div>
             <div className="pd-modal-body">
-              <div className="pd-helper-copy pd-studio-intro">{studioToolMeta.description}</div>
-              <div className="pd-field-grid">
-                <label className="pd-field-label">
-                  Source project
-                  <select
-                    className="pd-field-select"
-                    value={studioProjectId === "" ? "" : String(studioProjectId)}
-                    onChange={event => {
-                      const value = event.target.value
-                      if (!value) {
-                        setStudioProjectId("")
-                        return
-                      }
-                      const nextProject = normalizedProjects.find(project => project.id === Number(value))
-                      setStudioProjectId(Number(value))
-                      if (nextProject?.url) setStudioUrl(nextProject.url)
-                      if (nextProject?.clientName) setStudioAudience(nextProject.clientName)
-                    }}
-                  >
-                    <option value="">Manual URL</option>
-                    {normalizedProjects.map(project => (
-                      <option key={project.id} value={project.id}>
-                        {project.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="pd-field-label">
-                  Website URL
-                  <input
-                    className="pd-field-input"
-                    value={studioUrl}
-                    onChange={event => setStudioUrl(event.target.value)}
-                    placeholder="https://..."
-                  />
-                </label>
-                <label className="pd-field-label">
-                  Primary goal
-                  <input className="pd-field-input" value={studioGoal} onChange={event => setStudioGoal(event.target.value)} />
-                </label>
-                <label className="pd-field-label">
-                  Audience / client
-                  <input className="pd-field-input" value={studioAudience} onChange={event => setStudioAudience(event.target.value)} />
-                </label>
-                {activeStudioTool === "global-expansion" ? (
-                  <label className="pd-field-label pd-field-label-full">
-                    Target markets
-                    <input
-                      className="pd-field-input"
-                      value={studioMarkets}
-                      onChange={event => setStudioMarkets(event.target.value)}
-                      placeholder="Germany, Austria, Switzerland"
-                    />
-                  </label>
-                ) : null}
-                <label className="pd-field-label pd-field-label-full">
-                  Notes
-                  <textarea
-                    className="pd-field-textarea"
-                    value={studioNotes}
-                    onChange={event => setStudioNotes(event.target.value)}
-                    placeholder={
-                      activeStudioTool === "cro-agent"
-                        ? "Share known friction points, conversion goals, or current hypotheses."
-                        : activeStudioTool === "self-healing"
-                        ? "Mention recent issues, risky areas, or release cadence."
-                        : "Mention priority regions, pricing, positioning, or expansion constraints."
-                    }
-                  />
-                </label>
-              </div>
+              <div className="pd-studio-layout">
+                <div className="pd-studio-main">
+                  <div className="pd-helper-copy pd-studio-intro">{studioToolMeta.description}</div>
 
-              {studioResult ? (
-                <div className="pd-studio-result">
-                  <div className="pd-studio-head">
-                    <div>
-                      <div className="pd-studio-kicker">Latest run</div>
-                      <div className="pd-studio-title">{studioResult.headline}</div>
-                    </div>
-                    <div className="pd-studio-pill">{studioResult.audit?.url?.replace(/^https?:\/\//, "")}</div>
-                  </div>
-                  <div className="pd-studio-summary">{studioResult.summary}</div>
-
-                  {studioResult.audit ? (
-                    <div className="pd-studio-score-grid">
-                      <div className="pd-studio-score-card">
-                        <span className="pd-studio-score-label">Performance</span>
-                        <strong>{studioResult.audit.scores.performance}</strong>
-                      </div>
-                      <div className="pd-studio-score-card">
-                        <span className="pd-studio-score-label">Accessibility</span>
-                        <strong>{studioResult.audit.scores.accessibility}</strong>
-                      </div>
-                      <div className="pd-studio-score-card">
-                        <span className="pd-studio-score-label">SEO</span>
-                        <strong>{studioResult.audit.scores.seo}</strong>
-                      </div>
-                      <div className="pd-studio-score-card">
-                        <span className="pd-studio-score-label">Best practices</span>
-                        <strong>{studioResult.audit.scores.bestPractices}</strong>
+                  <section className="pd-studio-block">
+                    <div className="pd-studio-block-head">
+                      <span className="pd-studio-step">01</span>
+                      <div>
+                        <div className="pd-studio-block-title">Choose the source</div>
+                        <div className="pd-studio-block-copy">Pick an existing project or paste a live URL for the analysis run.</div>
                       </div>
                     </div>
-                  ) : null}
+                    <div className="pd-field-grid">
+                      <label className="pd-field-label">
+                        Source project
+                        <select
+                          className="pd-field-select"
+                          value={studioProjectId === "" ? "" : String(studioProjectId)}
+                          onChange={event => {
+                            const value = event.target.value
+                            if (!value) {
+                              setStudioProjectId("")
+                              return
+                            }
+                            const nextProject = normalizedProjects.find(project => project.id === Number(value))
+                            setStudioProjectId(Number(value))
+                            if (nextProject?.url) setStudioUrl(nextProject.url)
+                            if (nextProject?.clientName) setStudioAudience(nextProject.clientName)
+                          }}
+                        >
+                          <option value="">Manual URL</option>
+                          {normalizedProjects.map(project => (
+                            <option key={project.id} value={project.id}>
+                              {project.name}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="pd-field-hint">Selecting a project also pulls in its saved URL and client context.</span>
+                      </label>
+                      <label className="pd-field-label">
+                        Website URL
+                        <input
+                          className="pd-field-input"
+                          value={studioUrl}
+                          onChange={event => setStudioUrl(event.target.value)}
+                          placeholder="https://..."
+                        />
+                        <span className="pd-field-hint">
+                          {studioNeedsLiveUrl
+                            ? "A live URL is required because this workflow runs a real audit before generating the plan."
+                            : "Optional if the selected project already has enough content for analysis."}
+                        </span>
+                      </label>
+                    </div>
+                  </section>
 
-                  {studioResult.sections.length ? (
-                    <div className="pd-studio-section-grid">
-                      {studioResult.sections.map(section => (
-                        <section key={section.label} className="pd-studio-section">
-                          <div className="pd-studio-section-title">{section.label}</div>
+                  <section className="pd-studio-block">
+                    <div className="pd-studio-block-head">
+                      <span className="pd-studio-step">02</span>
+                      <div>
+                        <div className="pd-studio-block-title">Define the outcome</div>
+                        <div className="pd-studio-block-copy">Tell the tool what “good” looks like so the output is specific instead of generic.</div>
+                      </div>
+                    </div>
+                    <div className="pd-field-grid">
+                      <label className="pd-field-label">
+                        {studioToolMeta.goalLabel}
+                        <input className="pd-field-input" value={studioGoal} onChange={event => setStudioGoal(event.target.value)} />
+                        <div className="pd-studio-chip-row">
+                          {studioToolMeta.goalPresets.map(preset => (
+                            <button key={preset} className="pd-studio-chip" type="button" onClick={() => setStudioGoal(preset)}>
+                              {preset}
+                            </button>
+                          ))}
+                        </div>
+                      </label>
+                      <label className="pd-field-label">
+                        {studioToolMeta.audienceLabel}
+                        <input className="pd-field-input" value={studioAudience} onChange={event => setStudioAudience(event.target.value)} />
+                        <div className="pd-studio-chip-row">
+                          {studioToolMeta.audiencePresets.map(preset => (
+                            <button key={preset} className="pd-studio-chip" type="button" onClick={() => setStudioAudience(preset)}>
+                              {preset}
+                            </button>
+                          ))}
+                        </div>
+                      </label>
+                      {studioToolMeta.extraFieldLabel ? (
+                        <label className="pd-field-label pd-field-label-full">
+                          {studioToolMeta.extraFieldLabel}
+                          <input
+                            className="pd-field-input"
+                            value={studioMarkets}
+                            onChange={event => setStudioMarkets(event.target.value)}
+                            placeholder={studioToolMeta.extraFieldPlaceholder}
+                          />
+                          {studioToolMeta.extraFieldPresets?.length ? (
+                            <div className="pd-studio-chip-row">
+                              {studioToolMeta.extraFieldPresets.map(preset => (
+                                <button key={preset} className="pd-studio-chip" type="button" onClick={() => setStudioMarkets(preset)}>
+                                  {preset}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </label>
+                      ) : null}
+                    </div>
+                  </section>
+
+                  <section className="pd-studio-block">
+                    <div className="pd-studio-block-head">
+                      <span className="pd-studio-step">03</span>
+                      <div>
+                        <div className="pd-studio-block-title">Add context</div>
+                        <div className="pd-studio-block-copy">Use this to steer the output toward real constraints, hypotheses, or preferences.</div>
+                      </div>
+                    </div>
+                    <label className="pd-field-label pd-field-label-full">
+                      Notes
+                      <textarea
+                        className="pd-field-textarea"
+                        value={studioNotes}
+                        onChange={event => setStudioNotes(event.target.value)}
+                        placeholder={studioToolMeta.notePlaceholder}
+                      />
+                    </label>
+                  </section>
+
+                  {studioResult ? (
+                    <div className="pd-studio-result">
+                      <div className="pd-studio-head">
+                        <div>
+                          <div className="pd-studio-kicker">Latest run</div>
+                          <div className="pd-studio-title">{studioResult.headline}</div>
+                        </div>
+                        <div className="pd-studio-pill">
+                          {studioResult.audit?.url?.replace(/^https?:\/\//, "") || selectedStudioProject?.name || studioToolMeta.title}
+                        </div>
+                      </div>
+                      <div className="pd-studio-summary">{studioResult.summary}</div>
+
+                      {studioResult.audit ? (
+                        <div className="pd-studio-score-grid">
+                          <div className="pd-studio-score-card">
+                            <span className="pd-studio-score-label">Performance</span>
+                            <strong>{studioResult.audit.scores.performance}</strong>
+                          </div>
+                          <div className="pd-studio-score-card">
+                            <span className="pd-studio-score-label">Accessibility</span>
+                            <strong>{studioResult.audit.scores.accessibility}</strong>
+                          </div>
+                          <div className="pd-studio-score-card">
+                            <span className="pd-studio-score-label">SEO</span>
+                            <strong>{studioResult.audit.scores.seo}</strong>
+                          </div>
+                          <div className="pd-studio-score-card">
+                            <span className="pd-studio-score-label">Best practices</span>
+                            <strong>{studioResult.audit.scores.bestPractices}</strong>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {studioResult.sections.length ? (
+                        <div className="pd-studio-section-grid">
+                          {studioResult.sections.map(section => (
+                            <section key={section.label} className="pd-studio-section">
+                              <div className="pd-studio-section-title">{section.label}</div>
+                              <div className="pd-studio-bullet-list">
+                                {section.items.map(item => (
+                                  <div key={item} className="pd-studio-bullet-item">
+                                    <span className="pd-studio-bullet-dot" />
+                                    <span>{item}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </section>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {studioResult.markets?.length ? (
+                        <div className="pd-studio-market-grid">
+                          {studioResult.markets.map(market => (
+                            <article key={`${market.market}-${market.language}`} className="pd-studio-market-card">
+                              <div className="pd-studio-market-top">
+                                <strong>{market.market}</strong>
+                                <span>{market.language}</span>
+                              </div>
+                              <div className="pd-studio-market-copy">{market.angle}</div>
+                              <div className="pd-studio-market-offer">{market.offer}</div>
+                            </article>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {studioResult.audit?.opportunities?.length ? (
+                        <section className="pd-studio-section">
+                          <div className="pd-studio-section-title">Audit opportunities</div>
                           <div className="pd-studio-bullet-list">
-                            {section.items.map(item => (
-                              <div key={item} className="pd-studio-bullet-item">
+                            {studioResult.audit.opportunities.map(opportunity => (
+                              <div key={opportunity.id} className="pd-studio-bullet-item">
                                 <span className="pd-studio-bullet-dot" />
-                                <span>{item}</span>
+                                <span>
+                                  {opportunity.title}: {opportunity.value}
+                                </span>
                               </div>
                             ))}
                           </div>
                         </section>
-                      ))}
+                      ) : null}
                     </div>
-                  ) : null}
-
-                  {studioResult.markets?.length ? (
-                    <div className="pd-studio-market-grid">
-                      {studioResult.markets.map(market => (
-                        <article key={`${market.market}-${market.language}`} className="pd-studio-market-card">
-                          <div className="pd-studio-market-top">
-                            <strong>{market.market}</strong>
-                            <span>{market.language}</span>
-                          </div>
-                          <div className="pd-studio-market-copy">{market.angle}</div>
-                          <div className="pd-studio-market-offer">{market.offer}</div>
-                        </article>
-                      ))}
-                    </div>
-                  ) : null}
-
-                  {studioResult.audit?.opportunities?.length ? (
-                    <section className="pd-studio-section">
-                      <div className="pd-studio-section-title">Audit opportunities</div>
-                      <div className="pd-studio-bullet-list">
-                        {studioResult.audit.opportunities.map(opportunity => (
-                          <div key={opportunity.id} className="pd-studio-bullet-item">
-                            <span className="pd-studio-bullet-dot" />
-                            <span>
-                              {opportunity.title}: {opportunity.value}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
                   ) : null}
                 </div>
-              ) : null}
+
+                <aside className="pd-studio-guide">
+                  <section className="pd-studio-guide-card">
+                    <div className="pd-studio-guide-title">What you’ll get</div>
+                    <div className="pd-studio-guide-list">
+                      {studioToolMeta.outcomes.map(item => (
+                        <div key={item} className="pd-studio-guide-item">
+                          <span className="pd-studio-guide-dot" />
+                          <span>{item}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="pd-studio-guide-card">
+                    <div className="pd-studio-guide-title">This run uses</div>
+                    <div className="pd-studio-chip-row pd-studio-chip-row-guide">
+                      {studioToolMeta.systems.map(item => (
+                        <span key={item} className="pd-studio-chip pd-studio-chip-passive">
+                          {item}
+                        </span>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="pd-studio-guide-card">
+                    <div className="pd-studio-guide-title">Source snapshot</div>
+                    <div className="pd-studio-source-grid">
+                      <div className="pd-studio-source-card">
+                        <span className="pd-studio-source-label">Selected project</span>
+                        <strong className="pd-studio-source-value">{selectedStudioProject?.name || "Manual input"}</strong>
+                      </div>
+                      <div className="pd-studio-source-card">
+                        <span className="pd-studio-source-label">Live URL</span>
+                        <strong className="pd-studio-source-value">
+                          {effectiveStudioUrl ? effectiveStudioUrl.replace(/^https?:\/\//, "") : "Not set"}
+                        </strong>
+                      </div>
+                      <div className="pd-studio-source-card">
+                        <span className="pd-studio-source-label">Project content</span>
+                        <strong className="pd-studio-source-value">{selectedStudioProjectText ? "Available" : "Missing"}</strong>
+                      </div>
+                      <div className="pd-studio-source-card">
+                        <span className="pd-studio-source-label">Run status</span>
+                        <strong className={`pd-studio-source-value ${studioSourceReady ? "is-ready" : "is-warn"}`}>
+                          {studioSourceReady ? "Ready to run" : studioNeedsLiveUrl ? "Needs URL" : "Needs content"}
+                        </strong>
+                      </div>
+                    </div>
+                  </section>
+                </aside>
+              </div>
             </div>
             <div className="pd-modal-actions">
               <button className="pd-btn" type="button" onClick={resetStudioTool}>Close</button>
