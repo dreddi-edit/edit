@@ -1,6 +1,7 @@
 import { Storage } from "@google-cloud/storage"
 
 const BUCKET_NAME = process.env.GCS_BUCKET || "edit-assets"
+const GCS_PREFIX = `https://storage.googleapis.com/${BUCKET_NAME}/`
 
 function getStorage() {
   const json = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
@@ -9,13 +10,49 @@ function getStorage() {
   return new Storage({ credentials, projectId: credentials.project_id })
 }
 
+export function getManagedCloudPath(url) {
+  if (typeof url !== "string" || !url.startsWith(GCS_PREFIX)) return null
+  const pathname = url.slice(GCS_PREFIX.length).replace(/^\/+/, "")
+  return pathname || null
+}
+
+export function normalizeManagedThumbnailUrl(url) {
+  if (!url) return url || null
+  const pathname = getManagedCloudPath(url)
+  if (!pathname || !pathname.startsWith("thumbnails/")) return url
+  const filename = pathname.slice("thumbnails/".length)
+  if (!filename || filename.includes("/")) return url
+  return `/thumbnails/${filename}`
+}
+
+export async function streamManagedFile(pathname, res) {
+  if (!pathname) return false
+  const storage = getStorage()
+  const file = storage.bucket(BUCKET_NAME).file(pathname)
+  const [exists] = await file.exists()
+  if (!exists) return false
+
+  const [metadata] = await file.getMetadata().catch(() => [{}])
+  res.setHeader("Cache-Control", metadata.cacheControl || "public, max-age=31536000")
+  res.type(metadata.contentType || "application/octet-stream")
+
+  await new Promise((resolve, reject) => {
+    const stream = file.createReadStream()
+    stream.on("error", reject)
+    stream.on("end", resolve)
+    stream.pipe(res)
+  })
+  return true
+}
+
 export async function uploadThumbnail(filepath, filename) {
   const storage = getStorage()
   const bucket = storage.bucket(BUCKET_NAME)
-  await bucket.upload(filepath, {
+  const [file] = await bucket.upload(filepath, {
     destination: `thumbnails/${filename}`,
     metadata: { contentType: "image/jpeg", cacheControl: "public, max-age=31536000" }
   })
+  await file.makePublic()
   return `https://storage.googleapis.com/${BUCKET_NAME}/thumbnails/${filename}`
 }
 

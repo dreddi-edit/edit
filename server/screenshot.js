@@ -1,5 +1,5 @@
 import puppeteer from "puppeteer"
-import { uploadThumbnail } from "./cloudStorage.js"
+import { normalizeManagedThumbnailUrl, streamManagedFile, uploadThumbnail } from "./cloudStorage.js"
 import { authMiddleware } from "./auth.js"
 import db from "./db.js"
 import path from "path"
@@ -41,6 +41,7 @@ export function registerScreenshotRoutes(app) {
       } catch (e) {
         console.warn("GCS upload failed, using local:", e.message)
       }
+      thumbUrl = normalizeManagedThumbnailUrl(thumbUrl)
       db.prepare("UPDATE projects SET thumbnail = ? WHERE id = ?").run(thumbUrl, project_id)
       res.json({ ok: true, thumbnail: thumbUrl })
     } catch (e) {
@@ -51,10 +52,20 @@ export function registerScreenshotRoutes(app) {
     }
   })
 
-  // Thumbnails statisch ausliefern
-  app.use("/thumbnails", (req, res, next) => {
-    const filepath = path.join(THUMB_DIR, path.basename(req.path))
-    if (fs.existsSync(filepath)) res.sendFile(filepath)
-    else next()
+  // Thumbnails lokal oder via GCS-Fallback ausliefern
+  app.get("/thumbnails/:filename", async (req, res, next) => {
+    const filename = path.basename(req.params.filename || "")
+    const filepath = path.join(THUMB_DIR, filename)
+    if (fs.existsSync(filepath)) {
+      res.setHeader("Cache-Control", "public, max-age=31536000")
+      return res.sendFile(filepath)
+    }
+    try {
+      const streamed = await streamManagedFile(`thumbnails/${filename}`, res)
+      if (streamed) return
+    } catch (error) {
+      console.warn("Thumbnail proxy failed:", error.message)
+    }
+    next()
   })
 }

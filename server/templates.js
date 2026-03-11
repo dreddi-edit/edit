@@ -1,6 +1,7 @@
 import db from "./db.js"
 import { authMiddleware } from "./auth.js"
 import { logAudit } from "./auditLog.js"
+import { normalizeManagedThumbnailUrl } from "./cloudStorage.js"
 import { getPlatformGuide, normalizeProjectDocument, normalizeSiteUrl } from "./siteMeta.js"
 import { isValidationError, readId, readOptionalString, readRequiredString } from "./validation.js"
 
@@ -31,6 +32,7 @@ export function registerTemplateRoutes(app) {
       ok: true,
       templates: templates.map((template) => ({
         ...template,
+        thumbnail: normalizeManagedThumbnailUrl(template.thumbnail),
         platformGuide: getPlatformGuide(template.platform),
       })),
     })
