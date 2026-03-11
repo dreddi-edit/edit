@@ -22,6 +22,7 @@ import { ENDPOINTS } from './config';
 import { COMPONENT_LIBRARY, COMPONENT_CATEGORIES } from './components/ComponentLibrary';
 import { useTranslation } from "./i18n/useTranslation"
 import { detectSitePlatform, getPlatformMeta, normalizePlatform, type SitePlatform } from "./utils/sitePlatform"
+import "./components/editor-viewer-dark.css"
 
 type BlockFilter =
   | "all"
@@ -45,6 +46,18 @@ type StructureSnapshotItem = {
   isSelected: boolean
 }
 
+type ExportMode =
+  | "wp-placeholder"
+  | "html-clean"
+  | "html-raw"
+  | "shopify-section"
+  | "wp-theme"
+  | "wp-block"
+  | "web-component"
+  | "email-newsletter"
+  | "markdown-content"
+  | "pdf-print"
+
 const BLOCK_FILTER_OPTIONS: Array<{ value: BlockFilter; label: string }> = [
   { value: "all", label: "All blocks" },
   { value: "button", label: "Buttons" },
@@ -61,6 +74,37 @@ const EDIT_RAIL_EXPANDED_WIDTH = 272
 const EDIT_RAIL_COLLAPSED_WIDTH = 72
 const DEFAULT_CHROME_BACKGROUND = "rgba(5, 12, 24, 0.96)"
 const DEFAULT_CHROME_BORDER = "rgba(96, 165, 250, 0.18)"
+const EXPORT_FILENAME_MAP: Record<ExportMode, string> = {
+  "wp-placeholder": "site_wp_placeholders.zip",
+  "html-clean": "site_html_clean.zip",
+  "html-raw": "site_html_raw.zip",
+  "shopify-section": "shopify_section.zip",
+  "wp-theme": "wordpress_theme.zip",
+  "wp-block": "wordpress_block_plugin.zip",
+  "web-component": "web_component_embed.zip",
+  "email-newsletter": "email_newsletter.zip",
+  "markdown-content": "content_markdown.zip",
+  "pdf-print": "design_preview.pdf",
+}
+const EXPORT_MODE_OPTIONS: Array<{ value: ExportMode; label: string }> = [
+  { value: "wp-placeholder", label: "WP Placeholder" },
+  { value: "html-clean", label: "HTML Clean" },
+  { value: "html-raw", label: "HTML Raw" },
+  { value: "shopify-section", label: "Shopify Section" },
+  { value: "wp-theme", label: "WordPress Theme" },
+  { value: "wp-block", label: "WordPress Block" },
+  { value: "web-component", label: "Web Component" },
+  { value: "email-newsletter", label: "Email Newsletter" },
+  { value: "markdown-content", label: "Markdown" },
+  { value: "pdf-print", label: "PDF Print" },
+]
+const WORKFLOW_STAGE_OPTIONS: Array<{ value: WorkflowStage; label: string }> = [
+  { value: "draft", label: "Draft" },
+  { value: "internal_review", label: "Internal review" },
+  { value: "client_review", label: "Client review" },
+  { value: "approved", label: "Approved" },
+  { value: "shipped", label: "Shipped" },
+]
 const structureMoveButtonStyle: CSSProperties = {
   height: 28,
   width: 28,
@@ -111,6 +155,13 @@ function pickEditorChromeFromDocument(doc: Document | null): { background: strin
   }
 
   return { background: DEFAULT_CHROME_BACKGROUND, border: DEFAULT_CHROME_BORDER }
+}
+
+function getDownloadFilename(response: Response, mode: ExportMode): string {
+  const disposition = response.headers.get("Content-Disposition") || ""
+  const match = disposition.match(/filename="?([^"]+)"?/i)
+  if (match?.[1]) return match[1]
+  return EXPORT_FILENAME_MAP[mode]
 }
 
 export default function App() {
@@ -322,7 +373,7 @@ const [adminLoading, setAdminLoading] = useState(false)
   }
 
   const activePlanMeta = demoPlanMeta[demoPlan]
-  const [exportMode, setExportMode] = useState<"wp-placeholder" | "html-clean" | "html-raw">("wp-placeholder")
+  const [exportMode, setExportMode] = useState<ExportMode>("wp-placeholder")
   const [exporting, setExporting] = useState(false)
   const [leftAiPrompt, setLeftAiPrompt] = useState("")
   const [leftAiModel, setLeftAiModel] = useState("auto")
@@ -676,7 +727,7 @@ const autoSave = async (html: string) => {
       }
       const a = document.createElement("a");
       a.href = URL.createObjectURL(await r.blob());
-      a.download = exportMode === "wp-placeholder" ? "site_wp_placeholders.zip" : (exportMode === "html-clean" ? "site_html_clean.zip" : "site_html_raw.zip");
+      a.download = getDownloadFilename(r, exportMode);
       document.body.appendChild(a); a.click(); a.remove();
       if (currentProject?.id) {
         const refreshed = await apiGetProject(currentProject.id).catch(() => null)
@@ -793,6 +844,14 @@ const autoSave = async (html: string) => {
     { label: "Form", tint: "rgba(56,189,248,0.92)", background: "rgba(56,189,248,0.12)", value: "form" as BlockFilter },
     { label: "CTA", tint: "rgba(168,85,247,0.92)", background: "rgba(168,85,247,0.12)", value: "button" as BlockFilter },
   ]
+  const selectedExportMode = EXPORT_MODE_OPTIONS.find(option => option.value === exportMode) || EXPORT_MODE_OPTIONS[0]
+  const editorShellStyle: CSSProperties = {
+    height: "100vh",
+    ["--editor-topbar-height" as string]: "58px",
+    ["--editor-rail-width" as string]: `${editRailWidth}px`,
+    ["--editor-chrome-bg" as string]: editorChrome.background,
+    ["--editor-chrome-border" as string]: editorChrome.border,
+  }
   
   useEffect(() => {
     const onSignal = (e: Event) => {
@@ -951,333 +1010,179 @@ useEffect(() => {
   }
 
   return (
-    <div style={{ height: "100vh", background: "var(--bg-root)", fontFamily: "var(--font-sans)" }}>
+    <div className="editor-shell" style={editorShellStyle}>
+      {isEdit && isDraggingBlock && (
+        <div
+          data-bo-grid-overlay="1"
+          className="editor-shell__drag-grid"
+          style={{ left: editRailWidth }}
+        >
+          <div className="editor-shell__drag-grid-label">Drop grid active</div>
+        </div>
+      )}
 
-        {/* Drag Grid Overlay */}
-        {isEdit && isDraggingBlock && (
-          <div
-            data-bo-grid-overlay="1"
-            style={{
-              position: "fixed",
-              left: editRailWidth,
-              top: 58,
-              right: 0,
-              bottom: 0,
-              zIndex: 99999,
-              pointerEvents: "none",
-              backgroundImage:
-                "linear-gradient(to right, rgba(96,165,250,0.14) 1px, transparent 1px), linear-gradient(to bottom, rgba(96,165,250,0.14) 1px, transparent 1px)",
-              backgroundSize: "40px 40px",
-              boxShadow: "inset 0 0 0 1px rgba(96,165,250,0.22)",
-            }}
+      <div className="editor-toolbar">
+        <div className="editor-toolbar__cluster editor-toolbar__cluster--tight">
+          <button
+            className="editor-btn editor-btn--back"
+            onClick={() => setView("dashboard")}
           >
-            <div style={{
-              position: "absolute",
-              left: 14,
-              top: 10,
-              padding: "6px 10px",
-              borderRadius: 10,
-              background: "rgba(9,13,18,0.92)",
-              border: "1px solid rgba(96,165,250,0.24)",
-              color: "white",
-              fontSize: 12,
-              fontWeight: 800,
-            }}>
-              Drop-Grid aktiv
+            <span className="editor-btn__icon">&lt;</span>
+            Dashboard
+          </button>
+
+          <div className="editor-toolbar__identity">
+            <div className="editor-toolbar__label">Site Editor</div>
+            <div className="editor-toolbar__project">
+              {currentProject?.name || loadedUrl.replace(/^https?:\/\//, "") || "No project loaded"}
             </div>
           </div>
-        )}
 
-      {/* ── Toolbar ── */}
-      <div style={{
-        position: "fixed", top: 0, left: 0, right: 0, height: 58,
-        display: "flex", alignItems: "center", gap: 10, padding: "0 16px",
-        background: view === "editor" ? editorChrome.background : "var(--header-bg)",
-        borderBottom: view === "editor" ? `1px solid ${editorChrome.border}` : "1px solid var(--border)",
-        boxShadow: "0 8px 30px rgba(0,0,0,0.18)",
-        zIndex: 80,
-        transition: "background 0.3s ease",
-      }}>
-
-        {/* Back to Dashboard */}
-        <button onClick={() => setView("dashboard")} style={{
-          height: 34, padding: "0 12px", borderRadius: 10, flexShrink: 0,
-          border: "1px solid var(--border)",
-          background: "rgba(255,255,255,0.03)",
-          color: "white", cursor: "pointer", fontSize: 12, fontWeight: 800,
-          display: "inline-flex", alignItems: "center", gap: 6,
-        }}>← Dashboard</button>
-
-        {/* Logo */}
-        <div style={{
-          fontSize: 16, fontWeight: 800, color: "var(--text-primary)", marginRight: 2,
-          letterSpacing: -0.3,
-          flexShrink: 0,
-        }}>Site Editor</div>
-
-          {/* Active Plan Badge */}
           <div
+            className="editor-pill editor-pill--plan"
             style={{
-              height: 30,
-              padding: "0 10px",
-              borderRadius: 999,
-              flexShrink: 0,
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              border: `1px solid ${activePlanMeta.border}`,
+              borderColor: activePlanMeta.border,
               background: activePlanMeta.bg,
-              color: "white",
+              color: activePlanMeta.accent,
             }}
           >
-            <div
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: 999,
-                background: activePlanMeta.accent,
-                boxShadow: `0 0 10px ${activePlanMeta.accent}`,
-                flexShrink: 0,
-              }}
+            <span className="editor-pill__dot" style={{ background: activePlanMeta.accent }} />
+            Plan {activePlanMeta.label}
+          </div>
+        </div>
+
+        <div className="editor-toolbar__divider" />
+
+        <div className="editor-toolbar__cluster editor-toolbar__cluster--url">
+          <div className={`editor-urlbar ${isEdit ? "is-editing" : ""}`}>
+            <span className="editor-urlbar__icon">O</span>
+            <input
+              className="editor-urlbar__input"
+              value={url}
+              onChange={e => setUrl(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && load(true)}
+              placeholder="https://..."
             />
-            <span style={{ fontSize: 11, fontWeight: 900, color: activePlanMeta.accent, whiteSpace: "nowrap" }}>
-              PLAN · {activePlanMeta.label}
-            </span>
+            <button
+              className="editor-urlbar__load"
+              onClick={() => load(true)}
+            >
+              {isLoading ? "..." : "Load"}
+            </button>
+          </div>
+        </div>
+
+        <div className="editor-toolbar__divider editor-toolbar__divider--hide-mobile" />
+
+        <div className="editor-toolbar__cluster editor-toolbar__cluster--meta">
+          <div className={`editor-status editor-status--${status}`}>
+            <span className="editor-status__dot" />
+            {status === "idle" ? "Ready" : status === "blocked" ? "Loading" : "OK"}
           </div>
 
+          <div
+            className="editor-pill"
+            title={currentPlatformGuide?.safeEditScope || currentPlatformMeta.label}
+            style={{
+              borderColor: currentPlatformMeta.border,
+              background: currentPlatformMeta.background,
+              color: currentPlatformMeta.accent,
+            }}
+          >
+            <span className="editor-pill__dot" style={{ background: currentPlatformMeta.accent }} />
+            {currentPlatformMeta.label}
+          </div>
 
-          {/* Cost Tracker */}
+          {currentProject && (
+            <select
+              className="editor-select"
+              value={currentProject.workflowStage || "draft"}
+              onChange={e => changeWorkflowStage(e.target.value as WorkflowStage)}
+              title={workflowHistory[0] ? `Last workflow change: ${String(workflowHistory[0].to_stage || "draft").replace(/_/g, " ")}` : "Workflow stage"}
+            >
+              {WORKFLOW_STAGE_OPTIONS.map(option => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          )}
+
+          <button
+            className="editor-btn"
+            onClick={() => {
+              const prev = undoPop()
+              if (prev) setCurrentHtml(prev)
+            }}
+            title="Undo latest change"
+          >
+            Undo
+          </button>
+        </div>
+
+        <div className="editor-toolbar__spacer" />
+
+        <div className="editor-toolbar__cluster editor-toolbar__cluster--tight">
           {(sessionCost > 0 || sessionTokens.input > 0 || sessionTokens.output > 0) && (
             <div
-              title={`Input: ${sessionTokens.input.toLocaleString()} / Output: ${sessionTokens.output.toLocaleString()} tokens\nKlicken zum Zurücksetzen`}
-              onClick={() => { if(confirm(t("Reset session costs?"))) { setSessionCost(0); setSessionTokens({input:0,output:0}); } }}
-              style={{
-                minHeight: 36, padding: "6px 12px", borderRadius: 10, flexShrink: 0,
-                display: "flex", alignItems: "center", gap: 8,
-              border: "1px solid rgba(245,158,11,0.25)",
-              background: "rgba(245,158,11,0.1)",
-              fontSize: 12, fontWeight: 800, color: "rgba(253,224,71,0.92)",
-                cursor: "pointer",
-                lineHeight: 1.15,
-              }}>
-              <span>◈ ${sessionCost.toFixed(4)}</span>
-              <span style={{ opacity: 0.8 }}>•</span>
-              <span>{sessionTokens.input.toLocaleString()} in / {sessionTokens.output.toLocaleString()} out</span>
+              className="editor-cost-chip"
+              title={`Input: ${sessionTokens.input.toLocaleString()} / Output: ${sessionTokens.output.toLocaleString()} tokens\nClick to reset`}
+              onClick={() => {
+                if (confirm(t("Reset session costs?"))) {
+                  setSessionCost(0)
+                  setSessionTokens({ input: 0, output: 0 })
+                }
+              }}
+            >
+              <span>${sessionCost.toFixed(4)}</span>
+              <span className="editor-cost-chip__sep" />
+              <span>{sessionTokens.input.toLocaleString()} in</span>
+              <span>{sessionTokens.output.toLocaleString()} out</span>
             </div>
           )}
 
-        {/* URL Input + Load */}
-        <div style={{
-          flex: "0 1 430px",
-          minWidth: 240,
-          height: 38,
-          display: "flex",
-          alignItems: "center",
-          borderRadius: 12,
-          border: isEdit ? "1px solid rgba(248,113,113,0.24)" : "1px solid var(--border)",
-          background: "rgba(255,255,255,0.03)",
-          overflow: "hidden",
-        }}>
-          <div style={{
-            width: 34,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: 13,
-            color: "rgba(148,163,184,0.5)",
-            flexShrink: 0,
-          }}>◎</div>
-          <input
-            value={url} onChange={e => setUrl(e.target.value)}
-            onKeyDown={e => e.key === "Enter" && load(true)}
-            placeholder="https://..."
-            style={{
-              flex: 1,
-              height: "100%",
-              border: "none",
-              background: "transparent",
-              color: "var(--text-primary)",
-              padding: "0 12px 0 0",
-              outline: "none",
-              fontSize: 13,
-              minWidth: 0,
-            }}
-          />
-          <div style={{ width: 1, alignSelf: "stretch", background: "rgba(148,163,184,0.18)" }} />
-          <button onClick={() => load(true)}
-            onMouseDown={e => (e.currentTarget.style.transform="scale(0.96)")}
-            onMouseUp={e => (e.currentTarget.style.transform="scale(1)")}
-            onMouseLeave={e => (e.currentTarget.style.transform="scale(1)")}
-            style={{
-              height: "100%",
-              padding: "0 16px",
-              border: "none",
-              borderRadius: 0,
-              flexShrink: 0,
-              background: "rgba(255,255,255,0.04)",
-              color: "white",
-              cursor: "pointer",
-              fontWeight: 700,
-              fontSize: 13,
-              transition: "transform 0.1s, background 0.2s",
-            }}>{isLoading ? <span style={{display:"inline-block",animation:"spin 0.7s linear infinite"}}>⟳</span> : "↺"} Load</button>
-        </div>
-
-        {/* Status Badge */}
-        <div style={{
-          height: 36, padding: "0 12px", borderRadius: 10, flexShrink: 0,
-          display: "flex", alignItems: "center", gap: 6,
-          border: status === "ok" ? "1px solid rgba(34,197,94,0.4)" : status === "blocked" ? "1px solid rgba(245,158,11,0.4)" : "1px solid rgba(148,163,184,0.2)",
-          background: status === "ok" ? "rgba(34,197,94,0.12)" : status === "blocked" ? "rgba(245,158,11,0.12)" : "rgba(148,163,184,0.08)",
-          fontSize: 12, fontWeight: 700, color: "white",
-        }}>
-          <div style={{
-            width: 7, height: 7, borderRadius: "50%",
-            background: status === "ok" ? "#22c55e" : status === "blocked" ? "#f59e0b" : "#64748b",
-            boxShadow: status === "ok" ? "0 0 6px #22c55e" : status === "blocked" ? "0 0 6px #f59e0b" : "none",
-            animation: status === "blocked" ? "pulse 1s infinite" : "none",
-          }} />
-          {status === "idle" ? "Bereit" : status === "blocked" ? "Lädt…" : "OK"}
-        </div>
-
-        <div
-          title={currentPlatformGuide?.safeEditScope || currentPlatformMeta.label}
-          style={{
-          height: 36, padding: "0 12px", borderRadius: 10, flexShrink: 0,
-          display: "flex", alignItems: "center", gap: 8,
-          border: `1px solid ${currentPlatformMeta.border}`,
-          background: currentPlatformMeta.background,
-          color: currentPlatformMeta.accent,
-          fontSize: 12, fontWeight: 800,
-        }}>
-          <div style={{ width: 7, height: 7, borderRadius: "50%", background: currentPlatformMeta.accent, boxShadow: `0 0 6px ${currentPlatformMeta.accent}` }} />
-          {currentPlatformMeta.label}
-        </div>
-
-        {currentProject && (
-          <select
-            value={currentProject.workflowStage || "draft"}
-            onChange={e => changeWorkflowStage(e.target.value as WorkflowStage)}
-            title={workflowHistory[0] ? `Last workflow change: ${String(workflowHistory[0].to_stage || "draft").replace(/_/g, " ")}` : "Workflow stage"}
-            style={{
-              height: 36,
-              padding: "0 10px",
-              borderRadius: 10,
-              border: "1px solid rgba(255,255,255,0.08)",
-              background: "rgba(255,255,255,0.03)",
-              color: "white",
-              fontWeight: 700,
-              fontSize: 12,
-              outline: "none",
-            }}
+          <button
+            className={`editor-btn editor-btn--primary ${isEdit ? "is-saving" : ""}`}
+            onClick={handleModeSwitch}
           >
-            <option value="draft">Draft</option>
-            <option value="internal_review">Internal review</option>
-            <option value="client_review">Client review</option>
-            <option value="approved">Approved</option>
-            <option value="shipped">Shipped</option>
-          </select>
-        )}
+            {isEdit ? "Save" : "Edit"}
+          </button>
 
-        <button
-          onClick={() => { const prev = undoPop(); if (prev) setCurrentHtml(prev) }}
-          onMouseDown={e => (e.currentTarget.style.transform="scale(0.93)")}
-          onMouseUp={e => (e.currentTarget.style.transform="scale(1)")}
-          onMouseLeave={e => (e.currentTarget.style.transform="scale(1)")}
-          title="Letzte Änderung rückgängig"
-          style={{
-            height: 36,
-            padding: "0 14px",
-            borderRadius: 10,
-            flexShrink: 0,
-            border: "1px solid var(--border)",
-            background: "rgba(255,255,255,0.03)",
-            color: "white",
-            cursor: "pointer",
-            fontWeight: 700,
-            fontSize: 12,
-            transition: "transform 0.1s"
-          }}
-        >
-          Undo
-        </button>
-
-        {/* Divider */}
-        <div style={{ width: 1, height: 28, background: "rgba(148,163,184,0.15)", flexShrink: 0 }} />
-
-        {/* Edit/View Toggle */}
-        <button onClick={handleModeSwitch} style={{
-          height: 36, padding: "0 16px", borderRadius: 10, flexShrink: 0,
-          border: isEdit ? "1px solid rgba(248,113,113,0.22)" : "1px solid rgba(34,197,94,0.24)",
-          background: isEdit ? "rgba(127,29,29,0.24)" : "rgba(21,128,61,0.18)",
-          color: "white", cursor: "pointer", fontWeight: 700, fontSize: 13,
-        }}>{isEdit ? t("↓ Speichern") : t("✐ Bearbeiten")}</button>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <div className="editor-export-picker">
             <select
+              className="editor-select editor-select--export"
               value={exportMode}
-              onChange={e => setExportMode(e.target.value as "wp-placeholder" | "html-clean" | "html-raw")}
-              title="Download-Format"
-              style={{
-                height: 36,
-                padding: "0 10px",
-                borderRadius: 10,
-                border: "1px solid var(--border)",
-                background: "rgba(255,255,255,0.03)",
-                color: "white",
-                cursor: "pointer",
-                fontWeight: 700,
-                fontSize: 12,
-                outline: "none"
-              }}
+              onChange={e => setExportMode(e.target.value as ExportMode)}
+              title="Export format"
             >
-              <option value="wp-placeholder">WP Placeholder</option>
-              <option value="html-clean">HTML Clean</option>
-              <option value="html-raw">HTML Raw</option>
+              {EXPORT_MODE_OPTIONS.map(option => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
 
             <button
+              className={`editor-btn editor-btn--export ${exportReadiness === "guarded" ? "is-guarded" : ""}`}
               onClick={handleExport}
               disabled={exporting}
-              title="Download"
+              title="Export"
               aria-busy={exporting ? "true" : undefined}
-              onMouseDown={e => { if (!exporting) (e.currentTarget as HTMLElement).style.transform = "scale(0.93)" }}
-              onMouseUp={e => (e.currentTarget as HTMLElement).style.transform = "scale(1)"}
-              onMouseLeave={e => (e.currentTarget as HTMLElement).style.transform = "scale(1)"}
-              style={{
-                height: 36,
-                padding: "0 14px",
-                borderRadius: 10,
-                flexShrink: 0,
-                border: "1px solid var(--border)",
-                background: exporting
-                  ? "rgba(96,165,250,0.22)"
-                  : exportReadiness === "guarded"
-                  ? "rgba(245,158,11,0.12)"
-                  : "rgba(255,255,255,0.03)",
-                color: "white",
-                cursor: exporting ? "wait" : "pointer",
-                fontWeight: 700,
-                fontSize: 12,
-                transition: "transform 0.1s",
-                opacity: exporting ? 0.9 : 1,
-              }}
             >
-              {exporting ? "⟳ …" : "Download"}
+              {exporting ? "Exporting..." : "Export"}
             </button>
           </div>
-
+        </div>
       </div>
 
       <style>{`
-        @keyframes spin { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-        @keyframes loadingbar { 0%{transform:translateX(-120%)} 100%{transform:translateX(420%)} }
+        @keyframes spin { 0% { transform: rotate(0deg) } 100% { transform: rotate(360deg) } }
+        @keyframes pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.4 } }
+        @keyframes loadingbar { 0% { transform: translateX(-120%) } 100% { transform: translateX(420%) } }
       `}</style>
 
-      {/* Progress Bar */}
-      <div style={{ position:"fixed", left:0, right:0, top: 64, height: 2, background:"rgba(148,163,184,0.1)", zIndex:90, overflow:"hidden", opacity:isLoading?1:0, transition:"opacity 120ms" }}>
-        <div style={{ height:"100%", width:"40%", background:"linear-gradient(90deg, #38bdf8, #60a5fa)", transform:"translateX(-120%)", animation:isLoading?"loadingbar 800ms ease-in-out infinite":"none" }} />
+      <div className={`editor-progress ${isLoading ? "is-visible" : ""}`}>
+        <div className="editor-progress__bar" />
       </div>
 
       {currentAiApproval && (
@@ -1366,172 +1271,112 @@ useEffect(() => {
         </div>
       )}
 
-      {/* Loading Overlay */}
       {isLoading && (
         <div style={{ position:"fixed", top:58, left:0, right:0, bottom:0, background:"rgba(11,18,32,0.97)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", zIndex:100 }}>
           <div style={{ width:64, height:64, border:"3px solid rgba(99,102,241,0.2)", borderTop:"3px solid #6366f1", borderRadius:"50%", animation:"spin 0.8s linear infinite", marginBottom:20 }} />
-          <div style={{ color:"white", fontSize:17, fontWeight:700, marginBottom:8 }}>Website wird geladen…</div>
-          <div style={{ color:"rgba(148,163,184,0.7)", fontSize:13, textAlign:"center", maxWidth:280 }}>Seite wird über den Proxy geladen.</div>
+          <div style={{ color:"white", fontSize:17, fontWeight:700, marginBottom:8 }}>Website wird geladen...</div>
+          <div style={{ color:"rgba(148,163,184,0.7)", fontSize:13, textAlign:"center", maxWidth:280 }}>Seite wird ueber den Proxy geladen.</div>
         </div>
       )}
+
       {isEdit && (
-        <div style={{
-          position: "fixed",
-          left: 0,
-          top: 58,
-          bottom: 0,
-          width: editRailWidth,
-          overflowY: "auto",
-          zIndex: 96,
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-          padding: isEditRailCollapsed ? "12px 10px 18px" : "14px 14px 20px",
-          borderRight: "1px solid rgba(148,163,184,0.14)",
-          background: "rgba(4,8,20,0.985)",
-          boxShadow: "10px 0 26px rgba(0,0,0,0.14)",
-          boxSizing: "border-box",
-          transition: "width 0.22s ease, padding 0.22s ease",
-        }}>
-          <div style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: isEditRailCollapsed ? "center" : "space-between",
-            gap: 8,
-            paddingBottom: 12,
-            borderBottom: "1px solid rgba(148,163,184,0.14)",
-          }}>
-            <button
-              onClick={() => setIsEditRailCollapsed((prev) => !prev)}
-              title={isEditRailCollapsed ? "Expand tools" : "Collapse tools"}
-              style={{
-                width: 34,
-                height: 34,
-                borderRadius: 10,
-                border: "1px solid rgba(148,163,184,0.18)",
-                background: "rgba(255,255,255,0.03)",
-                color: "white",
-                cursor: "pointer",
-                fontSize: 16,
-                fontWeight: 900,
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-              }}
-            >
-              {isEditRailCollapsed ? "›" : "‹"}
-            </button>
-          </div>
+        <aside className={`editor-panel ${isEditRailCollapsed ? "is-collapsed" : ""}`}>
+          <button
+            className="editor-panel__collapse"
+            onClick={() => setIsEditRailCollapsed(prev => !prev)}
+            title={isEditRailCollapsed ? "Expand tools" : "Collapse tools"}
+          >
+            {isEditRailCollapsed ? ">" : "<"}
+          </button>
 
           {isEditRailCollapsed ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 50,
-                height: 50,
-                alignSelf: "center",
-                borderRadius: 16,
-                border: `1px solid ${currentPlatformMeta.border}`,
-                background: currentPlatformMeta.background,
-                color: currentPlatformMeta.accent,
-                fontSize: 11,
-                fontWeight: 900,
-                textAlign: "center",
-                lineHeight: 1.15,
-                padding: 6,
-                boxSizing: "border-box",
-              }}>
-                {currentPlatformMeta.label}
+            <div className="editor-panel__collapsed-stack">
+              <div
+                className="editor-panel__mini-platform"
+                style={{
+                  borderColor: currentPlatformMeta.border,
+                  background: currentPlatformMeta.background,
+                  color: currentPlatformMeta.accent,
+                }}
+              >
+                {currentPlatformMeta.shortLabel}
               </div>
+
               <button
+                className="editor-panel__mini-action"
                 onClick={() => handleAiRescan("block")}
                 disabled={aiScanLoading}
                 title="AI Block"
-                style={{
-                  width: 50,
-                  height: 40,
-                  alignSelf: "center",
-                  borderRadius: 12,
-                  border: "1px solid rgba(96,165,250,0.3)",
-                  background: "rgba(59,130,246,0.14)",
-                  color: "white",
-                  fontWeight: 800,
-                  fontSize: 11,
-                  cursor: aiScanLoading ? "wait" : "pointer",
-                  opacity: aiScanLoading ? 0.65 : 1,
-                }}
               >
                 AI
               </button>
+
               <button
+                className="editor-panel__mini-action"
                 onClick={() => handleAiRescan("page")}
                 disabled={aiScanLoading}
                 title="AI Page"
-                style={{
-                  width: 50,
-                  height: 40,
-                  alignSelf: "center",
-                  borderRadius: 12,
-                  border: "1px solid rgba(96,165,250,0.2)",
-                  background: "rgba(59,130,246,0.08)",
-                  color: "white",
-                  fontWeight: 800,
-                  fontSize: 11,
-                  cursor: aiScanLoading ? "wait" : "pointer",
-                  opacity: aiScanLoading ? 0.65 : 1,
-                }}
               >
                 Page
               </button>
+
+              <div className={`editor-panel__mini-readiness ${exportReadiness}`}>
+                {exportReadiness === "guarded" ? "!" : "OK"}
+              </div>
             </div>
           ) : (
-            <>
-              <div style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 8,
-                paddingBottom: 12,
-                borderBottom: "1px solid rgba(148,163,184,0.14)",
-              }}>
-                <div style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 8,
-                  alignSelf: "flex-start",
-                  padding: "6px 10px",
-                  borderRadius: 999,
-                  border: `1px solid ${currentPlatformMeta.border}`,
-                  background: currentPlatformMeta.background,
-                  color: currentPlatformMeta.accent,
-                  fontSize: 12,
-                  fontWeight: 800,
-                }}>
-                  <div style={{ width: 7, height: 7, borderRadius: "50%", background: currentPlatformMeta.accent }} />
-                  {currentPlatformMeta.label}
+            <div className="editor-panel__scroll">
+              <section className="editor-panel__section">
+                <div className="editor-panel__label">Page</div>
+                <div className="editor-panel__site-card">
+                  <div
+                    className="editor-panel__site-icon"
+                    style={{
+                      borderColor: currentPlatformMeta.border,
+                      background: currentPlatformMeta.background,
+                      color: currentPlatformMeta.accent,
+                    }}
+                  >
+                    {currentPlatformMeta.shortLabel}
+                  </div>
+
+                  <div className="editor-panel__site-copy">
+                    <div className="editor-panel__site-name">
+                      {currentProject?.name || loadedUrl.replace(/^https?:\/\//, "") || "No site loaded"}
+                    </div>
+                    <div className="editor-panel__site-meta">
+                      <span className="editor-panel__site-dot" style={{ background: currentPlatformMeta.accent }} />
+                      {currentPlatformMeta.label}
+                      {currentProject ? ` · ${titleCaseFallback(currentProject.workflowStage || "draft")}` : ""}
+                    </div>
+                  </div>
                 </div>
-                <div style={{ fontSize: 11, color: "rgba(226,232,240,0.72)", lineHeight: 1.45 }}>
-                  {loadedUrl ? loadedUrl.replace(/^https?:\/\//, "") : "No site loaded"}
+
+                <div className="editor-panel__url">
+                  {loadedUrl ? loadedUrl.replace(/^https?:\/\//, "") : "Load a site or open a project"}
                 </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {blockFamilyChips.map((chip) => {
+
+                <div className="editor-panel__note">
+                  {currentPlatformGuide?.safeEditScope || "Live block editing stays inside the current overlay scope."}
+                </div>
+              </section>
+
+              <div className="editor-panel__divider" />
+
+              <section className="editor-panel__section">
+                <div className="editor-panel__label">Block Types</div>
+                <div className="editor-panel__chips">
+                  {blockFamilyChips.map(chip => {
                     const isActive = chip.value === "all" ? blockFilter === "all" : blockFilter === chip.value
                     return (
                       <button
                         key={`${chip.label}-${chip.value}`}
+                        className={`editor-chip ${isActive ? "is-active" : ""}`}
                         onClick={() => setBlockFilter(chip.value)}
                         style={{
-                          height: 28,
-                          padding: "0 10px",
-                          borderRadius: 999,
-                          border: `1px solid ${isActive ? chip.tint : "rgba(148,163,184,0.18)"}`,
+                          borderColor: isActive ? chip.tint : "rgba(148,163,184,0.18)",
                           background: isActive ? chip.background : "rgba(255,255,255,0.03)",
                           color: isActive ? chip.tint : "rgba(226,232,240,0.8)",
-                          fontSize: 11,
-                          fontWeight: 800,
-                          cursor: "pointer",
                         }}
                       >
                         {chip.label}
@@ -1539,140 +1384,103 @@ useEffect(() => {
                     )
                   })}
                 </div>
-                {exportWarnings.length > 0 && (
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(251,191,36,0.94)" }}>
-                    {exportWarnings.length} export warning{exportWarnings.length === 1 ? "" : "s"}
-                  </div>
-                )}
-              </div>
+              </section>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: 0.4, color: "rgba(255,255,255,0.92)" }}>
-                  Overlay
+              <div className="editor-panel__divider" />
+
+              <section className="editor-panel__section">
+                <div className="editor-panel__label">Delivery</div>
+                <div className="editor-panel__delivery">
+                  <div className={`editor-panel__delivery-pill ${exportReadiness}`}>
+                    {exportReadiness === "guarded" ? "Guarded export" : "Ready export"}
+                  </div>
+                  <div className="editor-panel__delivery-mode">{selectedExportMode.label}</div>
                 </div>
+                {exportWarnings.length > 0 ? (
+                  <div className="editor-panel__warning">
+                    {exportWarnings.length} warning{exportWarnings.length === 1 ? "" : "s"} will be written into the manifest.
+                  </div>
+                ) : (
+                  <div className="editor-panel__note">No delivery warnings right now.</div>
+                )}
+              </section>
+
+              <div className="editor-panel__divider" />
+
+              <section className="editor-panel__section">
+                <div className="editor-panel__label">Overlay</div>
                 <select
+                  className="editor-select editor-select--full"
                   value={blockFilter}
                   onChange={e => setBlockFilter(e.target.value as BlockFilter)}
                   title="Visible blocks"
-                  style={{
-                    height: 36,
-                    padding: "0 10px",
-                    borderRadius: 10,
-                    border: "1px solid rgba(148,163,184,0.25)",
-                    background: "rgba(5,10,25,0.96)",
-                    color: "white",
-                    fontWeight: 700,
-                    fontSize: 12,
-                    outline: "none",
-                  }}
                 >
-                  {BLOCK_FILTER_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
+                  {BLOCK_FILTER_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
                   ))}
                 </select>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+
+                <div className="editor-panel__two-up">
                   <button
+                    className="editor-btn editor-btn--panel"
                     onClick={() => handleAiRescan("block")}
                     disabled={aiScanLoading}
-                    style={{
-                      height: 34,
-                      borderRadius: 10,
-                      border: "1px solid rgba(96,165,250,0.3)",
-                      background: "rgba(59,130,246,0.14)",
-                      color: "white",
-                      fontWeight: 800,
-                      fontSize: 12,
-                      cursor: aiScanLoading ? "wait" : "pointer",
-                      opacity: aiScanLoading ? 0.65 : 1,
-                    }}
                   >
                     {aiScanLoading ? "..." : "AI Block"}
                   </button>
                   <button
+                    className="editor-btn editor-btn--panel editor-btn--panel-muted"
                     onClick={() => handleAiRescan("page")}
                     disabled={aiScanLoading}
-                    style={{
-                      height: 34,
-                      borderRadius: 10,
-                      border: "1px solid rgba(96,165,250,0.3)",
-                      background: "rgba(59,130,246,0.08)",
-                      color: "white",
-                      fontWeight: 800,
-                      fontSize: 12,
-                      cursor: aiScanLoading ? "wait" : "pointer",
-                      opacity: aiScanLoading ? 0.65 : 1,
-                    }}
                   >
                     {aiScanLoading ? "..." : "AI Page"}
                   </button>
                 </div>
-              </div>
+              </section>
 
-              <div style={{ height: 1, background: "rgba(148,163,184,0.14)" }} />
+              <div className="editor-panel__divider" />
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: 0.4, color: "rgba(255,255,255,0.92)" }}>
-                  Structure
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 180, overflowY: "auto", paddingRight: 4 }}>
+              <section className="editor-panel__section">
+                <div className="editor-panel__label">Structure</div>
+                <div className="editor-structure">
                   {structureItems.length === 0 ? (
-                    <div style={{ fontSize: 11, color: "rgba(148,163,184,0.68)", lineHeight: 1.4 }}>
+                    <div className="editor-panel__note">
                       Load a site to reorder motherblocks.
                     </div>
-                  ) : structureItems.map((item) => (
+                  ) : structureItems.map(item => (
                     <div
                       key={item.id}
-                      style={{
-                        padding: 8,
-                        borderRadius: 10,
-                        border: item.isSelected ? "1px solid rgba(96,165,250,0.34)" : "1px solid rgba(148,163,184,0.14)",
-                        background: item.isSelected ? "rgba(37,99,235,0.12)" : "rgba(255,255,255,0.03)",
-                        display: "grid",
-                        gridTemplateColumns: "1fr auto",
-                        gap: 8,
-                        alignItems: "center",
-                      }}
+                      className={`editor-structure__item ${item.isSelected ? "is-selected" : ""}`}
                     >
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 11, fontWeight: 800, color: "white", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                          {item.displayLabel}
-                        </div>
-                        <div style={{ fontSize: 10, color: "rgba(148,163,184,0.72)", marginTop: 2 }}>
+                      <div className="editor-structure__copy">
+                        <div className="editor-structure__title">{item.displayLabel}</div>
+                        <div className="editor-structure__meta">
                           {item.childCount > 0 ? `${item.childCount} child blocks` : titleCaseFallback(item.kind)}
                         </div>
                       </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 28px)", gap: 4 }}>
-                        <button onClick={() => moveStructureItem(item.rootId, -2)} style={structureMoveButtonStyle}>⇡</button>
-                        <button onClick={() => moveStructureItem(item.rootId, -1)} style={structureMoveButtonStyle}>↑</button>
-                        <button onClick={() => moveStructureItem(item.rootId, 1)} style={structureMoveButtonStyle}>↓</button>
-                        <button onClick={() => moveStructureItem(item.rootId, 2)} style={structureMoveButtonStyle}>⇣</button>
+
+                      <div className="editor-structure__actions">
+                        <button onClick={() => moveStructureItem(item.rootId, -2)} style={structureMoveButtonStyle}>^^</button>
+                        <button onClick={() => moveStructureItem(item.rootId, -1)} style={structureMoveButtonStyle}>^</button>
+                        <button onClick={() => moveStructureItem(item.rootId, 1)} style={structureMoveButtonStyle}>v</button>
+                        <button onClick={() => moveStructureItem(item.rootId, 2)} style={structureMoveButtonStyle}>vv</button>
                       </div>
                     </div>
                   ))}
                 </div>
-              </div>
+              </section>
 
-              <div style={{ height: 1, background: "rgba(148,163,184,0.14)" }} />
+              <div className="editor-panel__divider" />
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: 0.4, color: "rgba(255,255,255,0.92)" }}>
-                  Components
-                </div>
+              <section className="editor-panel__section">
+                <div className="editor-panel__label">Components</div>
                 <select
+                  className="editor-select editor-select--full"
                   value={selectedComponent || ""}
                   onChange={e => setSelectedComponent(e.target.value)}
-                  title="Professional Components"
-                  style={{
-                    height: 36,
-                    padding: "0 10px",
-                    borderRadius: 10,
-                    border: "1px solid rgba(148,163,184,0.25)",
-                    background: "rgba(5,10,25,0.96)",
-                    color: "white",
-                    fontWeight: 700,
-                    fontSize: 12,
-                    outline: "none"
-                  }}
+                  title="Professional components"
                 >
                   <option value="">Choose component</option>
                   {Object.entries(COMPONENT_LIBRARY).map(([key, comp]) => (
@@ -1683,69 +1491,41 @@ useEffect(() => {
                 </select>
 
                 <button
+                  className={`editor-btn editor-btn--panel editor-btn--success ${selectedComponent ? "" : "is-disabled"}`}
                   disabled={!selectedComponent}
                   onClick={addSelectedComponent}
-                  style={{
-                    height: 36,
-                    borderRadius: 10,
-                    border: "1px solid rgba(34,197,94,0.28)",
-                    background: selectedComponent ? "rgba(21,128,61,0.16)" : "rgba(255,255,255,0.04)",
-                    color: "white",
-                    fontWeight: 800,
-                    fontSize: 12,
-                    cursor: selectedComponent ? "pointer" : "not-allowed",
-                    opacity: selectedComponent ? 1 : 0.55,
-                  }}
                 >
                   Add component
                 </button>
-              </div>
+              </section>
 
-              <div style={{ height: 1, background: "rgba(148,163,184,0.14)" }} />
+              <div className="editor-panel__divider" />
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: 0.4, color: "rgba(255,255,255,0.92)" }}>
-                  AI Assistant
-                </div>
+              <section className="editor-panel__section">
+                <div className="editor-panel__label">AI Assistant</div>
                 <select
+                  className="editor-select editor-select--full"
                   value={leftAiModel}
                   onChange={e => setLeftAiModel(e.target.value)}
                   title="AI model"
-                  style={{
-                    height: 36,
-                    padding: "0 10px",
-                    borderRadius: 10,
-                    border: "1px solid rgba(148,163,184,0.25)",
-                    background: "rgba(5,10,25,0.96)",
-                    color: "white",
-                    fontWeight: 700,
-                    fontSize: 12,
-                    outline: "none"
-                  }}
                 >
-                  {AI_MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                  {AI_MODELS.map(model => (
+                    <option key={model.value} value={model.value}>
+                      {model.label}
+                    </option>
+                  ))}
                 </select>
 
                 <textarea
+                  className="editor-textarea"
                   value={leftAiPrompt}
                   onChange={e => setLeftAiPrompt(e.target.value)}
-                  placeholder={`Prompt ${AI_MODELS.find(m => m.value === leftAiModel)?.label || leftAiModel}...`}
-                  style={{
-                    minHeight: 120,
-                    resize: "vertical",
-                    padding: "10px 10px",
-                    borderRadius: 10,
-                    border: "1px solid rgba(148,163,184,0.25)",
-                    background: "rgba(5,10,25,0.96)",
-                    color: "white",
-                    fontSize: 12,
-                    lineHeight: 1.45,
-                    outline: "none"
-                  }}
+                  placeholder={`Prompt ${AI_MODELS.find(model => model.value === leftAiModel)?.label || leftAiModel}...`}
                 />
 
                 <button
                   data-left-ai-run="1"
+                  className={`editor-btn editor-btn--panel editor-btn--accent ${leftAiRunning ? "is-loading" : ""}`}
                   onClick={() => {
                     if (!leftAiPrompt.trim()) {
                       toast.warning(t("Please enter an AI prompt first"))
@@ -1759,31 +1539,22 @@ useEffect(() => {
                       }
                     }))
                   }}
-                  style={{
-                    height: 36,
-                    borderRadius: 10,
-                    border: "1px solid rgba(59,130,246,0.28)",
-                    background: "rgba(37,99,235,0.16)",
-                    color: "white",
-                    fontWeight: 800,
-                    fontSize: 12,
-                    cursor: leftAiRunning ? "wait" : "pointer",
-                    opacity: leftAiRunning ? 0.7 : 1,
-                  }}
                 >
                   {leftAiRunning ? "Running..." : "Run prompt"}
                 </button>
-              </div>
-            </>
+              </section>
+            </div>
           )}
-        </div>
+        </aside>
       )}
-{/* Main Content */}
-      <div style={{ position:"fixed", left: editRailWidth, top:58, right:0, bottom:0, overflow:"hidden", transition: "left 0.22s ease" }}>
-        <iframe ref={iframeRef} title="preview" style={{
-          position:"absolute", left:0, top:0, width:"100%", height:"100%",
-          border:"none", background:"white", display:"block"
-        }} sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation" />
+
+      <div className="editor-viewport">
+        <iframe
+          ref={iframeRef}
+          title="preview"
+          className="editor-viewport__frame"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation"
+        />
         <BlockOverlay
           iframeRef={iframeRef}
           enabled={isEdit}
@@ -1793,7 +1564,7 @@ useEffect(() => {
           onHtmlChange={commitLiveEditorHtml}
         />
       </div>
-    <ToastContainer />
+      <ToastContainer />
     </div>
   );
 }

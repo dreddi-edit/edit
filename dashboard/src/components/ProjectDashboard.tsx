@@ -28,9 +28,13 @@ type AIStudioFilter = "all" | "creation" | "optimization" | "growth" | "autonomy
 type SpendRange = "1h" | "24h" | "7d" | "30d"
 type UsageMode = "model" | "task"
 type StudioTool =
+  | "company-box"
+  | "visual-product"
+  | "funnel-generator"
   | "cro-agent"
   | "self-healing"
   | "global-expansion"
+  | "sales-closer"
   | "brand-brain"
   | "war-room"
   | "personalization"
@@ -228,6 +232,54 @@ const AI_STUDIO_SERVICES: AIStudioService[] = [
 ]
 
 const STUDIO_TOOL_META: Record<StudioTool, StudioToolMeta> = {
+  "company-box": {
+    eyebrow: "Flagship",
+    title: "Company-in-a-Box",
+    description: "Turn one business brief into a full operating stack: site, offer, onboarding, campaigns, and support assets.",
+    actionLabel: "Assemble operating stack",
+    goalLabel: "Business objective",
+    audienceLabel: "Customer / market",
+    notePlaceholder: "Mention your offer, pricing model, business constraints, or must-have operating assets.",
+    outcomes: ["Core business stack blueprint", "Priority assets to generate first", "Automation and handoff plan"],
+    systems: ["Project context", "Gemini planning", "Optional live URL context"],
+    goalPresets: ["Launch a premium service business", "Package the offer into a clear funnel", "Build the operating system around one flagship offer"],
+    audiencePresets: ["Local service buyers", "B2B decision makers", "Online-first consumers"],
+    extraFieldLabel: "Core deliverables",
+    extraFieldPlaceholder: "Website, onboarding, CRM flow, email sequence",
+    extraFieldPresets: ["Website, onboarding, CRM flow, email sequence", "Landing page, proposal flow, nurture emails", "Site, support center, sales assets, automations"],
+  },
+  "visual-product": {
+    eyebrow: "Studio",
+    title: "Figma / Screenshot -> Product",
+    description: "Translate a visual reference into a product build plan, component map, and implementation path.",
+    actionLabel: "Generate product blueprint",
+    goalLabel: "Build objective",
+    audienceLabel: "End user",
+    notePlaceholder: "Describe the reference, desired fidelity, screen set, or UX details you want preserved.",
+    outcomes: ["Component and screen breakdown", "Build order for implementation", "Questions and gaps to resolve before coding"],
+    systems: ["Project HTML", "Gemini product planner", "Optional live URL context"],
+    goalPresets: ["Recreate a polished marketing page", "Turn a visual concept into an editable product UI", "Map the page into reusable components"],
+    audiencePresets: ["Product team", "Marketing visitors", "Customer portal users"],
+    extraFieldLabel: "Target output",
+    extraFieldPlaceholder: "Landing page, dashboard, app shell",
+    extraFieldPresets: ["Landing page, dashboard, app shell", "Marketing site, signup flow, settings", "Homepage, pricing, checkout"],
+  },
+  "funnel-generator": {
+    eyebrow: "Growth",
+    title: "Full Funnel Generator",
+    description: "Design the acquisition system around the offer: landing pages, ads, emails, upsells, and follow-up.",
+    actionLabel: "Generate funnel system",
+    goalLabel: "Revenue goal",
+    audienceLabel: "Buyer segment",
+    notePlaceholder: "Mention the offer, pricing, channels, and whether the funnel should maximize leads, demos, or checkouts.",
+    outcomes: ["Offer ladder and funnel map", "Assets needed for acquisition and nurture", "Channel-by-channel rollout plan"],
+    systems: ["Project context", "Gemini funnel planner", "Optional live URL context"],
+    goalPresets: ["Increase qualified leads", "Turn traffic into booked demos", "Build a higher-ticket funnel around the offer"],
+    audiencePresets: ["Cold traffic", "Warm leads", "High-intent buyers"],
+    extraFieldLabel: "Channel bundle",
+    extraFieldPlaceholder: "Landing page, ads, email nurture, upsell",
+    extraFieldPresets: ["Landing page, ads, email nurture, upsell", "SEO page, retargeting, sales email, checkout", "Lead magnet, booking page, proposal flow"],
+  },
   "cro-agent": {
     eyebrow: "Optimization",
     title: "Autonomous CRO Agent",
@@ -269,6 +321,22 @@ const STUDIO_TOOL_META: Record<StudioTool, StudioToolMeta> = {
     extraFieldLabel: "Target markets",
     extraFieldPlaceholder: "Germany, Austria, Switzerland",
     extraFieldPresets: ["Germany, Austria, Switzerland", "UK, Ireland, Netherlands", "US, Canada, Australia"],
+  },
+  "sales-closer": {
+    eyebrow: "Revenue",
+    title: "AI Sales Closer",
+    description: "Design the lead qualification, objection handling, routing, and closing flow for a future voice or chat agent.",
+    actionLabel: "Design sales closer",
+    goalLabel: "Closing objective",
+    audienceLabel: "Lead type",
+    notePlaceholder: "Mention common objections, qualification criteria, sales handoff needs, or deal value.",
+    outcomes: ["Qualification and routing flow", "Objection handling playbook", "Lead handoff and success metrics"],
+    systems: ["Project context", "Gemini conversation planner", "Optional live URL context"],
+    goalPresets: ["Qualify leads before a human call", "Increase booked calls from site traffic", "Close lower-ticket deals with an AI assistant"],
+    audiencePresets: ["Inbound leads", "Demo-ready prospects", "Support-to-sales opportunities"],
+    extraFieldLabel: "Sales focus",
+    extraFieldPlaceholder: "Qualification, objections, booking, handoff",
+    extraFieldPresets: ["Qualification, objections, booking, handoff", "Discovery, routing, close signals", "Lead scoring, booking, follow-up"],
   },
   "brand-brain": {
     eyebrow: "Memory",
@@ -1115,7 +1183,12 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
   const studioToolMeta = activeStudioTool ? STUDIO_TOOL_META[activeStudioTool] : null
   const selectedStudioProjectText = plainTextFromHtml(selectedStudioProject?.html)
   const effectiveStudioUrl = (studioUrl.trim() || selectedStudioProject?.url || "").trim()
-  const studioNeedsLiveUrl = activeStudioTool !== "brand-brain"
+  const studioNeedsLiveUrl =
+    activeStudioTool === "cro-agent" ||
+    activeStudioTool === "self-healing" ||
+    activeStudioTool === "global-expansion" ||
+    activeStudioTool === "war-room" ||
+    activeStudioTool === "personalization"
   const studioSourceReady = studioNeedsLiveUrl
     ? /^https?:\/\//i.test(effectiveStudioUrl)
     : Boolean(selectedStudioProjectText || /^https?:\/\//i.test(effectiveStudioUrl))
@@ -1299,12 +1372,20 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
     setStudioUrl(suggestedProject?.url || "")
     setStudioAudience(suggestedProject?.clientName || "")
     setStudioGoal(
-      tool === "cro-agent"
+      tool === "company-box"
+        ? "Build the business operating stack around one flagship offer."
+        : tool === "visual-product"
+        ? "Turn the visual reference into a buildable product blueprint."
+        : tool === "funnel-generator"
+        ? "Design the full conversion funnel around the core offer."
+        : tool === "cro-agent"
         ? "Increase qualified conversions on the main landing page."
         : tool === "self-healing"
         ? "Keep the site healthy, fast, and conversion-safe after every content change."
         : tool === "global-expansion"
         ? "Launch the site into high-value nearby markets with localized positioning."
+        : tool === "sales-closer"
+        ? "Design an AI-led qualification and booking flow."
         : tool === "brand-brain"
         ? "Codify the brand voice, messaging rules, and proof into reusable memory."
         : tool === "war-room"
@@ -1312,8 +1393,16 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
         : "Adapt the site by visitor intent, traffic source, and funnel stage."
     )
     setStudioMarkets(
-      tool === "global-expansion"
+      tool === "company-box"
+        ? "Website, onboarding, CRM flow, email sequence"
+        : tool === "visual-product"
+        ? "Landing page, dashboard, app shell"
+        : tool === "funnel-generator"
+        ? "Landing page, ads, email nurture, upsell"
+        : tool === "global-expansion"
         ? "Germany, Austria, Switzerland"
+        : tool === "sales-closer"
+        ? "Qualification, objections, booking, handoff"
         : tool === "war-room"
         ? "Direct rivals, category leaders, local incumbents"
         : tool === "personalization"
@@ -1357,7 +1446,52 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
       }
 
       const prompt =
-        activeStudioTool === "cro-agent"
+        activeStudioTool === "company-box"
+          ? [
+              "You are a business systems architect.",
+              "Return JSON only. No markdown, no prose outside JSON.",
+              'Schema: {"headline":"string","summary":"string","sections":[{"label":"Core Stack","items":["..."]},{"label":"Assets to Build First","items":["..."]},{"label":"Automation Layer","items":["..."]},{"label":"Execution Sequence","items":["..."]}]}',
+              `Site URL: ${resolvedUrl || "Not provided"}`,
+              `Project: ${selectedStudioProject?.name || "Unknown"}`,
+              `Client / market: ${studioAudience.trim() || selectedStudioProject?.clientName || "Unknown"}`,
+              `Business objective: ${studioGoal.trim() || "Build the operating stack around one flagship offer."}`,
+              `Core deliverables: ${studioMarkets.trim() || "Website, onboarding, CRM flow, email sequence"}`,
+              `Notes: ${studioNotes.trim() || "None"}`,
+              `Visible page copy: ${projectText || "No local HTML content provided."}`,
+              audit ? `Audit JSON: ${JSON.stringify(audit)}` : "Audit JSON: not available",
+              "Design the essential business stack, the highest-value assets, and the fastest sequence to launch.",
+            ].join("\n")
+        : activeStudioTool === "visual-product"
+          ? [
+              "You are a product design-to-build translator.",
+              "Return JSON only. No markdown, no prose outside JSON.",
+              'Schema: {"headline":"string","summary":"string","sections":[{"label":"Visual System","items":["..."]},{"label":"Component Map","items":["..."]},{"label":"Build Sequence","items":["..."]},{"label":"Open Questions","items":["..."]}]}',
+              `Site URL: ${resolvedUrl || "Not provided"}`,
+              `Project: ${selectedStudioProject?.name || "Unknown"}`,
+              `End user: ${studioAudience.trim() || selectedStudioProject?.clientName || "Unknown"}`,
+              `Build objective: ${studioGoal.trim() || "Turn the visual reference into a buildable product blueprint."}`,
+              `Target output: ${studioMarkets.trim() || "Landing page, dashboard, app shell"}`,
+              `Notes: ${studioNotes.trim() || "None"}`,
+              `Visible page copy: ${projectText || "No local HTML content provided."}`,
+              audit ? `Audit JSON: ${JSON.stringify(audit)}` : "Audit JSON: not available",
+              "Translate the reference into a concrete component system and implementation order.",
+            ].join("\n")
+        : activeStudioTool === "funnel-generator"
+          ? [
+              "You are a full-funnel growth architect.",
+              "Return JSON only. No markdown, no prose outside JSON.",
+              'Schema: {"headline":"string","summary":"string","sections":[{"label":"Offer Ladder","items":["..."]},{"label":"Acquisition Assets","items":["..."]},{"label":"Nurture Flow","items":["..."]},{"label":"Rollout Plan","items":["..."]}]}',
+              `Site URL: ${resolvedUrl || "Not provided"}`,
+              `Project: ${selectedStudioProject?.name || "Unknown"}`,
+              `Buyer segment: ${studioAudience.trim() || selectedStudioProject?.clientName || "Unknown"}`,
+              `Revenue goal: ${studioGoal.trim() || "Design the full conversion funnel around the core offer."}`,
+              `Channel bundle: ${studioMarkets.trim() || "Landing page, ads, email nurture, upsell"}`,
+              `Notes: ${studioNotes.trim() || "None"}`,
+              `Visible page copy: ${projectText || "No local HTML content provided."}`,
+              audit ? `Audit JSON: ${JSON.stringify(audit)}` : "Audit JSON: not available",
+              "Design the funnel assets, offer ladder, and rollout order around the current business.",
+            ].join("\n")
+        : activeStudioTool === "cro-agent"
           ? [
               "You are an elite conversion-rate strategist.",
               "Return JSON only. No markdown, no prose outside JSON.",
@@ -1396,6 +1530,21 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
               `Notes: ${studioNotes.trim() || "None"}`,
               `Audit JSON: ${JSON.stringify(audit)}`,
               "Propose the best launch order, language, positioning angle, and offer for each market.",
+            ].join("\n")
+          : activeStudioTool === "sales-closer"
+          ? [
+              "You are a conversational sales systems architect.",
+              "Return JSON only. No markdown, no prose outside JSON.",
+              'Schema: {"headline":"string","summary":"string","sections":[{"label":"Qualification Flow","items":["..."]},{"label":"Objection Handling","items":["..."]},{"label":"Handoff Logic","items":["..."]},{"label":"Success Metrics","items":["..."]}]}',
+              `Site URL: ${resolvedUrl || "Not provided"}`,
+              `Project: ${selectedStudioProject?.name || "Unknown"}`,
+              `Lead type: ${studioAudience.trim() || selectedStudioProject?.clientName || "Unknown"}`,
+              `Closing objective: ${studioGoal.trim() || "Design an AI-led qualification and booking flow."}`,
+              `Sales focus: ${studioMarkets.trim() || "Qualification, objections, booking, handoff"}`,
+              `Notes: ${studioNotes.trim() || "None"}`,
+              `Visible page copy: ${projectText || "No local HTML content provided."}`,
+              audit ? `Audit JSON: ${JSON.stringify(audit)}` : "Audit JSON: not available",
+              "Design how an AI closer should qualify leads, handle objections, and hand off or book them.",
             ].join("\n")
           : activeStudioTool === "brand-brain"
           ? [
@@ -1789,24 +1938,18 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
 
   const openAIStudioService = (service: AIStudioService) => {
     if (
+      service.id === "company-box" ||
+      service.id === "visual-product" ||
+      service.id === "funnel-generator" ||
       service.id === "cro-agent" ||
       service.id === "self-healing" ||
       service.id === "global-expansion" ||
+      service.id === "sales-closer" ||
       service.id === "brand-brain" ||
       service.id === "war-room" ||
       service.id === "personalization"
     ) {
       openStudioTool(service.id)
-      return
-    }
-    if (service.id === "company-box" || service.id === "funnel-generator") {
-      setShowLandingGenerator(true)
-      toast.info(`Opening ${service.name}`)
-      return
-    }
-    if (service.id === "visual-product") {
-      setShowNewProject(true)
-      toast.info("Screenshot and Figma import will be wired into this flow next.")
       return
     }
     toast.info(`${service.name} is visible and ready for wiring.`)

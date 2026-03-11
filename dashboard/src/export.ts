@@ -1,7 +1,30 @@
-export type ExportMode = "html" | "wp-placeholder" | "standalone";
+export type ExportMode =
+  | "html-clean"
+  | "html-raw"
+  | "wp-placeholder"
+  | "shopify-section"
+  | "wp-theme"
+  | "wp-block"
+  | "web-component"
+  | "email-newsletter"
+  | "markdown-content"
+  | "pdf-print";
+
+const EXPORT_FILENAME_MAP: Record<ExportMode, string> = {
+  "html-clean": "site_html_clean.zip",
+  "html-raw": "site_html_raw.zip",
+  "wp-placeholder": "site_wp_placeholders.zip",
+  "shopify-section": "shopify_section.zip",
+  "wp-theme": "wordpress_theme.zip",
+  "wp-block": "wordpress_block_plugin.zip",
+  "web-component": "web_component_embed.zip",
+  "email-newsletter": "email_newsletter.zip",
+  "markdown-content": "content_markdown.zip",
+  "pdf-print": "design_preview.pdf",
+};
 
 export async function exportSite(args: { url?: string; html?: string; mode?: ExportMode }) {
-  const { url, html, mode = "html" } = args;
+  const { url, html, mode = "html-clean" } = args;
 
   const r = await fetch("/api/export", {
     method: "POST",
@@ -17,11 +40,9 @@ export async function exportSite(args: { url?: string; html?: string; mode?: Exp
   const a = document.createElement("a");
   a.href = downloadUrl;
 
-  // Match backend filenames
-  a.download =
-    mode === "wp-placeholder" ? "site_wp_placeholder.zip" :
-    mode === "standalone" ? "site_standalone.zip" :
-    "site_html.zip";
+  const disposition = r.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="?([^"]+)"?/i);
+  a.download = match?.[1] || EXPORT_FILENAME_MAP[mode];
 
   document.body.appendChild(a);
   a.click();

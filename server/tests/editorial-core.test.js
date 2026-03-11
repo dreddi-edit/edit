@@ -1,7 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildDeliveryArtifact, validateDeliveryArtifact } from "../deliveryArtifacts.js";
+import {
+  buildDeliveryArtifact,
+  validateDeliveryArtifact,
+  generateShopifySection,
+  prepareWordPressThemeFiles,
+  prepareWordPressBlockFiles,
+  prepareWebComponentFile,
+  prepareEmailHtml,
+  prepareMarkdownFile,
+} from "../deliveryArtifacts.js";
 import { normalizeProjectDocument } from "../siteMeta.js";
 
 const FIXTURES = [
@@ -91,4 +100,31 @@ test("delivery validation warns on unresolved assets and embeds", () => {
 
   assert.ok(validation.warnings.some((item) => item.code === "relative-assets"));
   assert.ok(validation.warnings.some((item) => item.code === "embedded-frames"));
+});
+
+test("format generators produce portable export artifacts", async () => {
+  const html = `<!DOCTYPE html><html><body><section data-block-id="hero"><h1>Hello</h1><p>World</p></section></body></html>`;
+  const project = { name: "Launch Site" };
+
+  const shopify = generateShopifySection(html);
+  assert.match(shopify, /{% schema %}/);
+  assert.match(shopify, /section\.settings\./);
+
+  const themeFiles = prepareWordPressThemeFiles({ html, project });
+  assert.deepEqual(themeFiles.map((file) => file.name), ["style.css", "functions.php", "index.php", "page.php"]);
+
+  const blockFiles = prepareWordPressBlockFiles({ html, project });
+  assert.ok(blockFiles.some((file) => file.name === "block.json"));
+  assert.ok(blockFiles.some((file) => file.name.endsWith(".php")));
+
+  const { jsFile, readmeFile } = prepareWebComponentFile({ html });
+  assert.equal(jsFile.name, "embed.js");
+  assert.match(readmeFile.content, /site-editor-embed/);
+
+  const emailHtml = await prepareEmailHtml(`${html}<script>alert(1)</script>`);
+  assert.doesNotMatch(emailHtml, /<script\b/i);
+
+  const markdown = prepareMarkdownFile({ html, project });
+  assert.equal(markdown.name, "launch-site.md");
+  assert.match(markdown.content, /# Hello/);
 });

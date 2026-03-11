@@ -33,7 +33,17 @@ import {
 import { sendPasswordReset } from "./email.js"
 import { logAudit } from "./auditLog.js"
 import { detectSiteMeta, getPlatformGuide, normalizeProjectDocument, normalizeSiteUrl, prepareEditorDocument } from "./siteMeta.js"
-import { buildDeliveryArtifact, validateDeliveryArtifact } from "./deliveryArtifacts.js"
+import {
+  buildDeliveryArtifact,
+  validateDeliveryArtifact,
+  prepareWordPressThemeFiles,
+  prepareWordPressBlockFiles,
+  prepareWebComponentFile,
+  prepareEmailHtml,
+  prepareMarkdownFile,
+  preparePdfFile,
+  getExportSlug,
+} from "./deliveryArtifacts.js"
 import cors from "cors"
 import { proxy, asset } from "./proxy.js"
 import { claudeRewriteBlock, claudeGenerateLandingCopy, claudeGenerateLandingHtml } from "./claude.js"
@@ -246,6 +256,64 @@ const adminResetRateLimit = createRateLimit({
   keyPrefix: "admin-reset",
   message: "Zu viele Reset-Mails. Bitte spaeter erneut versuchen.",
 })
+
+const EXPORT_FILENAMES = {
+  "wp-placeholder": "site_wp_placeholders.zip",
+  "html-clean": "site_html_clean.zip",
+  "html-raw": "site_html_raw.zip",
+  "shopify-section": "shopify_section.zip",
+  "wp-theme": "wordpress_theme.zip",
+  "wp-block": "wordpress_block_plugin.zip",
+  "web-component": "web_component_embed.zip",
+  "email-newsletter": "email_newsletter.zip",
+  "markdown-content": "content_markdown.zip",
+  "pdf-print": "design_preview.pdf",
+}
+
+function exportFilenameForMode(mode) {
+  return EXPORT_FILENAMES[String(mode || "wp-placeholder")] || "site_export.zip"
+}
+
+async function appendExportBundle(archive, exportMode, artifact, linkedProject) {
+  archive.append(JSON.stringify(artifact.manifest, null, 2), { name: "manifest.json" })
+  archive.append(artifact.notes, { name: "DELIVERY_NOTES.md" })
+
+  switch (exportMode) {
+    case "wp-theme":
+      for (const file of prepareWordPressThemeFiles({ html: artifact.html, project: linkedProject })) {
+        archive.append(file.content, { name: file.name })
+      }
+      return
+    case "wp-block": {
+      const slug = getExportSlug(linkedProject)
+      for (const file of prepareWordPressBlockFiles({ html: artifact.html, project: linkedProject })) {
+        archive.append(file.content, { name: `${slug}/${file.name}` })
+      }
+      return
+    }
+    case "web-component": {
+      const { jsFile, readmeFile } = prepareWebComponentFile({ html: artifact.html })
+      archive.append(jsFile.content, { name: jsFile.name })
+      archive.append(readmeFile.content, { name: readmeFile.name })
+      return
+    }
+    case "email-newsletter":
+      archive.append(await prepareEmailHtml(artifact.html), { name: "index.html" })
+      return
+    case "markdown-content": {
+      const markdownFile = prepareMarkdownFile({ html: artifact.html, project: linkedProject })
+      archive.append(markdownFile.content, { name: markdownFile.name })
+      return
+    }
+    case "shopify-section": {
+      const slug = getExportSlug(linkedProject)
+      archive.append(artifact.html, { name: `sections/${slug}.liquid` })
+      return
+    }
+    default:
+      archive.append(artifact.html, { name: "index.html" })
+  }
+}
 
 app.post("/api/ai/analyze-and-rebuild", authMiddleware, aiRateLimit, async (req, res) => {
   try {
@@ -751,10 +819,7 @@ app.post("/api/export", authMiddleware, exportRateLimit, async (req, res) => {
 
     const normalized = normalizeProjectDocument({ html: sourceHtml, url: sourceUrl, platform })
     const exportMode = String(mode || "wp-placeholder")
-    const filename =
-      exportMode === "wp-placeholder" ? "site_wp_placeholders.zip" :
-      exportMode === "html-clean" ? "site_html_clean.zip" :
-      "site_html_raw.zip"
+    const filename = exportFilenameForMode(exportMode)
 
     let linkedProject = null
     let versionId = null
@@ -821,14 +886,21 @@ app.post("/api/export", authMiddleware, exportRateLimit, async (req, res) => {
       })
     }
 
+    if (exportMode === "pdf-print") {
+      const pdfFile = await preparePdfFile({ html: artifact.html, project: linkedProject })
+      res.setHeader("Content-Type", "application/pdf")
+      res.setHeader("Content-Disposition", `attachment; filename=${pdfFile.name}`)
+      res.setHeader("X-Export-Readiness", artifact.readiness)
+      res.setHeader("X-Export-Warnings", String(artifact.warnings.length))
+      return res.send(pdfFile.content)
+    }
+
     // If cloud=1 requested, upload to GCS and return link
     if (req.body.cloud === true || req.body.cloud === "1") {
       const chunks = []
       const archiveCloud = archiver("zip", { zlib: { level: 9 } })
-      archiveCloud.append(artifact.html, { name: "index.html" })
-      archiveCloud.append(JSON.stringify(artifact.manifest, null, 2), { name: "manifest.json" })
-      archiveCloud.append(artifact.notes, { name: "DELIVERY_NOTES.md" })
       archiveCloud.on("data", chunk => chunks.push(chunk))
+      await appendExportBundle(archiveCloud, exportMode, artifact, linkedProject)
       await archiveCloud.finalize()
       const buffer = Buffer.concat(chunks)
       const uniqueName = `${Date.now()}_${filename}`
@@ -847,9 +919,7 @@ app.post("/api/export", authMiddleware, exportRateLimit, async (req, res) => {
     res.setHeader("X-Export-Warnings", String(artifact.warnings.length))
     const archive = archiver("zip", { zlib: { level: 9 } })
     archive.pipe(res)
-    archive.append(artifact.html, { name: "index.html" })
-    archive.append(JSON.stringify(artifact.manifest, null, 2), { name: "manifest.json" })
-    archive.append(artifact.notes, { name: "DELIVERY_NOTES.md" })
+    await appendExportBundle(archive, exportMode, artifact, linkedProject)
     await archive.finalize()
   } catch (error) {
     if (isValidationError(error)) return sendError(res, 400, error.message)
