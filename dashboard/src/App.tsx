@@ -1270,7 +1270,11 @@ useEffect(() => {
         <div className="editor-toolbar__cluster editor-toolbar__cluster--meta">
           <div className={`editor-status editor-status--${status}`}>
             <span className="editor-status__dot" />
-            {status === "idle" ? "Ready" : status === "blocked" ? "Loading" : "OK"}
+            {status === "blocked"
+              ? t("Loading")
+              : status === "ok" && /^https?:\/\//i.test(loadedUrl || url)
+              ? t("Online")
+              : t("Offline")}
           </div>
 
           <div
@@ -1827,6 +1831,7 @@ useEffect(() => {
       </div>
       <AssistantWidget
         plan={demoPlan}
+        avoidOverlay={Boolean(currentAiApproval)}
         context={{
           surface: "editor",
           plan: demoPlan,

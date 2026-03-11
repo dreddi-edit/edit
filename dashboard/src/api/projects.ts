@@ -65,6 +65,21 @@ export type ProjectPage = {
   scannedAt?: string
 }
 
+export type ProjectImportEntry = {
+  name: string
+  mimeType?: string
+  contentBase64: string
+}
+
+export type ProjectImportPreview = {
+  name: string
+  url: string
+  html: string
+  pages: ProjectPage[]
+  platform?: SitePlatform
+  summary?: string
+}
+
 export type Project = {
   id: number
   name: string
@@ -94,6 +109,7 @@ type ProjectsRes = { ok: boolean; error?: string; projects: Project[] }
 type ProjectRes = { ok: boolean; error?: string; project: Project; latestExport?: LatestExport | null }
 type CreateProjectRes = { ok: boolean; error?: string; id: number; project?: Project }
 type PageProjectRes = { ok: boolean; error?: string; project: Project; page?: ProjectPage }
+type ImportPreviewRes = { ok: boolean; error?: string; preview: ProjectImportPreview }
 
 export async function apiGetProjects(): Promise<Project[]> {
   const d = await apiFetch<ProjectsRes>(`${BASE}/api/projects`)
@@ -112,7 +128,7 @@ export async function apiCreateProject(
   url: string,
   html: string,
   platform?: SitePlatform,
-  extras: Partial<Pick<Project, "clientName" | "workflowStage" | "deliveryStatus" | "dueAt" | "assignees">> = {}
+  extras: Partial<Pick<Project, "clientName" | "workflowStage" | "deliveryStatus" | "dueAt" | "assignees" | "pages">> = {}
 ): Promise<Project> {
   const d = await apiFetch<CreateProjectRes>(`${BASE}/api/projects`, {
     method: "POST",
@@ -131,6 +147,26 @@ export async function apiCreateProject(
     updated_at: new Date().toISOString(),
     created_at: new Date().toISOString(),
   }
+}
+
+export async function apiPreviewProjectImport(payload: {
+  kind: "url" | "entries" | "zip" | "brief" | "screenshot"
+  mode?: "single" | "crawl" | "sitemap"
+  url?: string
+  fileName?: string
+  mimeType?: string
+  contentBase64?: string
+  entries?: ProjectImportEntry[]
+  title?: string
+  summary?: string
+}): Promise<ProjectImportPreview> {
+  const d = await apiFetch<ImportPreviewRes>(`${BASE}/api/projects/import-preview`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  if (!d?.ok) throw new Error((d as ImportPreviewRes)?.error || "Failed to import source.")
+  return (d as ImportPreviewRes).preview
 }
 
 export async function apiSaveProject(id: number, data: Partial<Project>) {

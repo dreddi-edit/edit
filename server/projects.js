@@ -3,6 +3,7 @@ import { authMiddleware } from "./auth.js"
 import { logAudit } from "./auditLog.js"
 import { normalizeManagedThumbnailUrl } from "./cloudStorage.js"
 import { sendShareLink } from "./email.js"
+import { buildProjectImportPreview } from "./projectImport.js"
 import { getPlatformGuide, normalizeProjectDocument } from "./siteMeta.js"
 import {
   ValidationError,
@@ -318,6 +319,15 @@ function archiveProjectRecord(projectId, userId) {
 }
 
 export function registerProjectRoutes(app) {
+  app.post("/api/projects/import-preview", authMiddleware, async (req, res) => {
+    try {
+      const preview = await buildProjectImportPreview(req.body || {})
+      res.json({ ok: true, preview })
+    } catch (error) {
+      if (isValidationError(error)) return res.status(400).json({ ok: false, error: error.message })
+      res.status(500).json({ ok: false, error: error.message })
+    }
+  })
 
   // Alle Projekte des Users (search: ?q=..., sort: ?sort=updated|created|name; pinned first)
   app.get("/api/projects", authMiddleware, (req, res) => {

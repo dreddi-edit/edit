@@ -53,10 +53,12 @@ export default function AssistantWidget({
   plan,
   context,
   onUsage,
+  avoidOverlay = false,
 }: {
   plan: Plan
   context: AssistantContext
   onUsage?: (payload: unknown) => void
+  avoidOverlay?: boolean
 }) {
   const { t } = useTranslation()
   const [theme, setTheme] = useState<"dark" | "light">(readTheme)
@@ -133,7 +135,9 @@ export default function AssistantWidget({
   }
 
   return (
-    <div className={`assistant-widget assistant-widget--${theme} ${open ? "is-open" : ""}`}>
+    <div
+      className={`assistant-widget assistant-widget--${theme} ${open ? "is-open" : ""} ${avoidOverlay ? "assistant-widget--avoid" : ""} ${avoidOverlay && !open ? "assistant-widget--compact" : ""}`}
+    >
       {open ? (
         <div className="assistant-widget__panel" role="dialog" aria-label={t("Assistant")}>
           <div className="assistant-widget__header">

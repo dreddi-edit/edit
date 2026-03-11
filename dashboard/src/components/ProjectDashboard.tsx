@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react"
-import { apiGetProjects, apiCreateProject, apiDeleteProject, apiScanProjectPages, type Project, type ProjectAssignee, type ProjectPage } from "../api/projects"
+import {
+  apiGetProjects,
+  apiCreateProject,
+  apiDeleteProject,
+  apiPreviewProjectImport,
+  apiScanProjectPages,
+  type Project,
+  type ProjectAssignee,
+  type ProjectPage,
+} from "../api/projects"
 import { apiGetPlan, apiGetBalance, apiGetCreditsTransactions } from "../api/credits"
 import { apiFetch } from "../api/client"
 import CreditsPanel from "./CreditsPanel"
@@ -20,6 +29,7 @@ import {
   hasStudioAccess,
   type StudioToolId,
 } from "../utils/planAccess"
+import { filesToImportEntries, summarizeImportPreview } from "../utils/projectImport"
 import "./project-dashboard-dark.css"
 
 const BASE = ""
@@ -34,6 +44,7 @@ type AIStudioFilter = "all" | "creation" | "optimization" | "growth" | "autonomy
 type SpendRange = "1h" | "24h" | "7d" | "30d"
 type UsageMode = "model" | "task"
 type StudioTool = StudioToolId
+type ProjectImportMode = "single" | "crawl" | "sitemap"
 type Template = { id: number; name: string; url?: string; platform?: SitePlatform; thumbnail?: string; created_at: string }
 type ChecklistItem = { id: string; label: string; done: boolean }
 type NoteItem = { id: string; text: string; done: boolean }
@@ -484,6 +495,7 @@ const DASHBOARD_RUNTIME_STRINGS = Array.from(
       "Download export for",
       "Local export",
       "items",
+      "pages",
       "Private",
       "Exported",
       "Choose the source",
@@ -534,7 +546,37 @@ const DASHBOARD_RUNTIME_STRINGS = Array.from(
       "Upload file",
       "Upload HTML/SVG",
       "Clear",
-      "Current local upload support: `.html`, `.htm`, `.svg`.",
+      "Import source",
+      "Homepage",
+      "Crawl links",
+      "Sitemap.xml",
+      "Import website",
+      "Importing...",
+      "HTML / Markdown",
+      "Single page, SVG, Markdown, or plain text.",
+      "Folder import",
+      "Import a local site folder with multiple pages and assets.",
+      "ZIP website",
+      "Upload an exported HTML/CSS/JS site bundle.",
+      "DOCX / PDF brief",
+      "Turn a brief into a structured project page.",
+      "Screenshot import",
+      "Generate an editable page from a screenshot.",
+      "Asset library",
+      "Batch import images, videos, logos, and brand files.",
+      "Imported source ready",
+      "Clear import",
+      "Easy imports now support live URL crawl, sitemap.xml, ZIP websites, folders, HTML, SVG, Markdown, DOCX, PDF briefs, screenshots, and asset libraries.",
+      "Enter a website URL first.",
+      "Website imported",
+      "Upload currently supports HTML, SVG, Markdown, and text files.",
+      "Folder imported into project pages",
+      "ZIP website imported",
+      "Brief imported",
+      "Screenshot converted",
+      "Asset library imported into one project page",
+      "Asset library imported",
+      "Imported folder",
       "Assign team members",
       "Loading team members...",
       "No team members yet. Invite them in Settings first.",
@@ -1523,7 +1565,12 @@ export default function ProjectDashboard({
   const { t, lang } = useTranslation()
   const rt = useRuntimeTranslations(lang, DASHBOARD_RUNTIME_STRINGS, t)
   const exportSectionRef = useRef<HTMLDivElement | null>(null)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const localFileInputRef = useRef<HTMLInputElement | null>(null)
+  const folderInputRef = useRef<HTMLInputElement | null>(null)
+  const zipInputRef = useRef<HTMLInputElement | null>(null)
+  const briefInputRef = useRef<HTMLInputElement | null>(null)
+  const screenshotInputRef = useRef<HTMLInputElement | null>(null)
+  const assetInputRef = useRef<HTMLInputElement | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
   const [transactions, setTransactions] = useState<CreditTransaction[]>([])
@@ -1577,6 +1624,11 @@ export default function ProjectDashboard({
   const [newAssigneeEmails, setNewAssigneeEmails] = useState<string[]>([])
   const [newUploadHtml, setNewUploadHtml] = useState("")
   const [newUploadName, setNewUploadName] = useState("")
+  const [newUploadPages, setNewUploadPages] = useState<ProjectPage[]>([])
+  const [newUploadPlatform, setNewUploadPlatform] = useState<SitePlatform>("static")
+  const [newImportSummary, setNewImportSummary] = useState("")
+  const [newImportMode, setNewImportMode] = useState<ProjectImportMode>("crawl")
+  const [newImporting, setNewImporting] = useState(false)
   const [landingName, setLandingName] = useState("")
   const [landingDesc, setLandingDesc] = useState("")
   const [landingAudience, setLandingAudience] = useState("")
@@ -1857,7 +1909,16 @@ export default function ProjectDashboard({
     setNewAssigneeEmails([])
     setNewUploadHtml("")
     setNewUploadName("")
-    if (fileInputRef.current) fileInputRef.current.value = ""
+    setNewUploadPages([])
+    setNewUploadPlatform("static")
+    setNewImportSummary("")
+    setNewImportMode("crawl")
+    if (localFileInputRef.current) localFileInputRef.current.value = ""
+    if (folderInputRef.current) folderInputRef.current.value = ""
+    if (zipInputRef.current) zipInputRef.current.value = ""
+    if (briefInputRef.current) briefInputRef.current.value = ""
+    if (screenshotInputRef.current) screenshotInputRef.current.value = ""
+    if (assetInputRef.current) assetInputRef.current.value = ""
   }
 
   const resetStudioTool = () => {
@@ -2140,24 +2201,167 @@ export default function ProjectDashboard({
     )
   }
 
+  const applyImportPreview = (preview: {
+    name: string
+    url?: string
+    html: string
+    pages?: ProjectPage[]
+    platform?: SitePlatform
+    summary?: string
+  }) => {
+    setNewUploadHtml(preview.html || "")
+    setNewUploadPages(preview.pages || [])
+    setNewUploadPlatform(preview.platform || "static")
+    setNewUploadName(preview.name || "")
+    setNewImportSummary(preview.summary || summarizeImportPreview(preview))
+    if (!newName.trim() && preview.name) setNewName(preview.name)
+    if (preview.url) setNewUrl(preview.url)
+  }
+
+  const importFromUrl = async () => {
+    if (!newUrl.trim()) {
+      toast.warning(rt("Enter a website URL first."))
+      return
+    }
+    setNewImporting(true)
+    try {
+      const preview = await apiPreviewProjectImport({
+        kind: "url",
+        url: newUrl.trim(),
+        mode: newImportMode,
+      })
+      applyImportPreview(preview)
+      toast.success(preview.summary || rt("Website imported"))
+    } catch (error) {
+      toast.error(errMsg(error))
+    } finally {
+      setNewImporting(false)
+    }
+  }
+
   const handleUploadProjectFile = async (file?: File | null) => {
     if (!file) return
     const extension = file.name.split(".").pop()?.toLowerCase() || ""
-    if (!["html", "htm", "svg"].includes(extension)) {
-      toast.warning(rt("Upload currently supports .html, .htm, or .svg files."))
+    if (!["html", "htm", "svg", "md", "markdown", "txt"].includes(extension)) {
+      toast.warning(rt("Upload currently supports HTML, SVG, Markdown, and text files."))
       return
     }
 
+    setNewImporting(true)
     try {
-      const text = await file.text()
-      if (!text.trim()) throw new Error(rt("Uploaded file is empty."))
-      const html = wrapLocalMarkup(file.name, text)
-      setNewUploadHtml(html)
-      setNewUploadName(file.name)
-      if (!newName.trim()) setNewName(fileNameWithoutExtension(file.name))
-      toast.success(`${rt("Loaded")} ${file.name}`)
+      const entries = await filesToImportEntries([file])
+      const preview = await apiPreviewProjectImport({
+        kind: "entries",
+        entries,
+        title: fileNameWithoutExtension(file.name),
+      })
+      applyImportPreview(preview)
+      toast.success(preview.summary || `${rt("Loaded")} ${file.name}`)
     } catch (error) {
       toast.error(errMsg(error))
+    } finally {
+      setNewImporting(false)
+    }
+  }
+
+  const handleFolderImport = async (files: FileList | null | undefined) => {
+    const selectedFiles = Array.from(files || [])
+    if (!selectedFiles.length) return
+    setNewImporting(true)
+    try {
+      const entries = await filesToImportEntries(selectedFiles)
+      const preview = await apiPreviewProjectImport({
+        kind: "entries",
+        entries,
+        title: selectedFiles[0]?.webkitRelativePath?.split("/")[0] || rt("Imported folder"),
+        summary: rt("Folder imported into project pages"),
+      })
+      applyImportPreview(preview)
+      toast.success(preview.summary || rt("Folder imported"))
+    } catch (error) {
+      toast.error(errMsg(error))
+    } finally {
+      setNewImporting(false)
+    }
+  }
+
+  const handleZipImport = async (file?: File | null) => {
+    if (!file) return
+    setNewImporting(true)
+    try {
+      const [entry] = await filesToImportEntries([file])
+      const preview = await apiPreviewProjectImport({
+        kind: "zip",
+        fileName: file.name,
+        contentBase64: entry.contentBase64,
+      })
+      applyImportPreview(preview)
+      toast.success(preview.summary || rt("ZIP website imported"))
+    } catch (error) {
+      toast.error(errMsg(error))
+    } finally {
+      setNewImporting(false)
+    }
+  }
+
+  const handleBriefImport = async (file?: File | null) => {
+    if (!file) return
+    setNewImporting(true)
+    try {
+      const [entry] = await filesToImportEntries([file])
+      const preview = await apiPreviewProjectImport({
+        kind: "brief",
+        fileName: file.name,
+        mimeType: file.type || "",
+        contentBase64: entry.contentBase64,
+      })
+      applyImportPreview(preview)
+      toast.success(preview.summary || rt("Brief imported"))
+    } catch (error) {
+      toast.error(errMsg(error))
+    } finally {
+      setNewImporting(false)
+    }
+  }
+
+  const handleScreenshotImport = async (file?: File | null) => {
+    if (!file) return
+    setNewImporting(true)
+    try {
+      const [entry] = await filesToImportEntries([file])
+      const preview = await apiPreviewProjectImport({
+        kind: "screenshot",
+        fileName: file.name,
+        mimeType: file.type || "",
+        contentBase64: entry.contentBase64,
+      })
+      applyImportPreview(preview)
+      toast.success(preview.summary || rt("Screenshot converted"))
+    } catch (error) {
+      toast.error(errMsg(error))
+    } finally {
+      setNewImporting(false)
+    }
+  }
+
+  const handleAssetImport = async (files: FileList | null | undefined) => {
+    const selectedFiles = Array.from(files || [])
+    if (!selectedFiles.length) return
+    setNewImporting(true)
+    try {
+      const entries = await filesToImportEntries(selectedFiles)
+      const preview = await apiPreviewProjectImport({
+        kind: "entries",
+        entries,
+        title: rt("Asset library"),
+        summary: rt("Asset library imported into one project page"),
+      })
+      applyImportPreview(preview)
+      toast.success(preview.summary || rt("Asset library imported"))
+    } catch (error) {
+      toast.error(errMsg(error))
+    } finally {
+      setNewImporting(false)
     }
   }
 
@@ -2267,10 +2471,11 @@ export default function ProjectDashboard({
       const selectedAssignees = newAssigneeEmails
         .map(email => assignableMembers.find(member => member.email === email) || { email })
         .map(member => ({ email: member.email, role: member.role || "editor" }))
-      const project = await apiCreateProject(newName.trim(), newUrl.trim(), newUploadHtml, undefined, {
+      const project = await apiCreateProject(newName.trim(), newUrl.trim(), newUploadHtml, newUploadPlatform, {
         clientName: newClientName.trim() || "",
         dueAt: newDueAt || "",
         assignees: selectedAssignees,
+        pages: newUploadPages,
       })
       updateChecklist("create", true)
       if (newUrl.trim()) updateChecklist("load", true)
@@ -3384,11 +3589,48 @@ export default function ProjectDashboard({
             </div>
             <div className="pd-modal-body">
               <input
-                ref={fileInputRef}
+                ref={localFileInputRef}
                 type="file"
-                accept=".html,.htm,.svg,text/html,image/svg+xml"
+                accept=".html,.htm,.svg,.md,.markdown,.txt,text/html,image/svg+xml,text/markdown,text/plain"
                 hidden
                 onChange={event => void handleUploadProjectFile(event.target.files?.[0] || null)}
+              />
+              <input
+                ref={folderInputRef}
+                type="file"
+                hidden
+                multiple
+                {...({ webkitdirectory: "true", directory: "true" } as Record<string, string>)}
+                onChange={event => void handleFolderImport(event.target.files)}
+              />
+              <input
+                ref={zipInputRef}
+                type="file"
+                hidden
+                accept=".zip,application/zip"
+                onChange={event => void handleZipImport(event.target.files?.[0] || null)}
+              />
+              <input
+                ref={briefInputRef}
+                type="file"
+                hidden
+                accept=".docx,.pdf,.md,.markdown,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/markdown,text/plain"
+                onChange={event => void handleBriefImport(event.target.files?.[0] || null)}
+              />
+              <input
+                ref={screenshotInputRef}
+                type="file"
+                hidden
+                accept="image/*"
+                onChange={event => void handleScreenshotImport(event.target.files?.[0] || null)}
+              />
+              <input
+                ref={assetInputRef}
+                type="file"
+                hidden
+                multiple
+                accept="image/*,video/*,.svg,.ico,.woff,.woff2,.ttf,.otf"
+                onChange={event => void handleAssetImport(event.target.files)}
               />
               <div className="pd-field-grid">
                 <label className="pd-field-label">
@@ -3408,27 +3650,88 @@ export default function ProjectDashboard({
                   <input className="pd-field-input" value={newDueAt} onChange={event => setNewDueAt(event.target.value)} type="date" />
                 </label>
                 <div className="pd-field-label pd-field-label-full">
-                  {rt("Upload file")}
-                  <div className="pd-upload-row">
-                    <button className="pd-btn" type="button" onClick={() => fileInputRef.current?.click()}>
-                      {rt("Upload HTML/SVG")}
+                  {rt("Import source")}
+                  <div className="pd-import-toolbar">
+                    <div className="pd-import-mode">
+                      {([
+                        ["single", rt("Homepage")],
+                        ["crawl", rt("Crawl links")],
+                        ["sitemap", rt("Sitemap.xml")],
+                      ] as const).map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          className={`pd-segment-btn${newImportMode === value ? " is-active" : ""}`}
+                          onClick={() => setNewImportMode(value)}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <button className="pd-btn pd-btn-primary" type="button" onClick={() => void importFromUrl()} disabled={newImporting}>
+                      {newImporting ? rt("Importing...") : rt("Import website")}
                     </button>
-                    {newUploadName ? <span className="pd-upload-name">{newUploadName}</span> : null}
-                    {newUploadName ? (
+                  </div>
+                  <div className="pd-import-grid">
+                    <button className="pd-btn pd-import-card" type="button" onClick={() => localFileInputRef.current?.click()}>
+                      <strong>{rt("HTML / Markdown")}</strong>
+                      <span>{rt("Single page, SVG, Markdown, or plain text.")}</span>
+                    </button>
+                    <button className="pd-btn pd-import-card" type="button" onClick={() => folderInputRef.current?.click()}>
+                      <strong>{rt("Folder import")}</strong>
+                      <span>{rt("Import a local site folder with multiple pages and assets.")}</span>
+                    </button>
+                    <button className="pd-btn pd-import-card" type="button" onClick={() => zipInputRef.current?.click()}>
+                      <strong>{rt("ZIP website")}</strong>
+                      <span>{rt("Upload an exported HTML/CSS/JS site bundle.")}</span>
+                    </button>
+                    <button className="pd-btn pd-import-card" type="button" onClick={() => briefInputRef.current?.click()}>
+                      <strong>{rt("DOCX / PDF brief")}</strong>
+                      <span>{rt("Turn a brief into a structured project page.")}</span>
+                    </button>
+                    <button className="pd-btn pd-import-card" type="button" onClick={() => screenshotInputRef.current?.click()}>
+                      <strong>{rt("Screenshot import")}</strong>
+                      <span>{rt("Generate an editable page from a screenshot.")}</span>
+                    </button>
+                    <button className="pd-btn pd-import-card" type="button" onClick={() => assetInputRef.current?.click()}>
+                      <strong>{rt("Asset library")}</strong>
+                      <span>{rt("Batch import images, videos, logos, and brand files.")}</span>
+                    </button>
+                  </div>
+                  {(newUploadName || newImportSummary) ? (
+                    <div className="pd-import-summary">
+                      <div className="pd-import-summary-head">
+                        <strong>{newUploadName || rt("Imported source ready")}</strong>
+                        <span>{newImportSummary || summarizeImportPreview({ name: newUploadName || "", html: newUploadHtml, url: newUrl, pages: newUploadPages, platform: newUploadPlatform })}</span>
+                      </div>
+                      <div className="pd-import-summary-meta">
+                        <span>{(newUploadPages.length || (newUploadHtml ? 1 : 0))} {rt("pages")}</span>
+                        <span>{getPlatformMeta(newUploadPlatform).label}</span>
+                      </div>
                       <button
                         className="pd-btn"
                         type="button"
                         onClick={() => {
                           setNewUploadHtml("")
+                          setNewUploadPages([])
+                          setNewUploadPlatform("static")
                           setNewUploadName("")
-                          if (fileInputRef.current) fileInputRef.current.value = ""
+                          setNewImportSummary("")
+                          if (localFileInputRef.current) localFileInputRef.current.value = ""
+                          if (folderInputRef.current) folderInputRef.current.value = ""
+                          if (zipInputRef.current) zipInputRef.current.value = ""
+                          if (briefInputRef.current) briefInputRef.current.value = ""
+                          if (screenshotInputRef.current) screenshotInputRef.current.value = ""
+                          if (assetInputRef.current) assetInputRef.current.value = ""
                         }}
                       >
-                        {rt("Clear")}
+                        {rt("Clear import")}
                       </button>
-                    ) : null}
-                  </div>
-                  <span className="pd-field-hint">{rt("Current local upload support: `.html`, `.htm`, `.svg`.")}</span>
+                    </div>
+                  ) : null}
+                  <span className="pd-field-hint">
+                    {rt("Easy imports now support live URL crawl, sitemap.xml, ZIP websites, folders, HTML, SVG, Markdown, DOCX, PDF briefs, screenshots, and asset libraries.")}
+                  </span>
                 </div>
                 <div className="pd-field-label pd-field-label-full">
                   {rt("Assign team members")}
