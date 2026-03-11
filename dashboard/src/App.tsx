@@ -22,6 +22,7 @@ import { ENDPOINTS } from './config';
 import { COMPONENT_LIBRARY, COMPONENT_CATEGORIES } from './components/ComponentLibrary';
 import { useTranslation } from "./i18n/useTranslation"
 import { detectSitePlatform, getPlatformMeta, normalizePlatform, type SitePlatform } from "./utils/sitePlatform"
+import { TOP_TRANSLATION_LANGUAGES, translateWebsiteHtml } from "./utils/htmlTranslation"
 import "./components/editor-viewer-dark.css"
 
 type BlockFilter =
@@ -164,6 +165,13 @@ function getDownloadFilename(response: Response, mode: ExportMode): string {
   return EXPORT_FILENAME_MAP[mode]
 }
 
+function readSavedTheme(): "dark" | "light" {
+  if (typeof window === "undefined") return "dark"
+  const bodyTheme = document.body.getAttribute("data-theme")
+  if (bodyTheme === "light" || bodyTheme === "dark") return bodyTheme
+  return localStorage.getItem("se_theme") === "light" ? "light" : "dark"
+}
+
 export default function App() {
   const { t } = useTranslation();
   const resolvePlatform = (platform?: string | null, pageUrl?: string, html?: string): SitePlatform => {
@@ -187,6 +195,7 @@ export default function App() {
   const currentHtmlRef = useRef("")
   const skipNextLiveIframeSyncRef = useRef(false)
   const loadRequestRef = useRef(0)
+  const [theme, setTheme] = useState<"dark" | "light">(readSavedTheme)
   const [url, setUrl] = useState("")
   const [mode, setMode] = useState<"view" | "edit">("view")
   const [layoutMode] = useState<"flow" | "canvas">("flow")
@@ -319,6 +328,15 @@ const [adminLoading, setAdminLoading] = useState(false)
   const [isEditRailCollapsed, setIsEditRailCollapsed] = useState(false)
   const [structureItems, setStructureItems] = useState<StructureSnapshotItem[]>([])
   const [selectedRootId, setSelectedRootId] = useState<string | null>(null)
+  const [translationTargetLanguage, setTranslationTargetLanguage] = useState<string>(
+    () => localStorage.getItem("se_translate_lang") || "de"
+  )
+  const [isTranslatingSite, setIsTranslatingSite] = useState(false)
+  const [translationInfo, setTranslationInfo] = useState<{
+    targetLanguage: string
+    detectedSourceLanguage: string
+    translatedCount: number
+  } | null>(null)
 
   const demoPlanMeta: Record<"basis" | "starter" | "pro" | "scale", {
     label: string
@@ -588,6 +606,7 @@ const autoSave = async (html: string) => {
     setUrl(nextUrl)
     setLoadedUrl("")
     setCurrentHtml("")
+    setTranslationInfo(null)
     setCurrentPlatform(nextPlatform)
     setCurrentPlatformGuide(null)
     setExportWarnings([])
@@ -637,6 +656,7 @@ const autoSave = async (html: string) => {
   const handleOpenProject = async (p: Project) => {
     const project = await apiGetProject(p.id).catch(() => p)
     setCurrentProject(project)
+    setTranslationInfo(null)
     loadWorkflowHistory(project.id).catch(() => {})
     if (view !== "admin") setView("editor")
 
@@ -743,6 +763,39 @@ const autoSave = async (html: string) => {
     }
   };
 
+  const handleTranslateSite = async () => {
+    if (!currentHtml.trim()) {
+      toast.warning("Load a site before translating it")
+      return
+    }
+
+    const targetLanguage =
+      TOP_TRANSLATION_LANGUAGES.find((language) => language.code === translationTargetLanguage)?.code ||
+      "de"
+
+    setIsTranslatingSite(true)
+    try {
+      const result = await translateWebsiteHtml(currentHtml, targetLanguage)
+      commitLiveEditorHtml(result.html)
+      setTranslationInfo({
+        targetLanguage,
+        detectedSourceLanguage: result.detectedSourceLanguage,
+        translatedCount: result.translatedCount,
+      })
+      const targetLabel =
+        TOP_TRANSLATION_LANGUAGES.find((language) => language.code === targetLanguage)?.label || targetLanguage
+      toast.success(
+        result.translatedCount > 0
+          ? `Translated ${result.translatedCount} text blocks to ${targetLabel}`
+          : `No translatable text found for ${targetLabel}`
+      )
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Site translation failed")
+    } finally {
+      setIsTranslatingSite(false)
+    }
+  }
+
   useEffect(() => {
     if (!currentPlatform || currentPlatform === "unknown") {
       setCurrentPlatformGuide(null)
@@ -761,6 +814,28 @@ const autoSave = async (html: string) => {
     if (loadedUrl) localStorage.setItem("se_last_loaded_url", loadedUrl)
     if (currentPlatform) localStorage.setItem("se_last_site_platform", currentPlatform)
   }, [loadedUrl, currentPlatform])
+
+  useEffect(() => {
+    localStorage.setItem("se_translate_lang", translationTargetLanguage)
+    setTranslationInfo(null)
+  }, [translationTargetLanguage])
+
+  useEffect(() => {
+    const syncTheme = () => {
+      const nextTheme = readSavedTheme()
+      setTheme((prev) => (prev === nextTheme ? prev : nextTheme))
+      document.body.setAttribute("data-theme", nextTheme)
+    }
+
+    syncTheme()
+    const observer = new MutationObserver(syncTheme)
+    observer.observe(document.body, { attributes: true, attributeFilter: ["data-theme"] })
+    window.addEventListener("storage", syncTheme)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener("storage", syncTheme)
+    }
+  }, [])
 
   useEffect(() => {
     const onStructure = (event: Event) => {
@@ -845,12 +920,17 @@ const autoSave = async (html: string) => {
     { label: "CTA", tint: "rgba(168,85,247,0.92)", background: "rgba(168,85,247,0.12)", value: "button" as BlockFilter },
   ]
   const selectedExportMode = EXPORT_MODE_OPTIONS.find(option => option.value === exportMode) || EXPORT_MODE_OPTIONS[0]
+  const selectedTranslationLanguage =
+    TOP_TRANSLATION_LANGUAGES.find((language) => language.code === translationTargetLanguage) ||
+    TOP_TRANSLATION_LANGUAGES[0]
   const editorShellStyle: CSSProperties = {
     height: "100vh",
     ["--editor-topbar-height" as string]: "58px",
     ["--editor-rail-width" as string]: `${editRailWidth}px`,
-    ["--editor-chrome-bg" as string]: editorChrome.background,
-    ["--editor-chrome-border" as string]: editorChrome.border,
+    ["--editor-chrome-bg" as string]:
+      theme === "light" ? "rgba(255,255,255,0.96)" : editorChrome.background,
+    ["--editor-chrome-border" as string]:
+      theme === "light" ? "rgba(203,213,225,0.95)" : editorChrome.border,
   }
   
   useEffect(() => {
@@ -1010,7 +1090,7 @@ useEffect(() => {
   }
 
   return (
-    <div className="editor-shell" style={editorShellStyle}>
+    <div className={`editor-shell theme-${theme}`} style={editorShellStyle}>
       {isEdit && isDraggingBlock && (
         <div
           data-bo-grid-overlay="1"
@@ -1172,6 +1252,30 @@ useEffect(() => {
               {exporting ? "Exporting..." : "Export"}
             </button>
           </div>
+
+          <div className="editor-export-picker">
+            <select
+              className="editor-select editor-select--language"
+              value={translationTargetLanguage}
+              onChange={e => setTranslationTargetLanguage(e.target.value)}
+              title="Translation target language"
+            >
+              {TOP_TRANSLATION_LANGUAGES.map((language) => (
+                <option key={language.code} value={language.code}>
+                  {language.label}
+                </option>
+              ))}
+            </select>
+
+            <button
+              className={`editor-btn editor-btn--translate ${isTranslatingSite ? "is-loading" : ""}`}
+              onClick={handleTranslateSite}
+              disabled={isTranslatingSite || !currentHtml}
+              title="Instantly translate the loaded site"
+            >
+              {isTranslatingSite ? "Translating..." : "Translate site"}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1192,9 +1296,9 @@ useEffect(() => {
           bottom:16,
           width:360,
           maxWidth:"calc(100vw - 32px)",
-          background:"rgba(8,12,24,0.98)",
-          border:"1px solid rgba(245,158,11,0.35)",
-          boxShadow:"0 16px 60px rgba(0,0,0,0.45)",
+          background: theme === "light" ? "rgba(255,255,255,0.98)" : "rgba(8,12,24,0.98)",
+          border: theme === "light" ? "1px solid rgba(245,158,11,0.22)" : "1px solid rgba(245,158,11,0.35)",
+          boxShadow: theme === "light" ? "0 16px 60px rgba(15,23,42,0.14)" : "0 16px 60px rgba(0,0,0,0.45)",
           borderRadius:16,
           padding:14,
           zIndex:140,
@@ -1202,11 +1306,11 @@ useEffect(() => {
           flexDirection:"column",
           gap:10
         }}>
-          <div style={{ fontSize:12, fontWeight:900, letterSpacing:0.3, color:"rgba(255,255,255,0.95)" }}>
+          <div style={{ fontSize:12, fontWeight:900, letterSpacing:0.3, color: theme === "light" ? "#111827" : "rgba(255,255,255,0.95)" }}>
             Cloud Request Approval
           </div>
 
-          <div style={{ display:"grid", gridTemplateColumns:"92px 1fr", gap:6, fontSize:12, color:"rgba(255,255,255,0.82)" }}>
+          <div style={{ display:"grid", gridTemplateColumns:"92px 1fr", gap:6, fontSize:12, color: theme === "light" ? "#334155" : "rgba(255,255,255,0.82)" }}>
             <div style={{ opacity:0.7 }}>Model</div><div style={{ fontWeight:700 }}>{currentAiApproval.model}</div>
             <div style={{ opacity:0.7 }}>Scope</div><div style={{ fontWeight:700 }}>{currentAiApproval.scope}</div>
             <div style={{ opacity:0.7 }}>Input est.</div><div style={{ fontWeight:700 }}>~{currentAiApproval.estInputTokens.toLocaleString()} tokens</div>
@@ -1216,9 +1320,9 @@ useEffect(() => {
           <div style={{
             fontSize:12,
             lineHeight:1.45,
-            color:"rgba(255,255,255,0.72)",
-            background:"rgba(255,255,255,0.04)",
-            border:"1px solid rgba(255,255,255,0.08)",
+            color: theme === "light" ? "#475569" : "rgba(255,255,255,0.72)",
+            background: theme === "light" ? "rgba(248,250,252,0.96)" : "rgba(255,255,255,0.04)",
+            border: theme === "light" ? "1px solid rgba(15,23,42,0.08)" : "1px solid rgba(255,255,255,0.08)",
             borderRadius:10,
             padding:"10px 12px",
             maxHeight:88,
@@ -1237,9 +1341,9 @@ useEffect(() => {
                 height:36,
                 padding:"0 12px",
                 borderRadius:10,
-                border:"1px solid rgba(148,163,184,0.22)",
-                background:"rgba(255,255,255,0.04)",
-                color:"white",
+                border: theme === "light" ? "1px solid rgba(148,163,184,0.28)" : "1px solid rgba(148,163,184,0.22)",
+                background: theme === "light" ? "rgba(248,250,252,0.96)" : "rgba(255,255,255,0.04)",
+                color: theme === "light" ? "#0f172a" : "white",
                 cursor:"pointer",
                 fontWeight:700,
                 fontSize:12
@@ -1257,9 +1361,9 @@ useEffect(() => {
                 height:36,
                 padding:"0 12px",
                 borderRadius:10,
-                border:"1px solid rgba(245,158,11,0.35)",
-                background:"rgba(245,158,11,0.16)",
-                color:"white",
+                border: theme === "light" ? "1px solid rgba(245,158,11,0.28)" : "1px solid rgba(245,158,11,0.35)",
+                background: theme === "light" ? "rgba(245,158,11,0.12)" : "rgba(245,158,11,0.16)",
+                color: theme === "light" ? "#92400e" : "white",
                 cursor:"pointer",
                 fontWeight:800,
                 fontSize:12
@@ -1272,10 +1376,10 @@ useEffect(() => {
       )}
 
       {isLoading && (
-        <div style={{ position:"fixed", top:58, left:0, right:0, bottom:0, background:"rgba(11,18,32,0.97)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", zIndex:100 }}>
+        <div style={{ position:"fixed", top:58, left:0, right:0, bottom:0, background: theme === "light" ? "rgba(240,244,248,0.97)" : "rgba(11,18,32,0.97)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", zIndex:100 }}>
           <div style={{ width:64, height:64, border:"3px solid rgba(99,102,241,0.2)", borderTop:"3px solid #6366f1", borderRadius:"50%", animation:"spin 0.8s linear infinite", marginBottom:20 }} />
-          <div style={{ color:"white", fontSize:17, fontWeight:700, marginBottom:8 }}>Website wird geladen...</div>
-          <div style={{ color:"rgba(148,163,184,0.7)", fontSize:13, textAlign:"center", maxWidth:280 }}>Seite wird ueber den Proxy geladen.</div>
+          <div style={{ color: theme === "light" ? "#111827" : "white", fontSize:17, fontWeight:700, marginBottom:8 }}>Website wird geladen...</div>
+          <div style={{ color: theme === "light" ? "#64748b" : "rgba(148,163,184,0.7)", fontSize:13, textAlign:"center", maxWidth:280 }}>Seite wird ueber den Proxy geladen.</div>
         </div>
       )}
 
@@ -1403,6 +1507,31 @@ useEffect(() => {
                 ) : (
                   <div className="editor-panel__note">No delivery warnings right now.</div>
                 )}
+              </section>
+
+              <div className="editor-panel__divider" />
+
+              <section className="editor-panel__section">
+                <div className="editor-panel__label">Localization</div>
+                <div className="editor-panel__translation-card">
+                  <div className="editor-panel__translation-head">
+                    <div className="editor-panel__translation-title">Instant website translation</div>
+                    <div className="editor-panel__translation-language">{selectedTranslationLanguage.label}</div>
+                  </div>
+                  <div className="editor-panel__note">
+                    Translates the loaded page copy while preserving structure, exports, and block overlay markup.
+                  </div>
+                  {translationInfo ? (
+                    <div className="editor-panel__translation-summary">
+                      <strong>{translationInfo.translatedCount}</strong> text blocks translated
+                      {translationInfo.detectedSourceLanguage ? ` from ${translationInfo.detectedSourceLanguage.toUpperCase()}` : ""}
+                    </div>
+                  ) : (
+                    <div className="editor-panel__note">
+                      Choose one of the top 50 languages in the top bar and run Translate site.
+                    </div>
+                  )}
+                </div>
               </section>
 
               <div className="editor-panel__divider" />

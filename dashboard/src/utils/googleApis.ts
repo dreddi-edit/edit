@@ -182,18 +182,32 @@ export const analyzeEntities = async (text: string): Promise<NLPData> => {
 };
 
 // 6. Cloud Translation API
-export const translateText = async (text: string, targetLang: string): Promise<TranslationData> => {
+export const translateTexts = async (
+  texts: string[],
+  targetLang: string,
+  options: { format?: "text" | "html" } = {}
+): Promise<TranslationData[]> => {
+  if (!Array.isArray(texts) || texts.length === 0) return [];
   const data = await apiCall(`https://translation.googleapis.com/language/translate/v2?key=${apiKey}`, {
     method: 'POST',
     body: JSON.stringify({
-      q: text,
-      target: targetLang
+      q: texts,
+      target: targetLang,
+      format: options.format || "text",
     })
   });
-  
-  return {
-    translatedText: data.data?.translations?.[0]?.translatedText || "",
-    detectedSourceLanguage: data.data?.translations?.[0]?.detectedSourceLanguage || ""
+
+  return (data.data?.translations || []).map((entry: any) => ({
+    translatedText: entry?.translatedText || "",
+    detectedSourceLanguage: entry?.detectedSourceLanguage || "",
+  }));
+};
+
+export const translateText = async (text: string, targetLang: string): Promise<TranslationData> => {
+  const [translation] = await translateTexts([text], targetLang);
+  return translation || {
+    translatedText: "",
+    detectedSourceLanguage: "",
   };
 };
 
