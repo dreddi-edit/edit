@@ -27,6 +27,171 @@ function decodeAssetProxyEverywhere(input) {
   return out.replace(/&amp;/g, "&");
 }
 
+function uniqueList(values) {
+  return Array.from(new Set((values || []).filter(Boolean)));
+}
+
+function normalizeRemoteUrl(value) {
+  const raw = decodeAssetProxyEverywhere(String(value || "").trim());
+  if (!raw) return "";
+  if (/^\/\//.test(raw)) return `https:${raw}`;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return "";
+}
+
+function escapeHtmlAttribute(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapePhpSingleQuoted(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+function createNowdoc(content, tagBase = "SITE_EDITOR_EXPORT") {
+  const tag = `${String(tagBase || "SITE_EDITOR_EXPORT").replace(/[^A-Z0-9_]/gi, "_").toUpperCase()}_NOWDOC`;
+  return `<<<'${tag}'\n${String(content || "")}\n${tag}`;
+}
+
+function escapeTemplateLiteral(value) {
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/`/g, "\\`")
+    .replace(/\$\{/g, "\\${");
+}
+
+function extractPortableDocumentParts(html) {
+  const source = injectResponsiveViewport(decodeAssetProxyEverywhere(String(html || "")));
+  const dom = new JSDOM(source);
+  const doc = dom.window.document;
+  const title = (doc.querySelector("title")?.textContent || "").trim();
+  const externalStylesheets = uniqueList(
+    Array.from(doc.querySelectorAll('link[rel~="stylesheet"][href]'))
+      .map((node) => normalizeRemoteUrl(node.getAttribute("href")))
+      .filter(Boolean)
+  );
+  const inlineCss = Array.from(doc.querySelectorAll("style"))
+    .map((node) => node.textContent || "")
+    .join("\n\n")
+    .trim();
+
+  doc.querySelectorAll("script, style, link[rel~='stylesheet'], meta, base, title, noscript").forEach((node) => node.remove());
+  doc.body?.querySelectorAll("script, style, link, meta, base, title, noscript").forEach((node) => node.remove());
+
+  const bodyHtml = (doc.body?.innerHTML || "").trim();
+  return {
+    dom,
+    doc,
+    title,
+    inlineCss,
+    externalStylesheets,
+    bodyHtml,
+  };
+}
+
+function buildExternalStylesheetTags(urls) {
+  return uniqueList(urls)
+    .map((href) => `<link rel="stylesheet" href="${escapeHtmlAttribute(href)}">`)
+    .join("\n");
+}
+
+function wrapPortableFragment({ html, inlineCss = "", externalStylesheets = [], wrapperClass = "" }) {
+  const links = buildExternalStylesheetTags(externalStylesheets);
+  const styleTag = inlineCss ? `<style>${inlineCss}</style>` : "";
+  const classAttr = wrapperClass ? ` class="${escapeHtmlAttribute(wrapperClass)}"` : "";
+  return `${links}${links ? "\n" : ""}${styleTag}${styleTag ? "\n" : ""}<div${classAttr}>${String(html || "")}</div>`;
+}
+
+function buildPortableCss(inlineCss) {
+  const baseCss = [
+    ":root { color-scheme: light; }",
+    "body { margin: 0; }",
+    "img { max-width: 100%; height: auto; }",
+    "iframe { max-width: 100%; }",
+  ].join("\n");
+  return `${baseCss}\n\n${String(inlineCss || "").trim()}`.trim();
+}
+
+function deriveFieldLabel(field, form) {
+  const id = field.getAttribute("id");
+  const explicitLabel = id
+    ? Array.from(form.querySelectorAll("label")).find((label) => label.getAttribute("for") === id) || null
+    : null;
+  const fallback = explicitLabel?.textContent
+    || field.getAttribute("aria-label")
+    || field.getAttribute("placeholder")
+    || field.getAttribute("name")
+    || field.tagName;
+  return String(fallback || "").replace(/\s+/g, " ").trim();
+}
+
+function buildShopifyContactField(field, form, index) {
+  const tag = field.tagName.toLowerCase();
+  const inputType = String(field.getAttribute("type") || tag).toLowerCase();
+  if (["hidden", "submit", "button", "reset", "checkbox", "radio", "file"].includes(inputType)) return "";
+
+  const label = deriveFieldLabel(field, form) || `Field ${index + 1}`;
+  const placeholder = field.getAttribute("placeholder") || "";
+  const required = field.hasAttribute("required") || field.getAttribute("aria-required") === "true";
+  const attr = [
+    placeholder ? ` placeholder="${escapeHtmlAttribute(placeholder)}"` : "",
+    required ? " required" : "",
+  ].join("");
+
+  if (tag === "textarea") {
+    const rows = Number(field.getAttribute("rows") || 5);
+    return `<label>${escapeHtmlAttribute(label)}</label><textarea name="contact[body]" rows="${Number.isFinite(rows) && rows > 0 ? rows : 5}"${attr}></textarea>`;
+  }
+
+  if (tag === "select") {
+    const optionMarkup = Array.from(field.querySelectorAll("option"))
+      .map((option) => `<option value="${escapeHtmlAttribute(option.getAttribute("value") || option.textContent || "")}">${escapeHtmlAttribute(option.textContent || "")}</option>`)
+      .join("");
+    return `<label>${escapeHtmlAttribute(label)}</label><select name="contact[${escapeHtmlAttribute(label)}]"${attr}>${optionMarkup}</select>`;
+  }
+
+  const inputName =
+    inputType === "email"
+      ? "contact[email]"
+      : inputType === "tel"
+      ? "contact[phone]"
+      : `contact[${escapeHtmlAttribute(label)}]`;
+
+  return `<label>${escapeHtmlAttribute(label)}</label><input type="${escapeHtmlAttribute(inputType === "textarea" ? "text" : inputType || "text")}" name="${inputName}"${attr}>`;
+}
+
+function convertFormsToShopifyContact(container) {
+  Array.from(container.querySelectorAll("form")).forEach((form, formIndex) => {
+    const fieldMarkup = Array.from(form.querySelectorAll("input, textarea, select"))
+      .map((field, index) => buildShopifyContactField(field, form, index))
+      .filter(Boolean)
+      .join("\n");
+    if (!fieldMarkup) return;
+
+    const buttonLabel =
+      form.querySelector('button[type="submit"], input[type="submit"], button')?.textContent?.trim()
+      || form.querySelector('input[type="submit"]')?.getAttribute("value")
+      || "Send";
+
+    const replacement = `
+<div class="site-editor-shopify-contact site-editor-shopify-contact-${formIndex + 1}">
+  {% form 'contact', class: 'site-editor-contact-form' %}
+    {% if form.posted_successfully? %}
+      <p class="site-editor-contact-success">Thanks, your message has been sent.</p>
+    {% endif %}
+    {{ form.errors | default_errors }}
+    ${fieldMarkup}
+    <button type="submit">${escapeHtmlAttribute(buttonLabel)}</button>
+  {% endform %}
+</div>`.trim();
+
+    form.outerHTML = replacement;
+  });
+}
+
 export function transformExportHtml(html, mode) {
   const raw = String(html || "");
   if (mode === "html-raw") return raw;
@@ -142,8 +307,8 @@ export function validateDeliveryArtifact({ html, url, platform, mode }) {
 
 export function buildDeliveryArtifact({ html, url, platform, mode, project, versionId }) {
   const normalizedPlatform = normalizeSupportedPlatform(platform);
-  const modeSpecificHtml = getModeSpecificHtml(html, mode);
-  const transformedHtml = injectResponsiveViewport(transformExportHtml(modeSpecificHtml, mode));
+  const normalizedHtml = injectResponsiveViewport(transformExportHtml(html, mode));
+  const transformedHtml = getModeSpecificHtml(normalizedHtml, mode);
   const validation = validateDeliveryArtifact({
     html: transformedHtml,
     url,
@@ -207,13 +372,15 @@ export function buildDeliveryArtifact({ html, url, platform, mode, project, vers
 }
 
 export function generateShopifySection(html) {
-  const dom = new JSDOM(String(html || ""));
-  const doc = dom.window.document;
+  const { doc, bodyHtml, inlineCss, externalStylesheets, title } = extractPortableDocumentParts(html);
+  const container = doc.createElement("div");
+  container.innerHTML = bodyHtml;
+  convertFormsToShopifyContact(container);
   const schemaSettings = [];
-  const taggedBlocks = Array.from(doc.querySelectorAll("[data-block-id]"));
+  const taggedBlocks = Array.from(container.querySelectorAll("[data-block-id]"));
   const fallbackBlocks = taggedBlocks.length
     ? []
-    : Array.from(doc.querySelectorAll("h1, h2, h3, p, a, button")).filter((node) => node.textContent?.trim());
+    : Array.from(container.querySelectorAll("h1, h2, h3, h4, p, a, button")).filter((node) => node.textContent?.trim());
   const editableNodes = taggedBlocks.length ? taggedBlocks : fallbackBlocks.slice(0, 24);
   let settingCounter = 1;
 
@@ -235,122 +402,241 @@ export function generateShopifySection(html) {
     } else {
       node.innerHTML = `{{ section.settings.${settingId} }}`;
     }
+
+    if (tagName === "A" && node.getAttribute("href")) {
+      const urlSettingId = `setting_${settingCounter++}`;
+      const originalHref = String(node.getAttribute("href") || "").replace(/'/g, "\\'");
+      schemaSettings.push({
+        type: "url",
+        id: urlSettingId,
+        label: `${tagName} link`,
+      });
+      node.setAttribute("href", `{{ section.settings.${urlSettingId} | default: '${originalHref}' }}`);
+    }
   }
 
   const schema = {
-    name: "Site Editor Section",
-    target: "section",
+    name: title || "Site Editor Section",
     settings: schemaSettings,
+    presets: [{ name: title || "Site Editor Section" }],
   };
 
-  return `${doc.body.innerHTML}\n\n{% schema %}\n${JSON.stringify(schema, null, 2)}\n{% endschema %}`.trim();
+  const headMarkup = buildExternalStylesheetTags(externalStylesheets);
+  const styleMarkup = inlineCss ? `<style>\n${inlineCss}\n</style>` : "";
+
+  return `
+${headMarkup}
+${styleMarkup}
+<section id="shopify-section-{{ section.id }}" class="site-editor-shopify-section">
+${container.innerHTML.trim()}
+</section>
+
+{% schema %}
+${JSON.stringify(schema, null, 2)}
+{% endschema %}`.trim();
 }
 
 export function prepareWordPressThemeFiles({ html, project }) {
   const themeName = project?.name || "Site Editor Exported Theme";
   const themeSlug = slugify(themeName, "site-editor-theme");
+  const { bodyHtml, inlineCss, externalStylesheets, title } = extractPortableDocumentParts(html);
+  const externalEnqueues = externalStylesheets
+    .map((href, index) => `  wp_enqueue_style('${themeSlug}-remote-${index + 1}', '${escapePhpSingleQuoted(href)}', ['${themeSlug}-export'], null);`)
+    .join("\n");
   const styleCss = `/*
 Theme Name: ${themeName}
 Author: Site Editor
 Version: 1.0
 */
-
-body {
-  margin: 0;
-}
 `;
   const functionsPhp = `<?php
+if (!defined('ABSPATH')) exit;
+
+add_action('after_setup_theme', function () {
+  add_theme_support('title-tag');
+  add_theme_support('post-thumbnails');
+  add_theme_support('html5', ['search-form', 'gallery', 'caption', 'style', 'script']);
+});
+
 function ${themeSlug}_enqueue_styles() {
   wp_enqueue_style('${themeSlug}-style', get_stylesheet_uri(), [], '1.0');
+  wp_enqueue_style('${themeSlug}-export', get_template_directory_uri() . '/assets/site-editor-export.css', ['${themeSlug}-style'], '1.0');
+${externalEnqueues || "  // No remote stylesheets were detected in the source export."}
 }
 add_action('wp_enqueue_scripts', '${themeSlug}_enqueue_styles');
 `;
-  const indexPhp = `<?php
-get_header();
-if (have_posts()) :
-  while (have_posts()) : the_post();
-    the_content();
-  endwhile;
-endif;
-get_footer();
+  const headerPhp = `<?php if (!defined('ABSPATH')) exit; ?><!doctype html>
+<html <?php language_attributes(); ?>>
+<head>
+  <meta charset="<?php bloginfo('charset'); ?>">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <?php wp_head(); ?>
+</head>
+<body <?php body_class(); ?>>
+<?php wp_body_open(); ?>
 `;
-  const pagePhp = `<?php /* Template Name: Site Editor Export */ get_header(); ?>
-
-${html}
-
+  const footerPhp = `<?php if (!defined('ABSPATH')) exit; ?>
+<?php wp_footer(); ?>
+</body>
+</html>
+`;
+  const indexPhp = `<?php get_header(); ?>
+<?php get_template_part('template-parts/content', 'site-editor'); ?>
 <?php get_footer(); ?>
 `;
+  const frontPagePhp = `<?php
+/* Template Name: Site Editor Front Page */
+get_header();
+get_template_part('template-parts/content', 'site-editor');
+get_footer();
+`;
+  const pagePhp = `<?php get_header(); ?>
+<?php get_template_part('template-parts/content', 'site-editor'); ?>
+<?php get_footer(); ?>
+`;
+  const contentPhp = `<?php if (!defined('ABSPATH')) exit; ?>
+<?php
+$site_editor_export_html = ${createNowdoc(`<div class="site-editor-export site-editor-export--${themeSlug}">\n${bodyHtml}\n</div>`, `${themeSlug}_content`)};
+echo $site_editor_export_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+`;
+  const themeJson = {
+    version: 2,
+    settings: {
+      layout: {
+        contentSize: "840px",
+        wideSize: "1240px",
+      },
+    },
+    customTemplates: title ? [{ name: "site-editor-front-page", title }] : [],
+  };
 
   return [
     { name: "style.css", content: styleCss },
     { name: "functions.php", content: functionsPhp },
+    { name: "header.php", content: headerPhp },
+    { name: "footer.php", content: footerPhp },
     { name: "index.php", content: indexPhp },
+    { name: "front-page.php", content: frontPagePhp },
     { name: "page.php", content: pagePhp },
+    { name: "theme.json", content: JSON.stringify(themeJson, null, 2) },
+    { name: "assets/site-editor-export.css", content: buildPortableCss(inlineCss) },
+    { name: "template-parts/content-site-editor.php", content: contentPhp },
   ];
 }
 
 export function prepareWordPressBlockFiles({ html, project }) {
   const projectName = project?.name || "Site Editor Project";
   const slug = slugify(projectName, "site-editor-block");
+  const { bodyHtml, inlineCss, externalStylesheets } = extractPortableDocumentParts(html);
+  const blockName = `site-editor/${slug}`;
+  const wrapperClass = `wp-block-site-editor-${slug}`;
+  const previewMarkup = wrapPortableFragment({
+    html: bodyHtml,
+    inlineCss,
+    wrapperClass,
+  });
   const blockJson = {
     $schema: "https://schemas.wp.org/trunk/block.json",
-    apiVersion: 2,
-    name: `site-editor/${slug}`,
+    apiVersion: 3,
+    name: blockName,
     version: "1.0.0",
     title: `${projectName} (Exported)`,
     category: "design",
     icon: "layout",
-    description: "A custom block exported from Site Editor.",
-    supports: { html: false, align: ["wide", "full"] },
+    description: "A portable static block exported from Site Editor.",
+    supports: { html: false, anchor: true, align: ["wide", "full"] },
     textdomain: slug,
-    editorScript: "file:./view.js",
-    render: "file:./render.php",
+    editorScript: "file:./editor.js",
+    style: "file:./style.css",
   };
+  const remoteStyleEnqueues = externalStylesheets
+    .map((href, index) => `  wp_enqueue_style('${slug}-remote-${index + 1}', '${escapePhpSingleQuoted(href)}', ['${slug}-style'], null);`)
+    .join("\n");
   const pluginPhp = `<?php
 /**
  * Plugin Name: Site Editor - ${projectName}
+ * Description: Portable block export generated by Site Editor.
+ * Version: 1.0.0
  */
 if (!defined('ABSPATH')) exit;
 add_action('init', function () {
   register_block_type(__DIR__);
 });
+
+add_action('enqueue_block_assets', function () {
+${remoteStyleEnqueues || "  // No remote stylesheets were detected in the source export."}
+});
+`;
+  const editorJs = `(function (blocks, element, blockEditor) {
+  const el = element.createElement;
+  const RawHTML = element.RawHTML;
+  const useBlockProps = blockEditor.useBlockProps;
+  const previewMarkup = \`${escapeTemplateLiteral(previewMarkup)}\`;
+
+  blocks.registerBlockType(${JSON.stringify(blockName)}, {
+    edit: function () {
+      return el("div", useBlockProps({ className: "site-editor-export-editor" }), el(RawHTML, null, previewMarkup));
+    },
+    save: function () {
+      return el(RawHTML, null, previewMarkup);
+    },
+  });
+})(window.wp.blocks, window.wp.element, window.wp.blockEditor);
 `;
 
   return [
     { name: `${slug}.php`, content: pluginPhp },
     { name: "block.json", content: JSON.stringify(blockJson, null, 2) },
-    { name: "render.php", content: html },
-    { name: "view.js", content: "// Required for the block editor preview." },
+    { name: "editor.js", content: editorJs },
+    { name: "style.css", content: buildPortableCss(inlineCss) },
+    { name: "README.md", content: `Install this plugin ZIP in WordPress, activate it, then insert the "${projectName} (Exported)" block.` },
   ];
 }
 
-export function prepareWebComponentFile({ html }) {
-  const dom = new JSDOM(String(html || ""));
-  const doc = dom.window.document;
-  const styles = Array.from(doc.querySelectorAll("style"))
-    .map((style) => style.textContent || "")
-    .join("\n");
-  const bodyContent = doc.body.innerHTML;
+export function prepareWebComponentFile({ html, project }) {
+  const { bodyHtml, inlineCss, externalStylesheets } = extractPortableDocumentParts(html);
+  const componentName = `site-editor-${slugify(project?.name || "embed", "embed")}`;
+  const bodyContent = wrapPortableFragment({
+    html: bodyHtml,
+    inlineCss,
+    externalStylesheets,
+    wrapperClass: "site-editor-web-component",
+  });
   const jsContent = `class SiteEditorEmbed extends HTMLElement {
   constructor() {
     super();
     const root = this.attachShadow({ mode: "open" });
     const template = document.createElement("template");
-    template.innerHTML = \`<style>${styles.replace(/`/g, "\\`")}</style>${bodyContent.replace(/`/g, "\\`")}\`;
+    template.innerHTML = \`${escapeTemplateLiteral(bodyContent)}\`;
     root.appendChild(template.content.cloneNode(true));
   }
 }
 
-customElements.define("site-editor-embed", SiteEditorEmbed);
+if (!customElements.get(${JSON.stringify(componentName)})) {
+  customElements.define(${JSON.stringify(componentName)}, SiteEditorEmbed);
+}
 `;
+  const demoHtml = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${project?.name || "Site Editor Embed"}</title>
+    <script type="module" src="./embed.js"></script>
+  </head>
+  <body style="margin:0;background:#0b0f14">
+    <${componentName}></${componentName}>
+  </body>
+</html>`;
   const readme = `Usage:
 
-<script src="./embed.js"></script>
-<site-editor-embed></site-editor-embed>
+<script type="module" src="./embed.js"></script>
+<${componentName}></${componentName}>
 `;
 
   return {
     jsFile: { name: "embed.js", content: jsContent },
+    demoFile: { name: "demo.html", content: demoHtml },
     readmeFile: { name: "README.md", content: readme },
   };
 }
@@ -365,10 +651,45 @@ export async function prepareEmailHtml(html) {
     // `juice` is optional; fall back to a cleaned HTML export if it is not installed.
   }
 
-  const dom = new JSDOM(processed);
-  const doc = dom.window.document;
-  doc.querySelectorAll("script").forEach((node) => node.remove());
-  return `<!DOCTYPE html>\n${doc.documentElement.outerHTML}`;
+  const { bodyHtml } = extractPortableDocumentParts(processed);
+  const wrappedBody = `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;border-collapse:collapse;background:#ffffff;">
+  <tr>
+    <td align="center" style="padding:24px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="640" style="width:640px;max-width:100%;border-collapse:collapse;">
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif;color:#111827;font-size:16px;line-height:1.6;">
+            ${bodyHtml}
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>`;
+  return `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email export</title>
+  </head>
+  <body style="margin:0;padding:0;background:#f5f5f5;">
+    ${wrappedBody}
+  </body>
+</html>`;
+}
+
+export function preparePlainTextEmail({ html, project }) {
+  const markdown = prepareMarkdownFile({ html, project });
+  return {
+    name: "plain.txt",
+    content: markdown.content
+      .replace(/^#{1,6}\s+/gm, "")
+      .replace(/\[(.*?)\]\((.*?)\)/g, "$1: $2")
+      .replace(/^\s*[-*]\s+/gm, "")
+      .replace(/^>\s?/gm, "")
+      .replace(/[*_`]/g, "")
+      .trim(),
+  };
 }
 
 export function prepareMarkdownFile({ html, project }) {

@@ -9,6 +9,7 @@ import {
   prepareWordPressBlockFiles,
   prepareWebComponentFile,
   prepareEmailHtml,
+  preparePlainTextEmail,
   prepareMarkdownFile,
 } from "../deliveryArtifacts.js";
 import { normalizeProjectDocument } from "../siteMeta.js";
@@ -103,26 +104,39 @@ test("delivery validation warns on unresolved assets and embeds", () => {
 });
 
 test("format generators produce portable export artifacts", async () => {
-  const html = `<!DOCTYPE html><html><body><section data-block-id="hero"><h1>Hello</h1><p>World</p></section></body></html>`;
+  const html = `<!DOCTYPE html><html><head><style>.hero{padding:24px}</style><link rel="stylesheet" href="https://cdn.example.com/site.css"></head><body><section data-block-id="hero" class="hero"><h1>Hello</h1><p>World</p><form><label for="email">Email</label><input id="email" type="email" required><button type="submit">Send</button></form></section></body></html>`;
   const project = { name: "Launch Site" };
 
   const shopify = generateShopifySection(html);
   assert.match(shopify, /{% schema %}/);
   assert.match(shopify, /section\.settings\./);
+  assert.match(shopify, /{% form 'contact'/);
+  assert.match(shopify, /"presets": \[/);
+  assert.doesNotMatch(shopify, /"target": "section"/);
 
   const themeFiles = prepareWordPressThemeFiles({ html, project });
-  assert.deepEqual(themeFiles.map((file) => file.name), ["style.css", "functions.php", "index.php", "page.php"]);
+  assert.ok(themeFiles.some((file) => file.name === "header.php"));
+  assert.ok(themeFiles.some((file) => file.name === "footer.php"));
+  assert.ok(themeFiles.some((file) => file.name === "assets/site-editor-export.css"));
+  assert.ok(themeFiles.some((file) => file.name === "template-parts/content-site-editor.php"));
 
   const blockFiles = prepareWordPressBlockFiles({ html, project });
   assert.ok(blockFiles.some((file) => file.name === "block.json"));
   assert.ok(blockFiles.some((file) => file.name.endsWith(".php")));
+  assert.ok(blockFiles.some((file) => file.name === "editor.js"));
+  assert.ok(blockFiles.some((file) => file.name === "style.css"));
 
-  const { jsFile, readmeFile } = prepareWebComponentFile({ html });
+  const { jsFile, demoFile, readmeFile } = prepareWebComponentFile({ html, project });
   assert.equal(jsFile.name, "embed.js");
-  assert.match(readmeFile.content, /site-editor-embed/);
+  assert.equal(demoFile.name, "demo.html");
+  assert.match(readmeFile.content, /site-editor-launch-site/);
 
   const emailHtml = await prepareEmailHtml(`${html}<script>alert(1)</script>`);
   assert.doesNotMatch(emailHtml, /<script\b/i);
+  assert.match(emailHtml, /<table role="presentation"/);
+  const plainText = preparePlainTextEmail({ html, project });
+  assert.equal(plainText.name, "plain.txt");
+  assert.match(plainText.content, /Hello/);
 
   const markdown = prepareMarkdownFile({ html, project });
   assert.equal(markdown.name, "launch-site.md");
