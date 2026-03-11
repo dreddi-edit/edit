@@ -147,8 +147,6 @@ function localRebuild(html) {
 }
 
 const app = express()
-app.use(express.urlencoded({ extended: true }))
-
 const corsOrigin = process.env.NODE_ENV === "production"
   ? (process.env.ALLOWED_ORIGIN?.split(",").map(s => s.trim()).filter(Boolean) || [])
   : [`http://localhost:${process.env.PORT || 8787}`, "http://localhost:8788"]
@@ -163,7 +161,9 @@ app.use(cors({
 }))
 
 app.use(cookieParser())
-app.use(express.json({ limit: '25mb' }))
+const API_BODY_LIMIT = process.env.API_BODY_LIMIT || "100mb"
+app.use(express.urlencoded({ extended: true, limit: API_BODY_LIMIT }))
+app.use(express.json({ limit: API_BODY_LIMIT }))
 
 const dashboardIndex = path.join(dashboardDist, "index.html")
 if (!fs.existsSync(dashboardIndex)) {

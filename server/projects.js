@@ -21,6 +21,7 @@ import {
 
 const WORKFLOW_STAGES = ["draft", "internal_review", "client_review", "approved", "shipped"]
 const DELIVERY_STATUSES = ["not_exported", "export_ready", "exported", "handed_off", "shipped"]
+const PROJECT_HTML_MAX = Number(process.env.PROJECT_HTML_MAX || 20_000_000)
 const NON_PAGE_FILE_EXTENSIONS = new Set([
   ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico",
   ".pdf", ".zip", ".xml", ".json", ".txt", ".css", ".js",
@@ -472,7 +473,7 @@ export function registerProjectRoutes(app) {
     try {
       const name = readRequiredString(req.body?.name, "Name", { max: 160 })
       const url = readOptionalUrl(req.body?.url)
-      const html = readOptionalHtml(req.body?.html)
+      const html = readOptionalHtml(req.body?.html, "HTML", { max: PROJECT_HTML_MAX })
       const platform = readOptionalString(req.body?.platform, "Platform", { max: 32, empty: "" })
       const clientName = readOptionalString(req.body?.clientName ?? req.body?.client_name, "Client", { max: 160, empty: "" })
       const dueAt = readOptionalIsoDate(req.body?.dueAt ?? req.body?.due_at, "Due date")
@@ -543,7 +544,7 @@ export function registerProjectRoutes(app) {
       if (!project) return res.status(404).json({ ok: false, error: "Projekt nicht gefunden" })
 
       const name = req.body?.name === undefined ? undefined : readRequiredString(req.body.name, "Name", { max: 160 })
-      const html = req.body?.html === undefined ? undefined : readOptionalHtml(req.body.html)
+      const html = req.body?.html === undefined ? undefined : readOptionalHtml(req.body.html, "HTML", { max: PROJECT_HTML_MAX })
       const url = req.body?.url === undefined ? undefined : readOptionalUrl(req.body.url)
       const thumbnail = req.body?.thumbnail === undefined ? undefined : readOptionalUrl(req.body.thumbnail, "Thumbnail URL")
       const pinned = readOptionalBoolean(req.body?.pinned, "Pinned")
