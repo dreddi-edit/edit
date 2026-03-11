@@ -3,12 +3,15 @@ import { apiGetPlan } from "./api/credits"
 import { apiFetch } from "./api/client"
 import {
   apiGetProject,
+  apiLoadProjectPage,
   apiGetProjectWorkflowHistory,
+  apiScanProjectPages,
   apiSaveProject,
   apiSetProjectWorkflowStage,
   type ExportWarning,
   type PlatformGuide,
   type Project,
+  type ProjectPage,
   type WorkflowEvent,
   type WorkflowStage,
 } from "./api/projects"
@@ -279,6 +282,10 @@ export default function App() {
   const [authUser, setAuthUser] = useState<User | null | "loading">("loading")
   const [view, setView] = useState<"auth" | "dashboard" | "editor" | "admin">("auth")
   const [currentProject, setCurrentProject] = useState<Project | null>(null)
+  const [projectPages, setProjectPages] = useState<ProjectPage[]>([])
+  const [activePageId, setActivePageId] = useState<string | null>(null)
+  const [scanningPages, setScanningPages] = useState(false)
+  const [loadingProjectPageId, setLoadingProjectPageId] = useState<string | null>(null)
   const [selectedComponent, setSelectedComponent] = useState<string>("")
   
   // Simple undo history
@@ -523,9 +530,24 @@ const createUser = async () => {
 
 const autoSave = async (html: string) => {
     if (!currentProject) return
+    const nextPages = activePageId
+      ? projectPages.map((page) =>
+          page.id === activePageId
+            ? { ...page, html, updatedAt: new Date().toISOString() }
+            : page
+        )
+      : projectPages
+    if (activePageId) setProjectPages(nextPages)
     try {
-      const saved = await apiSaveProject(currentProject.id, { html, platform: currentPlatform })
-      if (saved) setCurrentProject(prev => (prev && prev.id === saved.id ? { ...prev, ...saved } : saved))
+      const saved = await apiSaveProject(currentProject.id, {
+        html,
+        platform: currentPlatform,
+        pages: nextPages.length ? nextPages : undefined,
+      })
+      if (saved) {
+        setCurrentProject(prev => (prev && prev.id === saved.id ? { ...prev, ...saved } : saved))
+        if (saved.pages) setProjectPages(saved.pages)
+      }
     } catch { /* autosave failure is non-fatal */ }
   }
 
@@ -597,10 +619,71 @@ const autoSave = async (html: string) => {
     return text.length >= 40 || structure.length >= 4
   }
 
+  const findDefaultProjectPage = (pages: ProjectPage[]) => {
+    return pages.find((page) => page.path === "/") || pages[0] || null
+  }
+
+  const applyProjectPage = (project: Project, page: ProjectPage) => {
+    const pageHtml = String(page.html || "")
+    setActivePageId(page.id)
+    setUrl(page.url || project.url || "")
+    setLoadedUrl(page.url || project.url || "")
+    setCurrentHtml(pageHtml)
+    setTranslationInfo(null)
+    setCurrentPlatform(resolvePlatform(project.platform, page.url || project.url, pageHtml))
+    setCurrentPlatformGuide(project.platformGuide ?? null)
+    setExportWarnings(project.latestExport?.manifest?.warnings || [])
+    setExportReadiness(project.latestExport?.readiness || "ready")
+    renderToIframe(pageHtml)
+    setStatus("ok")
+  }
+
+  const loadScannedProjectPage = async (project: Project, page: ProjectPage) => {
+    if (!project.id) return
+    if (page.html && hasMeaningfulProjectHtml(page.html)) {
+      applyProjectPage(project, page)
+      return
+    }
+    setLoadingProjectPageId(page.id)
+    try {
+      const response = await apiLoadProjectPage(project.id, page.id)
+      const nextProject = response.project
+      const nextPage = response.page || nextProject.pages?.find((entry) => entry.id === page.id) || page
+      setCurrentProject(nextProject)
+      setProjectPages(nextProject.pages || [])
+      applyProjectPage(nextProject, nextPage)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Page could not be loaded.")
+    } finally {
+      setLoadingProjectPageId(null)
+    }
+  }
+
+  const scanProjectPages = async (project: Project, openFirstPage = false) => {
+    if (!project.id || !project.url || scanningPages) return
+    setScanningPages(true)
+    try {
+      const nextProject = await apiScanProjectPages(project.id)
+      const nextPages = nextProject.pages || []
+      setCurrentProject(nextProject)
+      setProjectPages(nextPages)
+      if (openFirstPage && nextPages.length) {
+        applyProjectPage(nextProject, findDefaultProjectPage(nextPages) || nextPages[0])
+      }
+      toast.success(nextPages.length ? `Found ${nextPages.length} internal pages` : "No internal pages found")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Page scan failed")
+    } finally {
+      setScanningPages(false)
+    }
+  }
+
   const resetLoadedDocument = (nextUrl = "", nextPlatform: SitePlatform = "unknown") => {
     setUrl(nextUrl)
     setLoadedUrl("")
     setCurrentHtml("")
+    setProjectPages([])
+    setActivePageId(null)
     setTranslationInfo(null)
     setCurrentPlatform(nextPlatform)
     setCurrentPlatformGuide(null)
@@ -652,11 +735,19 @@ const autoSave = async (html: string) => {
     const project = await apiGetProject(p.id).catch(() => p)
     setCurrentProject(project)
     setTranslationInfo(null)
+    setProjectPages(project.pages || [])
+    setActivePageId(null)
     loadWorkflowHistory(project.id).catch(() => {})
     if (view !== "admin") setView("editor")
 
     const projectHtml = String(project.html ?? "")
     const inlineHtml = projectHtml.trim()
+    const defaultPage = findDefaultProjectPage(project.pages || [])
+
+    if (defaultPage) {
+      await loadScannedProjectPage(project, defaultPage)
+      return
+    }
 
     if (inlineHtml && hasMeaningfulProjectHtml(inlineHtml)) {
       setUrl(project.url || "")
@@ -668,6 +759,9 @@ const autoSave = async (html: string) => {
       setExportReadiness(project.latestExport?.readiness || "ready")
       renderToIframe(inlineHtml)
       setStatus("ok")
+      if (project.url) {
+        void scanProjectPages(project)
+      }
       return
     }
 
@@ -687,7 +781,7 @@ const autoSave = async (html: string) => {
     if (project.url) {
       setExportWarnings([])
       setExportReadiness("ready")
-      setTimeout(() => load(true, project.url || ""), 100)
+      void scanProjectPages(project, true)
     }
   }
 
@@ -926,6 +1020,9 @@ const autoSave = async (html: string) => {
   const selectedTranslationLanguage =
     TOP_TRANSLATION_LANGUAGES.find((language) => language.code === translationTargetLanguage) ||
     TOP_TRANSLATION_LANGUAGES[0]
+  const selectedProjectPage =
+    projectPages.find((page) => page.id === activePageId) ||
+    findDefaultProjectPage(projectPages)
   const selectedStructureItem =
     structureItems.find((item) => item.rootId === selectedRootId) ||
     structureItems.find((item) => item.isSelected) ||
@@ -1428,6 +1525,42 @@ useEffect(() => {
                 <div className="editor-panel__url">
                   {loadedUrl ? loadedUrl.replace(/^https?:\/\//, "") : "Load a site or open a project"}
                 </div>
+
+                {currentProject?.url ? (
+                  <div className="editor-panel__page-tools">
+                    <div className="editor-panel__page-count">
+                      {projectPages.length ? `${projectPages.length} pages in project` : "Single-page project"}
+                    </div>
+                    <button
+                      className="editor-btn editor-btn--panel editor-btn--panel-muted"
+                      onClick={() => void scanProjectPages(currentProject, !projectPages.length)}
+                      disabled={scanningPages}
+                    >
+                      {scanningPages ? "Scanning..." : projectPages.length ? "Rescan links" : "Scan internal links"}
+                    </button>
+                  </div>
+                ) : null}
+
+                {projectPages.length > 0 ? (
+                  <div className="editor-panel__page-list">
+                    {projectPages.map((page) => (
+                      <button
+                        key={page.id}
+                        type="button"
+                        className={`editor-panel__page-item ${selectedProjectPage?.id === page.id ? "is-active" : ""}`}
+                        onClick={() => void loadScannedProjectPage(currentProject as Project, page)}
+                      >
+                        <span className="editor-panel__page-item-copy">
+                          <strong>{page.name}</strong>
+                          <span>{page.path}</span>
+                        </span>
+                        <span className="editor-panel__page-item-state">
+                          {loadingProjectPageId === page.id ? "..." : page.html ? "Saved" : "Load"}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
 
                 <div className="editor-panel__note">
                   {currentPlatformGuide?.safeEditScope || "Live block editing stays inside the current overlay scope."}

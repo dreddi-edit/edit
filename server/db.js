@@ -32,6 +32,7 @@ db.exec(`
     client_name TEXT,
     url TEXT,
     html TEXT,
+    pages_json TEXT DEFAULT '[]',
     platform TEXT DEFAULT 'unknown',
     workflow_status TEXT DEFAULT 'draft',
     workflow_stage TEXT DEFAULT 'draft',
@@ -326,7 +327,8 @@ runMigration("20260310_projects_last_export_mode", () => {
   execMigrationSql(`ALTER TABLE projects ADD COLUMN last_export_mode TEXT`)
 })
 runMigration("20260310_projects_last_export_warning_count", () => {
-  execMigrationSql(`ALTER TABLE projects ADD COLUMN last_export_warning_count INTEGER DEFAULT 0`)
+execMigrationSql(`ALTER TABLE projects ADD COLUMN last_export_warning_count INTEGER DEFAULT 0`)
+execMigrationSql(`ALTER TABLE projects ADD COLUMN pages_json TEXT DEFAULT '[]'`)
 })
 runMigration("20260310_project_exports_table", () => {
   execMigrationSql(`

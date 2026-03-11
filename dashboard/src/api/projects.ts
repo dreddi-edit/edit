@@ -54,11 +54,23 @@ export type ProjectAssignee = {
   source?: string
 }
 
+export type ProjectPage = {
+  id: string
+  name: string
+  title?: string
+  path: string
+  url: string
+  html?: string
+  updatedAt?: string
+  scannedAt?: string
+}
+
 export type Project = {
   id: number
   name: string
   url: string
   html?: string
+  pages?: ProjectPage[]
   platform?: SitePlatform
   thumbnail?: string
   pinned?: number
@@ -81,6 +93,7 @@ export type Project = {
 type ProjectsRes = { ok: boolean; error?: string; projects: Project[] }
 type ProjectRes = { ok: boolean; error?: string; project: Project; latestExport?: LatestExport | null }
 type CreateProjectRes = { ok: boolean; error?: string; id: number; project?: Project }
+type PageProjectRes = { ok: boolean; error?: string; project: Project; page?: ProjectPage }
 
 export async function apiGetProjects(): Promise<Project[]> {
   const d = await apiFetch<ProjectsRes>(`${BASE}/api/projects`)
@@ -128,6 +141,25 @@ export async function apiSaveProject(id: number, data: Partial<Project>) {
   })
   if (!d?.ok) throw new Error((d as { error?: string })?.error || "Failed to save.")
   return d.project
+}
+
+export async function apiScanProjectPages(id: number): Promise<Project> {
+  const d = await apiFetch<PageProjectRes>(`${BASE}/api/projects/${id}/pages/scan`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+  })
+  if (!d?.ok) throw new Error((d as { error?: string })?.error || "Failed to scan project pages.")
+  return d.project
+}
+
+export async function apiLoadProjectPage(id: number, pageId: string): Promise<PageProjectRes> {
+  const d = await apiFetch<PageProjectRes>(`${BASE}/api/projects/${id}/pages/load`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ pageId }),
+  })
+  if (!d?.ok) throw new Error((d as { error?: string })?.error || "Failed to load project page.")
+  return d
 }
 
 export async function apiDeleteProject(id: number) {

@@ -20,6 +20,11 @@ import {
 
 const WORKFLOW_STAGES = ["draft", "internal_review", "client_review", "approved", "shipped"]
 const DELIVERY_STATUSES = ["not_exported", "export_ready", "exported", "handed_off", "shipped"]
+const NON_PAGE_FILE_EXTENSIONS = new Set([
+  ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico",
+  ".pdf", ".zip", ".xml", ".json", ".txt", ".css", ".js",
+  ".mp4", ".mov", ".mp3", ".wav", ".webm", ".woff", ".woff2", ".ttf", ".eot",
+])
 const WORKFLOW_TRANSITIONS = {
   draft: ["internal_review"],
   internal_review: ["draft", "client_review"],
@@ -56,8 +61,148 @@ function mapProjectRow(row, assignees = []) {
     lastExportMode: row.last_export_mode || "",
     lastExportWarningCount: Number(row.last_export_warning_count || 0),
     platformGuide: getPlatformGuide(row.platform || "unknown"),
+    pages: parseProjectPages(row.pages_json, row.url),
     assignees,
   }
+}
+
+function cleanText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim()
+}
+
+function stripHtml(value) {
+  return cleanText(String(value || "").replace(/<[^>]+>/g, " "))
+}
+
+function normalizePagePath(pageUrl, siteRootUrl) {
+  try {
+    const resolved = new URL(pageUrl, siteRootUrl || pageUrl)
+    resolved.hash = ""
+    resolved.search = ""
+    let pathname = resolved.pathname || "/"
+    pathname = pathname.replace(/\/index\.html?$/i, "/")
+    pathname = pathname.replace(/\/{2,}/g, "/")
+    return pathname || "/"
+  } catch {
+    return "/"
+  }
+}
+
+function pageIdFromPath(pathname) {
+  const normalized = String(pathname || "/").replace(/^\/+|\/+$/g, "")
+  if (!normalized) return "home"
+  return normalized.replace(/[^\w]+/g, "-").replace(/^-+|-+$/g, "") || "page"
+}
+
+function derivePageName(pathname, title = "", anchorText = "") {
+  const preferred = cleanText(title) || cleanText(anchorText)
+  if (preferred) return preferred
+  if (!pathname || pathname === "/") return "Home"
+  const segment = pathname.split("/").filter(Boolean).pop() || "Page"
+  return segment
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase())
+}
+
+function isLikelyPageUrl(candidateUrl, rootUrl) {
+  try {
+    const resolved = new URL(candidateUrl, rootUrl || candidateUrl)
+    if (!/^https?:$/i.test(resolved.protocol)) return false
+    const pathname = resolved.pathname || "/"
+    const extMatch = pathname.toLowerCase().match(/\.[a-z0-9]+$/)
+    if (extMatch && NON_PAGE_FILE_EXTENSIONS.has(extMatch[0])) return false
+    return !/^(mailto|tel|javascript):/i.test(String(candidateUrl || ""))
+  } catch {
+    return false
+  }
+}
+
+function normalizeProjectPage(input, siteRootUrl) {
+  const url = cleanText(input?.url)
+  const path = normalizePagePath(url || input?.path || "/", siteRootUrl)
+  return {
+    id: cleanText(input?.id) || pageIdFromPath(path),
+    name: cleanText(input?.name) || derivePageName(path, input?.title, ""),
+    title: cleanText(input?.title),
+    path,
+    url,
+    html: typeof input?.html === "string" ? input.html : "",
+    updatedAt: cleanText(input?.updatedAt),
+    scannedAt: cleanText(input?.scannedAt),
+  }
+}
+
+function parseProjectPages(rawPagesJson, siteRootUrl = "") {
+  if (!rawPagesJson) return []
+  try {
+    const parsed = JSON.parse(rawPagesJson)
+    if (!Array.isArray(parsed)) return []
+    const seen = new Set()
+    return parsed
+      .map((entry) => normalizeProjectPage(entry, siteRootUrl))
+      .filter((page) => {
+        const key = `${page.path}|${page.url}`
+        if (!page.url || seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+  } catch {
+    return []
+  }
+}
+
+function serializeProjectPages(pages = [], siteRootUrl = "") {
+  return JSON.stringify(parseProjectPages(JSON.stringify(pages), siteRootUrl))
+}
+
+async function fetchSitePage(url) {
+  const response = await fetch(url, {
+    headers: { "User-Agent": "Mozilla/5.0 (compatible; SiteEditor/1.0)" },
+  })
+  if (!response.ok) throw new Error(`Could not load page (${response.status})`)
+  const rawHtml = await response.text()
+  const finalUrl = response.url || url
+  const normalized = normalizeProjectDocument({ html: rawHtml, url: finalUrl, platform: "unknown" })
+  const titleMatch = cleanText(String(rawHtml || "").match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "")
+  return {
+    html: normalized.html,
+    finalUrl: normalized.meta.url || finalUrl,
+    platform: normalized.meta.platform,
+    rawHtml,
+    title: titleMatch,
+  }
+}
+
+function extractSitePagesFromHtml(html, rootUrl) {
+  const root = new URL(rootUrl)
+  const pages = new Map()
+  const addPage = (pageUrl, anchorText = "", title = "") => {
+    if (!isLikelyPageUrl(pageUrl, rootUrl)) return
+    const resolved = new URL(pageUrl, rootUrl)
+    if (resolved.origin !== root.origin) return
+    resolved.hash = ""
+    resolved.search = ""
+    const path = normalizePagePath(resolved.toString(), rootUrl)
+    if (pages.has(path)) return
+    pages.set(path, {
+      id: pageIdFromPath(path),
+      name: derivePageName(path, title, anchorText),
+      title: cleanText(title),
+      path,
+      url: resolved.toString(),
+      html: "",
+      updatedAt: "",
+      scannedAt: new Date().toISOString(),
+    })
+  }
+
+  addPage(rootUrl, "", "Home")
+  const anchorRegex = /<a\b[^>]*href=(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>/gi
+  for (const match of String(html || "").matchAll(anchorRegex)) {
+    addPage(match[2], stripHtml(match[3] || ""))
+    if (pages.size >= 24) break
+  }
+  return Array.from(pages.values())
 }
 
 function getProjectAssigneeMap(projectIds) {
@@ -183,7 +328,7 @@ export function registerProjectRoutes(app) {
     if (q) {
       projects = db.prepare(
         `SELECT id, user_id, name, client_name, url, html, platform, workflow_status, workflow_stage, delivery_status, due_at,
-                approved_at, shipped_at, thumbnail, pinned, last_activity_at, last_export_at, last_export_mode, last_export_warning_count,
+                approved_at, shipped_at, thumbnail, pinned, pages_json, last_activity_at, last_export_at, last_export_mode, last_export_warning_count,
                 updated_at, created_at
          FROM projects
          WHERE user_id = ? AND (name LIKE ? OR url LIKE ?) ORDER BY pinned DESC, ${orderCol}`
@@ -191,7 +336,7 @@ export function registerProjectRoutes(app) {
     } else {
       projects = db.prepare(
         `SELECT id, user_id, name, client_name, url, html, platform, workflow_status, workflow_stage, delivery_status, due_at,
-                approved_at, shipped_at, thumbnail, pinned, last_activity_at, last_export_at, last_export_mode, last_export_warning_count,
+                approved_at, shipped_at, thumbnail, pinned, pages_json, last_activity_at, last_export_at, last_export_mode, last_export_warning_count,
                 updated_at, created_at
          FROM projects
          WHERE user_id = ? ORDER BY pinned DESC, ${orderCol}`
@@ -252,16 +397,17 @@ export function registerProjectRoutes(app) {
 
       const insert = db.prepare(`
         INSERT INTO projects (
-          user_id, name, client_name, url, html, platform, workflow_status, workflow_stage,
+          user_id, name, client_name, url, html, pages_json, platform, workflow_status, workflow_stage,
           delivery_status, due_at, last_activity_at, last_export_at, last_export_mode,
           last_export_warning_count, approved_at, shipped_at, thumbnail, pinned
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         req.user.id,
         restoredName,
         project.client_name || null,
         project.url || "",
         project.html || "",
+        project.pages_json || "[]",
         project.platform || "unknown",
         project.workflow_status || project.workflow_stage || "draft",
         project.workflow_stage || project.workflow_status || "draft",
@@ -324,17 +470,19 @@ export function registerProjectRoutes(app) {
       const deliveryStatus = readOptionalEnum(req.body?.deliveryStatus ?? req.body?.delivery_status, DELIVERY_STATUSES, "Delivery status", "not_exported") || "not_exported"
       const assignees = readProjectAssignees(req.body?.assignees) || []
       const normalized = normalizeProjectDocument({ html, url, platform })
+      const pages = req.body?.pages ? parseProjectPages(JSON.stringify(req.body.pages), normalized.meta.url || url || "") : []
       const result = db.prepare(
         `INSERT INTO projects (
-          user_id, name, client_name, url, html, platform, workflow_status, workflow_stage,
+          user_id, name, client_name, url, html, pages_json, platform, workflow_status, workflow_stage,
           delivery_status, due_at, last_activity_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
       ).run(
         req.user.id,
         name,
         clientName || null,
         normalized.meta.url || url || "",
         normalized.html || "",
+        serializeProjectPages(pages, normalized.meta.url || url || ""),
         normalized.meta.platform,
         workflowStage,
         workflowStage,
@@ -380,7 +528,7 @@ export function registerProjectRoutes(app) {
     try {
       const projectId = readId(req.params.id, "Projekt")
       const project = db.prepare(
-        "SELECT id, html, url, platform, workflow_stage, workflow_status, delivery_status, client_name, due_at FROM projects WHERE id = ? AND user_id = ?"
+        "SELECT id, html, url, pages_json, platform, workflow_stage, workflow_status, delivery_status, client_name, due_at FROM projects WHERE id = ? AND user_id = ?"
       ).get(projectId, req.user.id)
       if (!project) return res.status(404).json({ ok: false, error: "Projekt nicht gefunden" })
 
@@ -403,6 +551,7 @@ export function registerProjectRoutes(app) {
         ? undefined
         : readOptionalEnum(req.body?.deliveryStatus ?? req.body?.delivery_status, DELIVERY_STATUSES, "Delivery status", undefined)
       const assignees = readProjectAssignees(req.body?.assignees)
+      const pages = req.body?.pages === undefined ? undefined : parseProjectPages(JSON.stringify(req.body.pages), project.url || "")
 
       const nextHtmlInput = html !== undefined ? html : project.html
       const nextUrlInput = url !== undefined ? url : project.url
@@ -432,6 +581,7 @@ export function registerProjectRoutes(app) {
         UPDATE projects SET
           name = COALESCE(?, name),
           html = COALESCE(?, html),
+          pages_json = COALESCE(?, pages_json),
           url = COALESCE(?, url),
           platform = COALESCE(?, platform),
           client_name = COALESCE(?, client_name),
@@ -455,6 +605,7 @@ export function registerProjectRoutes(app) {
       `).run(
         name ?? null,
         html !== undefined ? normalizedHtml : null,
+        pages !== undefined ? serializeProjectPages(pages, project.url || normalizedUrl) : null,
         url !== undefined || html !== undefined ? normalizedUrl : null,
         nextPlatform || null,
         clientName ?? null,
@@ -521,15 +672,16 @@ export function registerProjectRoutes(app) {
     const assignees = getProjectAssignees(req.params.id)
     const result = db.prepare(
       `INSERT INTO projects (
-        user_id, name, client_name, url, html, platform, workflow_status, workflow_stage,
+        user_id, name, client_name, url, html, pages_json, platform, workflow_status, workflow_stage,
         delivery_status, due_at, thumbnail, last_activity_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
     ).run(
       req.user.id,
       (p.name || "Project") + " (Copy)",
       p.client_name || null,
       p.url || "",
       p.html || "",
+      p.pages_json || "[]",
       p.platform || "unknown",
       "draft",
       "draft",
@@ -681,5 +833,103 @@ export function registerProjectRoutes(app) {
     ).run(normalized.html, normalized.meta.platform, req.params.id)
     logAudit({ userId: req.user.id, action: "project.restore_version", targetType: "project", targetId: req.params.id, meta: { versionId: req.params.versionId } })
     res.json({ ok: true, html: normalized.html, platform: normalized.meta.platform })
+  })
+
+  app.post("/api/projects/:id/pages/scan", authMiddleware, async (req, res) => {
+    try {
+      const projectId = readId(req.params.id, "Projekt")
+      const project = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, req.user.id)
+      if (!project) return res.status(404).json({ ok: false, error: "Projekt nicht gefunden" })
+      if (!project.url) return res.status(400).json({ ok: false, error: "Project needs a root URL before scanning pages" })
+
+      const fetched = await fetchSitePage(project.url)
+      const scannedPages = extractSitePagesFromHtml(fetched.rawHtml, fetched.finalUrl)
+      const existingPages = parseProjectPages(project.pages_json, project.url || fetched.finalUrl)
+      const existingByPath = new Map(existingPages.map((page) => [page.path, page]))
+      const mergedPages = scannedPages.map((page, index) => {
+        const existing = existingByPath.get(page.path)
+        return {
+          ...page,
+          html: index === 0 ? fetched.html : existing?.html || "",
+          title: index === 0 ? fetched.title || page.title || page.name : existing?.title || page.title || "",
+          name: existing?.name || page.name,
+          updatedAt: existing?.updatedAt || "",
+        }
+      })
+
+      db.prepare(`
+        UPDATE projects SET
+          url = ?,
+          html = ?,
+          pages_json = ?,
+          platform = ?,
+          updated_at = datetime('now'),
+          last_activity_at = datetime('now')
+        WHERE id = ? AND user_id = ?
+      `).run(
+        fetched.finalUrl,
+        fetched.html,
+        JSON.stringify(mergedPages),
+        fetched.platform,
+        projectId,
+        req.user.id
+      )
+
+      const updated = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, req.user.id)
+      logAudit({ userId: req.user.id, action: "project.scan_pages", targetType: "project", targetId: projectId, meta: { pageCount: mergedPages.length } })
+      res.json({ ok: true, project: mapProjectRow(updated, getProjectAssignees(projectId)) })
+    } catch (error) {
+      if (isValidationError(error)) return res.status(400).json({ ok: false, error: error.message })
+      res.status(500).json({ ok: false, error: error.message })
+    }
+  })
+
+  app.post("/api/projects/:id/pages/load", authMiddleware, async (req, res) => {
+    try {
+      const projectId = readId(req.params.id, "Projekt")
+      const pageId = readRequiredString(req.body?.pageId, "Page", { max: 200 })
+      const project = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, req.user.id)
+      if (!project) return res.status(404).json({ ok: false, error: "Projekt nicht gefunden" })
+
+      const pages = parseProjectPages(project.pages_json, project.url)
+      const index = pages.findIndex((page) => page.id === pageId)
+      if (index === -1) return res.status(404).json({ ok: false, error: "Page not found in project" })
+
+      const targetPage = pages[index]
+      const fetched = await fetchSitePage(targetPage.url)
+      const updatedPage = {
+        ...targetPage,
+        url: fetched.finalUrl,
+        path: normalizePagePath(fetched.finalUrl, project.url || fetched.finalUrl),
+        title: fetched.title || targetPage.title || targetPage.name,
+        name: targetPage.name || derivePageName(targetPage.path, fetched.title, ""),
+        html: fetched.html,
+        updatedAt: new Date().toISOString(),
+      }
+      const nextPages = [...pages]
+      nextPages[index] = updatedPage
+
+      db.prepare(`
+        UPDATE projects SET
+          html = ?,
+          pages_json = ?,
+          platform = ?,
+          updated_at = datetime('now'),
+          last_activity_at = datetime('now')
+        WHERE id = ? AND user_id = ?
+      `).run(
+        fetched.html,
+        JSON.stringify(nextPages),
+        fetched.platform,
+        projectId,
+        req.user.id
+      )
+
+      const updated = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, req.user.id)
+      res.json({ ok: true, project: mapProjectRow(updated, getProjectAssignees(projectId)), page: updatedPage })
+    } catch (error) {
+      if (isValidationError(error)) return res.status(400).json({ ok: false, error: error.message })
+      res.status(500).json({ ok: false, error: error.message })
+    }
   })
 }
