@@ -632,14 +632,28 @@ function preprocessTemplateSource(entryPath, text) {
   let output = String(text || "")
   if (!output) return output
   if ([".php", ".phtml", ".php5"].includes(ext)) {
-    output = output.replace(
-      /<\?(?:php|=)?[\s\S]*?(?:get_template_directory_uri|get_stylesheet_directory_uri|get_theme_file_uri)\s*\([^)]*\)?[\s\S]*?\?>/gi,
-      ".",
-    )
-    output = output.replace(
-      /<\?(?:php|=)?[\s\S]*?(?:home_url|site_url)\s*\(\s*['"]([^'"]+)['"]\s*\)[\s\S]*?\?>/gi,
-      "$1",
-    )
+    output = output.replace(/<\?(?:php|=)?([\s\S]*?)\?>/gi, (match, code = "") => {
+      const source = String(code || "")
+      const trimmed = cleanText(source)
+      if (!trimmed) return ""
+      const isThemeUriReference =
+        /\$theme_uri\b/i.test(source)
+        || /get_template_directory_uri\s*\(/i.test(source)
+        || /get_stylesheet_directory_uri\s*\(/i.test(source)
+        || /get_theme_file_uri\s*\(/i.test(source)
+      if (isThemeUriReference) {
+        if (/\$theme_uri\s*=|=\s*get_template_directory_uri\s*\(/i.test(source) && !/\becho\b|print\s*\(/i.test(source)) {
+          return ""
+        }
+        return "."
+      }
+      const urlMatch = source.match(/(?:home_url|site_url)\s*\(\s*['"]([^'"]+)['"]\s*\)/i)
+      if (urlMatch?.[1]) return urlMatch[1]
+      if (/\bwp_head\s*\(/i.test(source) || /\bwp_footer\s*\(/i.test(source) || /\bbody_class\s*\(/i.test(source)) {
+        return ""
+      }
+      return match
+    })
   }
   return output
 }
