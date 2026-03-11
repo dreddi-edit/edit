@@ -8,11 +8,18 @@ import ReferralInvite from "./ReferralInvite"
 import CommandPalette from "./CommandPalette"
 import KeyboardShortcuts from "./KeyboardShortcuts"
 import { apiLogout, type User } from "../api/auth"
-import type { CreditTransaction } from "../api/types"
+import type { CreditTransaction, Plan } from "../api/types"
 import { toast } from "./Toast"
-import { useTranslation } from "../i18n/useTranslation"
+import { useRuntimeTranslations, useTranslation } from "../i18n/useTranslation"
 import { errMsg } from "../utils/errMsg"
 import { getPlatformMeta, type SitePlatform } from "../utils/sitePlatform"
+import AssistantWidget from "./AssistantWidget"
+import {
+  PLAN_META,
+  getRequiredPlanForTool,
+  hasStudioAccess,
+  type StudioToolId,
+} from "../utils/planAccess"
 import "./project-dashboard-dark.css"
 
 const BASE = ""
@@ -20,31 +27,20 @@ const CHECKLIST_KEY = "pd_dashboard_checklist_v1"
 const NOTES_KEY = "pd_dashboard_notes_v1"
 
 type DashboardStage = "all" | "draft" | "review" | "approved" | "shipped"
-type Plan = "basis" | "starter" | "pro" | "scale"
 type WorkspaceView = "ai-studio" | "projects" | "templates" | "exports"
 type TemplateFilter = "all" | "wordpress" | "shopify" | "webflow" | "other"
 type ExportFilter = "all" | "wp-placeholder" | "html-clean" | "ready" | "guarded"
 type AIStudioFilter = "all" | "creation" | "optimization" | "growth" | "autonomy"
 type SpendRange = "1h" | "24h" | "7d" | "30d"
 type UsageMode = "model" | "task"
-type StudioTool =
-  | "company-box"
-  | "visual-product"
-  | "funnel-generator"
-  | "cro-agent"
-  | "self-healing"
-  | "global-expansion"
-  | "sales-closer"
-  | "brand-brain"
-  | "war-room"
-  | "personalization"
+type StudioTool = StudioToolId
 type Template = { id: number; name: string; url?: string; platform?: SitePlatform; thumbnail?: string; created_at: string }
 type ChecklistItem = { id: string; label: string; done: boolean }
 type NoteItem = { id: string; text: string; done: boolean }
 type SpendBreakdownItem = { label: string; amount: number; percent: number }
 type AssignableMember = ProjectAssignee
 type AIStudioService = {
-  id: string
+  id: StudioToolId
   badge: string
   name: string
   tagline: string
@@ -87,6 +83,12 @@ type StudioToolMeta = {
   extraFieldPresets?: string[]
 }
 
+function titleCaseFallback(value: string): string {
+  return String(value || "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase())
+}
+
 const DEFAULT_CHECKLIST: ChecklistItem[] = [
   { id: "create", label: "Create first project", done: false },
   { id: "load", label: "Load a URL", done: false },
@@ -97,16 +99,26 @@ const DEFAULT_CHECKLIST: ChecklistItem[] = [
 ]
 
 const MOCK_ACTIVITY = [
-  { dot: "green", text: "<strong>Eastside Coffee</strong> exported as ZIP", time: "12 min ago" },
-  { dot: "blue", text: "AI rewrite on <strong>Marktplatz</strong> hero section", time: "1h ago" },
-  { dot: "amber", text: "<strong>Nordlicht Reisen</strong> moved to approved", time: "3h ago" },
-  { dot: "", text: "<strong>Keramik Studio</strong> project created", time: "Yesterday" },
+  { dot: "green", template: "{name} exported as ZIP", name: "Eastside Coffee", time: "12 min ago" },
+  { dot: "blue", template: "AI rewrite on {name} hero section", name: "Marktplatz", time: "1h ago" },
+  { dot: "amber", template: "{name} moved to approved", name: "Nordlicht Reisen", time: "3h ago" },
+  { dot: "", template: "{name} project created", name: "Keramik Studio", time: "Yesterday" },
 ]
 
 const DEFAULT_NOTES: NoteItem[] = [
   { id: "follow-up", text: "Follow up on guarded exports", done: false },
   { id: "review-copy", text: "Review AI spend before next export", done: false },
 ]
+
+const DEFAULT_NOTE_TEXT_BY_ID = Object.fromEntries(DEFAULT_NOTES.map(item => [item.id, item.text]))
+
+function renderActivityText(
+  item: { template: string; name: string },
+  rt: (text: string) => string,
+) {
+  const translated = rt(item.template)
+  return translated.replace("{name}", `<strong>${item.name}</strong>`)
+}
 
 const AI_STUDIO_SERVICES: AIStudioService[] = [
   {
@@ -387,6 +399,214 @@ const STUDIO_TOOL_META: Record<StudioTool, StudioToolMeta> = {
     extraFieldPresets: ["Cold paid traffic, branded search, returning visitors", "New visitors, demo-ready leads, existing customers", "Mobile traffic, desktop researchers, retargeted visitors"],
   },
 }
+
+const DASHBOARD_RUNTIME_STRINGS = Array.from(
+  new Set(
+    [
+      ...DEFAULT_CHECKLIST.map(item => item.label),
+      ...AI_STUDIO_SERVICES.flatMap(service => [
+        service.tagline,
+        service.description,
+        service.actionLabel,
+        service.status,
+        titleCaseFallback(service.category),
+      ]),
+      ...Object.values(STUDIO_TOOL_META).flatMap(meta => [
+        meta.eyebrow,
+        meta.title,
+        meta.description,
+        meta.actionLabel,
+        meta.goalLabel,
+        meta.audienceLabel,
+        meta.notePlaceholder,
+        ...meta.outcomes,
+        ...meta.systems,
+        ...meta.goalPresets,
+        ...meta.audiencePresets,
+        meta.extraFieldLabel || "",
+        meta.extraFieldPlaceholder || "",
+        ...(meta.extraFieldPresets || []),
+      ]),
+      "Workspace",
+      "Create",
+      "AI models",
+      "Get started",
+      "Activity",
+      "AI Studio",
+      "Projects",
+      "Exports",
+      "Templates",
+      "New project",
+      "AI generator",
+      "SEO optimizer",
+      "SEO optimizer is currently in beta",
+      "Hosting",
+      "Hosting is currently in beta",
+      "beta",
+      "On",
+      "Off",
+      "All",
+      "Creation",
+      "Optimization",
+      "Growth",
+      "Autonomy",
+      "Draft",
+      "Review",
+      "Approved",
+      "Shipped",
+      "Other",
+      "Ready",
+      "Guarded",
+      "Filter...",
+      "Launch flagship",
+      "+ New project",
+      "+ Extract template",
+      "Spending",
+      "Usage",
+      "By model",
+      "By task",
+      "No AI spend yet in this range.",
+      "Notes",
+      "No notes yet.",
+      "Add a note...",
+      "No AI services match this view",
+      "No projects yet",
+      "No templates yet",
+      "No exports yet",
+      "Try another filter or clear the search to reveal the full AI Studio catalog.",
+      "Create a new project or use the AI generator to get started.",
+      "Extract a site into a reusable template to fill this workspace.",
+      "Export a project from the editor and it will show up here.",
+      "Show all",
+      "Open projects",
+      "Recent exports",
+      "Download",
+      "Download export for",
+      "Local export",
+      "items",
+      "Private",
+      "Exported",
+      "Choose the source",
+      "Pick an existing project or paste a live URL for the analysis run.",
+      "Manual URL",
+      "Selecting a project also pulls in its saved URL and client context.",
+      "Define the outcome",
+      "Tell the tool what “good” looks like so the output is specific instead of generic.",
+      "Add context",
+      "Use this to steer the output toward real constraints, hypotheses, or preferences.",
+      "Latest run",
+      "Performance",
+      "Accessibility",
+      "SEO",
+      "Best practices",
+      "Audit opportunities",
+      "What you’ll get",
+      "This run uses",
+      "Source snapshot",
+      "Selected project",
+      "Live URL",
+      "Project content",
+      "Run status",
+      "Close",
+      "Running...",
+      "Manual input",
+      "Not set",
+      "Available",
+      "Missing",
+      "Ready to run",
+      "Needs URL",
+      "Needs content",
+      "Cancel",
+      "Create",
+      "Creating...",
+      "Create project",
+      "Generate landing page",
+      "English",
+      "German",
+      "Generate",
+      "Generating...",
+      "Extract template",
+      "Templates",
+      "Project name",
+      "Website URL",
+      "Client name",
+      "Due date",
+      "Upload file",
+      "Upload HTML/SVG",
+      "Clear",
+      "Current local upload support: `.html`, `.htm`, `.svg`.",
+      "Assign team members",
+      "Loading team members...",
+      "No team members yet. Invite them in Settings first.",
+      "Product name",
+      "Target audience",
+      "Description",
+      "Language",
+      "Template name",
+      "Optional",
+      "Save template",
+      "Extracting...",
+      "Source project",
+      "A live URL is required because this workflow runs a real audit before generating the plan.",
+      "Optional if the selected project already has enough content for analysis.",
+      "Create first project",
+      "Load a URL",
+      "Try AI block rewrite",
+      "Export to ZIP",
+      "Invite a team member",
+      "Connect custom domain",
+      "{name} exported as ZIP",
+      "AI rewrite on {name} hero section",
+      "{name} moved to approved",
+      "{name} project created",
+      "12 min ago",
+      "1h ago",
+      "3h ago",
+      "Yesterday",
+      "Template",
+      "Client",
+      "Assigned",
+      "Last export",
+      "Updated",
+      "Saved",
+      "left",
+      ...DEFAULT_NOTES.map(item => item.text),
+      "A full website URL is required for this workflow.",
+      "Brand Brain needs either a project with content or a full website URL.",
+      "Upload currently supports .html, .htm, or .svg files.",
+      "Uploaded file is empty.",
+      "Loaded",
+      "Template saved",
+      "Template extraction failed",
+      "Project name for this template:",
+      "Delete template?",
+      "Project created from template",
+      "Export download failed",
+      "Product name required",
+      "Landing Page could not be generated",
+      "Landing Page created",
+      "URL required",
+      "Loading website and preparing editor-safe HTML...",
+      "Site Editor",
+      "Team members",
+      "Switch workspace",
+      "Studio",
+      "Credits remaining",
+      "Sign out",
+      "Settings",
+      "Invite",
+      "is visible and ready for wiring.",
+      "Plan generated",
+      "Project name required",
+      "Project created",
+      "Project deleted",
+      "owner",
+      "admin",
+      "member",
+      "pending",
+    ].filter(Boolean),
+  ),
+)
 
 function parseJsonCandidate(text: string) {
   const candidates = [text]
@@ -800,10 +1020,12 @@ function ProjectCard({
   project,
   onOpen,
   onDelete,
+  rt,
 }: {
   project: Project
   onOpen: () => void
   onDelete: () => void
+  rt: (text: string) => string
 }) {
   const platformMeta = getPlatformMeta(project.platform)
   const initials = project.name.slice(0, 2).toUpperCase()
@@ -856,12 +1078,14 @@ function ProjectCard({
         <div className="pd-card-name">{project.name}</div>
         <div className="pd-card-url">{(project.url || "local-project").replace(/^https?:\/\//, "")}</div>
         <div className="pd-card-tags">
-          <span className={`pd-tag ${workflowClass(project.workflowStage)}`}>{workflowLabel(project.workflowStage)}</span>
-          {project.clientName ? <span className="pd-tag">Client · {project.clientName}</span> : null}
-          {assigneeSummary ? <span className="pd-tag">Assigned · {assigneeSummary}</span> : null}
+          <span className={`pd-tag ${workflowClass(project.workflowStage)}`}>{rt(titleCaseFallback(workflowLabel(project.workflowStage)))}</span>
+          {project.clientName ? <span className="pd-tag">{rt("Client")} · {project.clientName}</span> : null}
+          {assigneeSummary ? <span className="pd-tag">{rt("Assigned")} · {assigneeSummary}</span> : null}
         </div>
         <div className="pd-card-date">
-          {project.lastExportAt ? `Last export · ${formatExportDate(project.lastExportAt)}` : `Updated ${formatUpdatedDate(project.updated_at)}`}
+          {project.lastExportAt
+            ? `${rt("Last export")} · ${formatExportDate(project.lastExportAt)}`
+            : `${rt("Updated")} ${formatUpdatedDate(project.updated_at)}`}
         </div>
       </div>
     </article>
@@ -872,10 +1096,12 @@ function TemplateCard({
   template,
   onUse,
   onDelete,
+  rt,
 }: {
   template: Template
   onUse: () => void
   onDelete: () => void
+  rt: (text: string) => string
 }) {
   const platformMeta = getPlatformMeta(template.platform)
   const initials = template.name.slice(0, 2).toUpperCase()
@@ -918,10 +1144,10 @@ function TemplateCard({
         <div className="pd-card-name">{template.name}</div>
         <div className="pd-card-url">{(template.url || "saved-template").replace(/^https?:\/\//, "")}</div>
         <div className="pd-card-tags">
-          <span className="pd-tag">Template</span>
+          <span className="pd-tag">{rt("Template")}</span>
           <span className="pd-tag">{platformMeta.shortLabel}</span>
         </div>
-        <div className="pd-card-date">Saved {formatUpdatedDate(template.created_at)}</div>
+        <div className="pd-card-date">{rt("Saved")} {formatUpdatedDate(template.created_at)}</div>
       </div>
     </article>
   )
@@ -931,10 +1157,12 @@ function ExportCard({
   project,
   downloading,
   onDownload,
+  rt,
 }: {
   project: Project
   downloading: boolean
   onDownload: () => void
+  rt: (text: string) => string
 }) {
   const platformMeta = getPlatformMeta(project.platform)
   const modeLabel = exportModeLabel(project.lastExportMode)
@@ -948,7 +1176,7 @@ function ExportCard({
       onKeyDown={event => event.key === "Enter" && onDownload()}
       tabIndex={0}
       role="button"
-      aria-label={`Download export for ${project.name}`}
+      aria-label={`${rt("Download export for")} ${project.name}`}
     >
       <div
         className="pd-card-thumb"
@@ -969,7 +1197,7 @@ function ExportCard({
             event.stopPropagation()
             onDownload()
           }}
-          aria-label={`Download export for ${project.name}`}
+          aria-label={`${rt("Download export for")} ${project.name}`}
         >
           {downloading ? "..." : "D"}
         </button>
@@ -977,13 +1205,13 @@ function ExportCard({
       </div>
       <div className="pd-card-body">
         <div className="pd-card-name">{project.name}</div>
-        <div className="pd-card-url">{(project.url || "local-export").replace(/^https?:\/\//, "")}</div>
+        <div className="pd-card-url">{project.url ? project.url.replace(/^https?:\/\//, "") : rt("Local export")}</div>
         <div className="pd-card-tags">
           <span className="pd-tag">{modeLabel}</span>
-          <span className={`pd-tag ${readiness}`}>{readiness}</span>
+          <span className={`pd-tag ${readiness}`}>{rt(titleCaseFallback(readiness))}</span>
         </div>
         <div className="pd-card-date">
-          Exported {project.lastExportAt ? formatExportDate(project.lastExportAt) : formatUpdatedDate(project.updated_at)}
+          {rt("Exported")} {project.lastExportAt ? formatExportDate(project.lastExportAt) : formatUpdatedDate(project.updated_at)}
         </div>
       </div>
     </article>
@@ -993,14 +1221,20 @@ function ExportCard({
 function AIStudioCard({
   service,
   onOpen,
+  rt,
+  locked,
+  requiredPlan,
 }: {
   service: AIStudioService
   onOpen: () => void
+  rt: (text: string) => string
+  locked: boolean
+  requiredPlan?: Plan
 }) {
   return (
     <button
       type="button"
-      className="pd-ai-card"
+      className={`pd-ai-card ${locked ? "is-locked" : ""}`}
       onClick={onOpen}
       style={
         {
@@ -1011,21 +1245,26 @@ function AIStudioCard({
     >
       <div className="pd-ai-card-top">
         <div className="pd-ai-card-mark">{service.badge}</div>
-        <div className="pd-ai-card-status">{service.status}</div>
+        <div className="pd-ai-card-status">
+          {locked && requiredPlan ? `${rt("Unlocks on")} ${PLAN_META[requiredPlan].label}` : rt(service.status)}
+        </div>
       </div>
       <div className="pd-ai-card-title">{service.name}</div>
-      <div className="pd-ai-card-tagline">{service.tagline}</div>
-      <div className="pd-ai-card-copy">{service.description}</div>
+      <div className="pd-ai-card-tagline">{rt(service.tagline)}</div>
+      <div className="pd-ai-card-copy">{rt(service.description)}</div>
       <div className="pd-ai-card-bottom">
-        <span className="pd-ai-card-category">{service.category}</span>
-        <span className="pd-ai-card-action">{service.actionLabel}</span>
+        <span className="pd-ai-card-category">{rt(titleCaseFallback(service.category))}</span>
+        <span className="pd-ai-card-action">
+          {locked && requiredPlan ? `${rt("Upgrade")} ->` : rt(service.actionLabel)}
+        </span>
       </div>
     </button>
   )
 }
 
 export default function ProjectDashboard({ user, onOpen, onLogout }: { user: User; onOpen: (p: Project) => void; onLogout: () => void }) {
-  const { t } = useTranslation()
+  const { t, lang } = useTranslation()
+  const rt = useRuntimeTranslations(lang, DASHBOARD_RUNTIME_STRINGS, t)
   const exportSectionRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
@@ -1169,14 +1408,9 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
     return () => window.removeEventListener("keydown", handler)
   }, [])
 
-  const planMeta: Record<Plan, { label: string; price: string; projects: string }> = {
-    basis: { label: "Basic", price: "EUR9/mo", projects: "3 projects" },
-    starter: { label: "Starter", price: "EUR29/mo", projects: "10 projects" },
-    pro: { label: "Pro", price: "EUR79/mo", projects: "30 projects" },
-    scale: { label: "Scale", price: "EUR149/mo", projects: "100 projects" },
-  }
-
-  const currentPlanMeta = planMeta[plan]
+  const currentPlanMeta = PLAN_META[plan]
+  const unlockedStudioServices = AI_STUDIO_SERVICES.filter(service => hasStudioAccess(plan, service.id))
+  const featuredStudioService = unlockedStudioServices[0] || AI_STUDIO_SERVICES[0]
   const normalizedProjects = projects
   const selectedStudioProject =
     typeof studioProjectId === "number" ? normalizedProjects.find(project => project.id === studioProjectId) : undefined
@@ -1269,12 +1503,12 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
       : filteredExports.length
   const workspaceTitle =
     activeWorkspace === "ai-studio"
-      ? "AI Studio"
+      ? rt("AI Studio")
       : activeWorkspace === "projects"
-      ? "Projects"
+      ? rt("Projects")
       : activeWorkspace === "templates"
-      ? "Templates"
-      : "Exports"
+      ? rt("Templates")
+      : rt("Exports")
   const workspaceSummaryValue =
     activeWorkspace === "ai-studio"
       ? AI_STUDIO_SERVICES.length
@@ -1300,34 +1534,34 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
   const workspacePipeline =
     activeWorkspace === "ai-studio"
       ? ([
-          ["all", "All", aiStudioCounts.all, "var(--pd-text-3)", () => setAIStudioFilter("all")],
-          ["creation", "Creation", aiStudioCounts.creation, "var(--pd-blue)", () => setAIStudioFilter("creation")],
-          ["optimization", "Optimization", aiStudioCounts.optimization, "var(--pd-amber)", () => setAIStudioFilter("optimization")],
-          ["growth", "Growth", aiStudioCounts.growth, "var(--pd-green)", () => setAIStudioFilter("growth")],
-          ["autonomy", "Autonomy", aiStudioCounts.autonomy, "#c084fc", () => setAIStudioFilter("autonomy")],
+          ["all", rt("All"), aiStudioCounts.all, "var(--pd-text-3)", () => setAIStudioFilter("all")],
+          ["creation", rt("Creation"), aiStudioCounts.creation, "var(--pd-blue)", () => setAIStudioFilter("creation")],
+          ["optimization", rt("Optimization"), aiStudioCounts.optimization, "var(--pd-amber)", () => setAIStudioFilter("optimization")],
+          ["growth", rt("Growth"), aiStudioCounts.growth, "var(--pd-green)", () => setAIStudioFilter("growth")],
+          ["autonomy", rt("Autonomy"), aiStudioCounts.autonomy, "#c084fc", () => setAIStudioFilter("autonomy")],
         ] as const)
       : activeWorkspace === "projects"
       ? ([
-          ["all", "All", counts.all, "var(--pd-text-3)", () => setStageFilter("all")],
-          ["draft", "Draft", counts.draft, "var(--pd-text-3)", () => setStageFilter("draft")],
-          ["review", "Review", counts.review, "var(--pd-amber)", () => setStageFilter("review")],
-          ["approved", "Approved", counts.approved, "var(--pd-blue)", () => setStageFilter("approved")],
-          ["shipped", "Shipped", counts.shipped, "var(--pd-green)", () => setStageFilter("shipped")],
+          ["all", rt("All"), counts.all, "var(--pd-text-3)", () => setStageFilter("all")],
+          ["draft", rt("Draft"), counts.draft, "var(--pd-text-3)", () => setStageFilter("draft")],
+          ["review", rt("Review"), counts.review, "var(--pd-amber)", () => setStageFilter("review")],
+          ["approved", rt("Approved"), counts.approved, "var(--pd-blue)", () => setStageFilter("approved")],
+          ["shipped", rt("Shipped"), counts.shipped, "var(--pd-green)", () => setStageFilter("shipped")],
         ] as const)
       : activeWorkspace === "templates"
       ? ([
-          ["all", "All", templateCounts.all, "var(--pd-text-3)", () => setTemplateFilter("all")],
+          ["all", rt("All"), templateCounts.all, "var(--pd-text-3)", () => setTemplateFilter("all")],
           ["wordpress", "WordPress", templateCounts.wordpress, "var(--pd-blue)", () => setTemplateFilter("wordpress")],
           ["shopify", "Shopify", templateCounts.shopify, "var(--pd-green)", () => setTemplateFilter("shopify")],
           ["webflow", "Webflow", templateCounts.webflow, "var(--pd-amber)", () => setTemplateFilter("webflow")],
-          ["other", "Other", templateCounts.other, "var(--pd-text-2)", () => setTemplateFilter("other")],
+          ["other", rt("Other"), templateCounts.other, "var(--pd-text-2)", () => setTemplateFilter("other")],
         ] as const)
       : ([
-          ["all", "All", exportCounts.all, "var(--pd-text-3)", () => setExportFilter("all")],
+          ["all", rt("All"), exportCounts.all, "var(--pd-text-3)", () => setExportFilter("all")],
           ["wp-placeholder", "WP", exportCounts["wp-placeholder"], "var(--pd-blue)", () => setExportFilter("wp-placeholder")],
           ["html-clean", "HTML", exportCounts["html-clean"], "var(--pd-green)", () => setExportFilter("html-clean")],
-          ["ready", "Ready", exportCounts.ready, "var(--pd-green)", () => setExportFilter("ready")],
-          ["guarded", "Guarded", exportCounts.guarded, "var(--pd-amber)", () => setExportFilter("guarded")],
+          ["ready", rt("Ready"), exportCounts.ready, "var(--pd-green)", () => setExportFilter("ready")],
+          ["guarded", rt("Guarded"), exportCounts.guarded, "var(--pd-amber)", () => setExportFilter("guarded")],
         ] as const)
 
   const isPipelineFilterActive = (value: string) => {
@@ -1366,6 +1600,13 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
   }
 
   const openStudioTool = (tool: StudioTool) => {
+    if (!hasStudioAccess(plan, tool)) {
+      const requiredPlan = getRequiredPlanForTool(tool)
+      const toolName = AI_STUDIO_SERVICES.find(service => service.id === tool)?.name || titleCaseFallback(tool)
+      setShowCredits(true)
+      toast.info(`${toolName} ${rt("unlocks on")} ${PLAN_META[requiredPlan].label}.`)
+      return
+    }
     const suggestedProject = normalizedProjects.find(project => project.url) ?? normalizedProjects[0]
     setActiveStudioTool(tool)
     setStudioProjectId(suggestedProject?.id ?? "")
@@ -1419,11 +1660,11 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
     const projectText = selectedStudioProjectText.slice(0, 5000)
     const needsUrl = activeStudioTool !== "brand-brain"
     if (needsUrl && !/^https?:\/\//i.test(resolvedUrl)) {
-      toast.warning("A full website URL is required for this workflow.")
+      toast.warning(rt("A full website URL is required for this workflow."))
       return
     }
     if (activeStudioTool === "brand-brain" && !projectText && !/^https?:\/\//i.test(resolvedUrl)) {
-      toast.warning("Brand Brain needs either a project with content or a full website URL.")
+      toast.warning(rt("Brand Brain needs either a project with content or a full website URL."))
       return
     }
 
@@ -1630,18 +1871,18 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
     if (!file) return
     const extension = file.name.split(".").pop()?.toLowerCase() || ""
     if (!["html", "htm", "svg"].includes(extension)) {
-      toast.warning("Upload currently supports .html, .htm, or .svg files.")
+      toast.warning(rt("Upload currently supports .html, .htm, or .svg files."))
       return
     }
 
     try {
       const text = await file.text()
-      if (!text.trim()) throw new Error("Uploaded file is empty.")
+      if (!text.trim()) throw new Error(rt("Uploaded file is empty."))
       const html = wrapLocalMarkup(file.name, text)
       setNewUploadHtml(html)
       setNewUploadName(file.name)
       if (!newName.trim()) setNewName(fileNameWithoutExtension(file.name))
-      toast.success(`Loaded ${file.name}`)
+      toast.success(`${rt("Loaded")} ${file.name}`)
     } catch (error) {
       toast.error(errMsg(error))
     }
@@ -1710,7 +1951,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
 
   const createProject = async () => {
     if (!newName.trim()) {
-      toast.warning(t("Project name required"))
+      toast.warning(rt("Project name required"))
       return
     }
     setCreatingProject(true)
@@ -1727,7 +1968,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
       if (newUrl.trim()) updateChecklist("load", true)
       setProjects(prev => [project, ...prev.filter(candidate => candidate.id !== project.id)])
       resetNewProjectForm()
-      toast.success(t("Project created"))
+      toast.success(rt("Project created"))
       await loadDashboard()
     } catch (error) {
       toast.error(errMsg(error))
@@ -1741,7 +1982,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
     try {
       await apiDeleteProject(id)
       setProjects(prev => prev.filter(project => project.id !== id))
-      toast.success(t("Project deleted"))
+      toast.success(rt("Project deleted"))
     } catch (error) {
       toast.error(errMsg(error))
     }
@@ -1749,7 +1990,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
 
   const generateLandingPage = async () => {
     if (!landingName.trim()) {
-      toast.warning(t("Product name required"))
+      toast.warning(rt("Product name required"))
       return
     }
     setLandingGenerating(true)
@@ -1772,7 +2013,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
       })
 
       if (!data?.ok || !data.html) {
-        throw new Error(data?.error || t("Landing Page could not be generated"))
+        throw new Error(data?.error || rt("Landing Page could not be generated"))
       }
 
       const createdProject = await apiCreateProject(
@@ -1788,7 +2029,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
       setLandingDesc("")
       setLandingAudience("")
       setLandingLang("english")
-      toast.success(t("Landing Page created"))
+      toast.success(rt("Landing Page created"))
       await loadDashboard()
       handleOpenProject(createdProject)
     } catch (error) {
@@ -1800,11 +2041,11 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
 
   const extractTemplate = async () => {
     if (!templateUrl.trim()) {
-      toast.warning(t("URL required"))
+      toast.warning(rt("URL required"))
       return
     }
     setTemplateExtracting(true)
-    setTemplateExtractFeedback("Loading website and preparing editor-safe HTML...")
+    setTemplateExtractFeedback(rt("Loading website and preparing editor-safe HTML..."))
     try {
       let fallbackName = templateUrl.trim()
       try {
@@ -1823,9 +2064,9 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
         }),
       })
       if (!response.ok || !response.template) {
-        throw new Error(response.error || "Template extraction failed")
+        throw new Error(response.error || rt("Template extraction failed"))
       }
-      toast.success("Template saved")
+      toast.success(rt("Template saved"))
       setShowTemplateExtract(false)
       setTemplateUrl("")
       setTemplateName("")
@@ -1839,7 +2080,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
   }
 
   const applyTemplate = async (templateId: number) => {
-    const projectName = window.prompt("Project name for this template:")
+    const projectName = window.prompt(rt("Project name for this template:"))
     if (!projectName) return
     setApplyingTemplateId(templateId)
     try {
@@ -1849,7 +2090,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
         body: JSON.stringify({ template_id: templateId, name: projectName }),
       })
       if (!response?.ok) throw new Error(response?.error || "Template apply failed")
-      toast.success("Project created from template")
+      toast.success(rt("Project created from template"))
       await loadDashboard()
       setActiveWorkspace("projects")
     } catch (error) {
@@ -1860,7 +2101,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
   }
 
   const deleteTemplate = async (id: number) => {
-    if (!window.confirm("Delete template?")) return
+    if (!window.confirm(rt("Delete template?"))) return
     try {
       await fetch(`/api/templates/${id}`, { method: "DELETE", credentials: "include" })
       await loadTemplates()
@@ -1904,7 +2145,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
 
       if (!response.ok) {
         const text = await response.text()
-        let message = "Export download failed"
+        let message = rt("Export download failed")
         try {
           const data = JSON.parse(text)
           if (data?.error) message = data.error
@@ -1937,22 +2178,13 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
   }
 
   const openAIStudioService = (service: AIStudioService) => {
-    if (
-      service.id === "company-box" ||
-      service.id === "visual-product" ||
-      service.id === "funnel-generator" ||
-      service.id === "cro-agent" ||
-      service.id === "self-healing" ||
-      service.id === "global-expansion" ||
-      service.id === "sales-closer" ||
-      service.id === "brand-brain" ||
-      service.id === "war-room" ||
-      service.id === "personalization"
-    ) {
-      openStudioTool(service.id)
+    if (!hasStudioAccess(plan, service.id)) {
+      const requiredPlan = getRequiredPlanForTool(service.id)
+      setShowCredits(true)
+      toast.info(`${service.name} ${rt("unlocks on")} ${PLAN_META[requiredPlan].label}.`)
       return
     }
-    toast.info(`${service.name} is visible and ready for wiring.`)
+    openStudioTool(service.id)
   }
 
   const logout = async () => {
@@ -1984,13 +2216,13 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
               <rect x="6.5" y="6.5" width="4.5" height="4.5" rx="1" fill="#efefed" opacity="0.2" />
             </svg>
           </div>
-          Site Editor
+          {rt("Site Editor")}
         </div>
 
         <div className="pd-header-spacer" />
 
         <div className="pd-header-right">
-          <div className="pd-team-stack" title="Team members">
+          <div className="pd-team-stack" title={rt("Team members")}>
             <div className="pd-team-avatar" style={{ background: "#1a2332" }}>EB</div>
             <div className="pd-team-avatar" style={{ background: "#2a1a20" }}>LK</div>
             <div className="pd-team-avatar" style={{ background: "#1a2a1a" }}>MR</div>
@@ -1998,12 +2230,12 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
           </div>
           <div className="pd-divider" />
 
-          <div className="pd-studio-split" title="Switch workspace">
+          <div className="pd-studio-split" title={rt("Switch workspace")}>
             <button className="pd-studio-half" type="button">
               <span className="pd-studio-dot" />
-              Studio
+              {rt("Studio")}
             </button>
-            <button className="pd-studio-half" type="button">Privat</button>
+            <button className="pd-studio-half" type="button">{rt("Private")}</button>
           </div>
 
           <div className="pd-divider" />
@@ -2013,15 +2245,15 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
             {currentPlanMeta.label}
           </div>
 
-          <button className="pd-btn" type="button" onClick={() => setShowCredits(true)} title="Credits remaining">
+          <button className="pd-btn" type="button" onClick={() => setShowCredits(true)} title={rt("Credits remaining")}>
             <span className="pd-btn-icon">+</span>
             <span className="pd-btn-strong">EUR{balance === null ? "..." : balance.toFixed(2)}</span>
-            <span className="pd-btn-muted">left</span>
+            <span className="pd-btn-muted">{rt("left")}</span>
           </button>
 
           <div className="pd-divider" />
 
-          <button className="pd-btn" type="button" onClick={() => setShowSettings(true)}>{t("Settings")}</button>
+          <button className="pd-btn" type="button" onClick={() => setShowSettings(true)}>{rt("Settings")}</button>
           <button
             className="pd-btn"
             type="button"
@@ -2030,9 +2262,9 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
               setShowInvite(true)
             }}
           >
-            {t("Invite")}
+            {rt("Invite")}
           </button>
-          <button className="pd-btn" type="button" onClick={logout} title="Sign out">
+          <button className="pd-btn" type="button" onClick={logout} title={rt("Sign out")}>
             {(user.email || "account").replace(/(.{12}).+/, "$1...")} v
           </button>
         </div>
@@ -2040,7 +2272,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
 
       <div className="pd-body">
         <aside className="pd-sidebar">
-          <div className="pd-sidebar-section">Workspace</div>
+          <div className="pd-sidebar-section">{rt("Workspace")}</div>
           <div className="pd-scroll-box">
             <button
               className={`pd-sidebar-item ${activeWorkspace === "ai-studio" ? "is-active" : ""}`}
@@ -2048,7 +2280,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
               onClick={() => setActiveWorkspace("ai-studio")}
             >
               <span className="pd-sidebar-icon">AI</span>
-              AI Studio
+              {rt("AI Studio")}
               <span className="pd-sidebar-pill">{AI_STUDIO_SERVICES.length}</span>
             </button>
             <button
@@ -2057,7 +2289,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
               onClick={() => setActiveWorkspace("projects")}
             >
               <span className="pd-sidebar-icon">[]</span>
-              Projects
+              {rt("Projects")}
               <span className="pd-sidebar-pill">{projects.length}</span>
             </button>
             <button
@@ -2066,7 +2298,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
               onClick={() => setActiveWorkspace("templates")}
             >
               <span className="pd-sidebar-icon">[]</span>
-              Templates
+              {rt("Templates")}
               <span className="pd-sidebar-pill">{templates.length}</span>
             </button>
             <button
@@ -2075,45 +2307,45 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
               onClick={openExports}
             >
               <span className="pd-sidebar-icon">D</span>
-              Exports
+              {rt("Exports")}
               <span className="pd-sidebar-pill">{exportedProjects.length}</span>
             </button>
           </div>
 
           <div className="pd-sidebar-divider" />
 
-          <div className="pd-sidebar-section">Create</div>
+          <div className="pd-sidebar-section">{rt("Create")}</div>
           <div className="pd-scroll-box">
             <button className="pd-sidebar-item" type="button" onClick={() => setShowNewProject(true)}>
               <span className="pd-sidebar-icon">+</span>
-              New project
+              {rt("New project")}
             </button>
             <button className="pd-sidebar-item" type="button" onClick={() => setShowLandingGenerator(true)}>
               <span className="pd-sidebar-icon">*</span>
-              AI generator
+              {rt("AI generator")}
             </button>
-            <button className="pd-sidebar-item" type="button" onClick={() => toast.warning("SEO optimizer is currently in beta")}>
+            <button className="pd-sidebar-item" type="button" onClick={() => toast.warning(rt("SEO optimizer is currently in beta"))}>
               <span className="pd-sidebar-icon">SEO</span>
-              SEO optimizer
-              <span className="pd-sidebar-pill">beta</span>
+              {rt("SEO optimizer")}
+              <span className="pd-sidebar-pill">{rt("beta")}</span>
             </button>
-            <button className="pd-sidebar-item" type="button" onClick={() => toast.warning("Hosting is currently in beta")}>
+            <button className="pd-sidebar-item" type="button" onClick={() => toast.warning(rt("Hosting is currently in beta"))}>
               <span className="pd-sidebar-icon">C</span>
-              Hosting
-              <span className="pd-sidebar-pill">beta</span>
+              {rt("Hosting")}
+              <span className="pd-sidebar-pill">{rt("beta")}</span>
             </button>
           </div>
 
           <div className="pd-sidebar-divider" />
 
-          <div className="pd-sidebar-section">AI models</div>
+          <div className="pd-sidebar-section">{rt("AI models")}</div>
           <div className="pd-scroll-box">
             {aiModelRows.map(model => (
               <div key={model.name} className="pd-ai-row">
                 <span className="pd-ai-name">{model.name}</span>
                 <span className={`pd-ai-status ${model.on ? "is-on" : "is-off"}`}>
                   <span className={`pd-dot ${model.on ? "is-on" : "is-off"}`} />
-                  {model.on ? "On" : "Off"}
+                  {model.on ? rt("On") : rt("Off")}
                 </span>
               </div>
             ))}
@@ -2121,7 +2353,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
 
           <div className="pd-sidebar-divider" />
 
-          <div className="pd-sidebar-section">Get started</div>
+          <div className="pd-sidebar-section">{rt("Get started")}</div>
           <div className="pd-scroll-box pd-scroll-box-tall">
             {checklist.map(item => (
               <button
@@ -2131,22 +2363,22 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                 onClick={() => updateChecklist(item.id, !item.done)}
               >
                 <div className={`pd-checklist-box ${item.done ? "is-done" : ""}`}>{item.done ? "v" : ""}</div>
-                <span className={`pd-checklist-text ${item.done ? "is-done" : ""}`}>{item.label}</span>
+                <span className={`pd-checklist-text ${item.done ? "is-done" : ""}`}>{rt(item.label)}</span>
               </button>
             ))}
           </div>
 
           <div className="pd-sidebar-divider" />
 
-          <div className="pd-sidebar-section">Activity</div>
+          <div className="pd-sidebar-section">{rt("Activity")}</div>
           <div className="pd-scroll-box pd-scroll-box-tall">
             {MOCK_ACTIVITY.map((item, index) => (
               <div key={`${item.time}-${index}`} className="pd-feed-item">
                 <div className={`pd-feed-dot ${item.dot || ""}`} />
                 {index < MOCK_ACTIVITY.length - 1 ? <div className="pd-feed-line" /> : null}
                 <div className="pd-feed-body">
-                  <div className="pd-feed-text" dangerouslySetInnerHTML={{ __html: item.text }} />
-                  <div className="pd-feed-time">{item.time}</div>
+                  <div className="pd-feed-text" dangerouslySetInnerHTML={{ __html: renderActivityText(item, rt) }} />
+                  <div className="pd-feed-time">{rt(item.time)}</div>
                 </div>
               </div>
             ))}
@@ -2156,7 +2388,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
             <div className="pd-sidebar-divider" />
             <button className="pd-sidebar-item" type="button" onClick={logout}>
               <span className="pd-sidebar-icon">&lt;-</span>
-              {t("Sign out")}
+              {rt("Sign out")}
             </button>
           </div>
         </aside>
@@ -2179,11 +2411,11 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
 
           <div className="pd-toolbar">
             <span className="pd-toolbar-title">{workspaceTitle}</span>
-            <span className="pd-toolbar-count">{activeItemsCount} items</span>
+            <span className="pd-toolbar-count">{activeItemsCount} {rt("items")}</span>
             <div className="pd-toolbar-spacer" />
             <input
               className="pd-filter-input"
-              placeholder="Filter..."
+              placeholder={rt("Filter...")}
               value={projectSearch}
               onChange={event => setProjectSearch(event.target.value)}
             />
@@ -2191,21 +2423,21 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
               <button
                 className="pd-btn pd-btn-primary"
                 type="button"
-                onClick={() => openAIStudioService(AI_STUDIO_SERVICES[0])}
+                onClick={() => openAIStudioService(featuredStudioService)}
               >
-                Launch flagship
+                {rt("Launch included tool")}
               </button>
             ) : activeWorkspace === "projects" ? (
               <button className="pd-btn pd-btn-primary" type="button" onClick={() => setShowNewProject(true)}>
-                + New project
+                {rt("+ New project")}
               </button>
             ) : activeWorkspace === "templates" ? (
               <button className="pd-btn pd-btn-primary" type="button" onClick={() => setShowTemplateExtract(true)}>
-                + Extract template
+                {rt("+ Extract template")}
               </button>
             ) : (
               <button className="pd-btn pd-btn-primary" type="button" onClick={() => setActiveWorkspace("projects")}>
-                Projects
+                {rt("Projects")}
               </button>
             )}
           </div>
@@ -2228,7 +2460,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
             </section>
 
             <section className="pd-stat">
-              <span className="pd-stat-label">Spending</span>
+              <span className="pd-stat-label">{rt("Spending")}</span>
               <span className="pd-stat-value">EUR{totalSpend.toFixed(2)}</span>
               <div className="pd-spend-tabs">
                 {(["1h", "24h", "7d", "30d"] as SpendRange[]).map(range => (
@@ -2254,21 +2486,21 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
             </section>
 
             <section className="pd-stat">
-              <span className="pd-stat-label">Usage</span>
+              <span className="pd-stat-label">{rt("Usage")}</span>
               <div className="pd-usage-toggle-row">
                 <button
                   className={`pd-usage-toggle ${usageMode === "model" ? "is-active" : ""}`}
                   type="button"
                   onClick={() => setUsageMode("model")}
                 >
-                  By model
+                  {rt("By model")}
                 </button>
                 <button
                   className={`pd-usage-toggle ${usageMode === "task" ? "is-active" : ""}`}
                   type="button"
                   onClick={() => setUsageMode("task")}
                 >
-                  By task
+                  {rt("By task")}
                 </button>
               </div>
               <div className="pd-usage-list">
@@ -2286,13 +2518,13 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                     </div>
                   ))
                 ) : (
-                  <div className="pd-usage-empty">No AI spend yet in this range.</div>
+                  <div className="pd-usage-empty">{rt("No AI spend yet in this range.")}</div>
                 )}
               </div>
             </section>
 
             <section className="pd-stat pd-stat-notes">
-              <span className="pd-stat-label">Notes</span>
+              <span className="pd-stat-label">{rt("Notes")}</span>
               <div className="pd-notes-list">
                 {notes.length > 0 ? (
                   notes.map(note => (
@@ -2300,14 +2532,16 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                       <button className={`pd-note-check ${note.done ? "is-done" : ""}`} type="button" onClick={() => toggleNote(note.id)}>
                         {note.done ? "v" : ""}
                       </button>
-                      <span className={`pd-note-text ${note.done ? "is-done" : ""}`}>{note.text}</span>
+                      <span className={`pd-note-text ${note.done ? "is-done" : ""}`}>
+                        {DEFAULT_NOTE_TEXT_BY_ID[note.id] ? rt(DEFAULT_NOTE_TEXT_BY_ID[note.id]) : note.text}
+                      </span>
                       <button className="pd-note-delete" type="button" onClick={() => deleteNote(note.id)}>
                         X
                       </button>
                     </div>
                   ))
                 ) : (
-                  <div className="pd-usage-empty">No notes yet.</div>
+                  <div className="pd-usage-empty">{rt("No notes yet.")}</div>
                 )}
               </div>
               <div className="pd-note-input-row">
@@ -2321,7 +2555,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                       addNote()
                     }
                   }}
-                  placeholder="Add a note..."
+                  placeholder={rt("Add a note...")}
                 />
                 <button className="pd-note-add" type="button" onClick={addNote}>
                   +
@@ -2340,7 +2574,14 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
             ) : activeWorkspace === "ai-studio" && filteredAIStudioServices.length > 0 ? (
               <div className="pd-projects-grid">
                 {filteredAIStudioServices.map(service => (
-                  <AIStudioCard key={service.id} service={service} onOpen={() => openAIStudioService(service)} />
+                  <AIStudioCard
+                    key={service.id}
+                    service={service}
+                    rt={rt}
+                    locked={!hasStudioAccess(plan, service.id)}
+                    requiredPlan={hasStudioAccess(plan, service.id) ? undefined : getRequiredPlanForTool(service.id)}
+                    onOpen={() => openAIStudioService(service)}
+                  />
                 ))}
               </div>
             ) : activeWorkspace === "projects" && filteredProjects.length > 0 ? (
@@ -2349,6 +2590,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                   <ProjectCard
                     key={project.id}
                     project={project}
+                    rt={rt}
                     onOpen={() => handleOpenProject(project)}
                     onDelete={() => deleteProject(project.id, project.name)}
                   />
@@ -2360,6 +2602,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                   <TemplateCard
                     key={template.id}
                     template={template}
+                    rt={rt}
                     onUse={() => applyTemplate(template.id)}
                     onDelete={() => deleteTemplate(template.id)}
                   />
@@ -2371,6 +2614,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                   <ExportCard
                     key={project.id}
                     project={project}
+                    rt={rt}
                     downloading={downloadingExportId === project.id}
                     onDownload={() => downloadExport(project)}
                   />
@@ -2379,16 +2623,22 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
             ) : (
               <div className="pd-empty-state">
                 <div className="pd-empty-title">
-                  {activeWorkspace === "ai-studio" ? "No AI services match this view" : `No ${workspaceTitle.toLowerCase()} yet`}
+                  {activeWorkspace === "ai-studio"
+                    ? rt("No AI services match this view")
+                    : activeWorkspace === "projects"
+                    ? rt("No projects yet")
+                    : activeWorkspace === "templates"
+                    ? rt("No templates yet")
+                    : rt("No exports yet")}
                 </div>
                 <div className="pd-empty-copy">
                   {activeWorkspace === "ai-studio"
-                    ? "Try another filter or clear the search to reveal the full AI Studio catalog."
+                    ? rt("Try another filter or clear the search to reveal the full AI Studio catalog.")
                     : activeWorkspace === "projects"
-                    ? "Create a new project or use the AI generator to get started."
+                    ? rt("Create a new project or use the AI generator to get started.")
                     : activeWorkspace === "templates"
-                    ? "Extract a site into a reusable template to fill this workspace."
-                    : "Export a project from the editor and it will show up here."}
+                    ? rt("Extract a site into a reusable template to fill this workspace.")
+                    : rt("Export a project from the editor and it will show up here.")}
                 </div>
                 <div className="pd-empty-actions">
                   {activeWorkspace === "ai-studio" ? (
@@ -2401,28 +2651,28 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                           setProjectSearch("")
                         }}
                       >
-                        Show all
+                        {rt("Show all")}
                       </button>
-                      <button className="pd-btn" type="button" onClick={() => openAIStudioService(AI_STUDIO_SERVICES[0])}>
-                        Launch flagship
+                      <button className="pd-btn" type="button" onClick={() => openAIStudioService(featuredStudioService)}>
+                        {rt("Launch included tool")}
                       </button>
                     </>
                   ) : activeWorkspace === "projects" ? (
                     <>
                       <button className="pd-btn pd-btn-primary" type="button" onClick={() => setShowNewProject(true)}>
-                        + New project
+                        {rt("+ New project")}
                       </button>
                       <button className="pd-btn" type="button" onClick={() => setShowLandingGenerator(true)}>
-                        AI generator
+                        {rt("AI generator")}
                       </button>
                     </>
                   ) : activeWorkspace === "templates" ? (
                     <button className="pd-btn pd-btn-primary" type="button" onClick={() => setShowTemplateExtract(true)}>
-                      + Extract template
+                      {rt("+ Extract template")}
                     </button>
                   ) : (
                     <button className="pd-btn pd-btn-primary" type="button" onClick={() => setActiveWorkspace("projects")}>
-                      Open projects
+                      {rt("Open projects")}
                     </button>
                   )}
                 </div>
@@ -2439,7 +2689,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                   type="button"
                   onClick={() => setExportSectionOpen(open => !open)}
                 >
-                  Recent exports
+                  {rt("Recent exports")}
                   <span className="pd-export-arrow">v</span>
                 </button>
                 <div className="pd-export-table">
@@ -2457,12 +2707,12 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                           type="button"
                           onClick={() => downloadExport(project)}
                         >
-                          {downloadingExportId === project.id ? "..." : "D Download"}
+                          {downloadingExportId === project.id ? "..." : `D ${rt("Download")}`}
                         </button>
                       </div>
                     ))
                   ) : (
-                    <div className="pd-export-empty">No exports yet.</div>
+                    <div className="pd-export-empty">{rt("No exports yet")}</div>
                   )}
                 </div>
               </div>
@@ -2492,32 +2742,44 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
       {showSettings ? <SettingsPanel onClose={() => setShowSettings(false)} onThemeChange={value => setTheme(value as "dark" | "light")} /> : null}
       {showInvite ? <ReferralInvite theme={theme} userEmail={user.email} onClose={() => setShowInvite(false)} /> : null}
 
+      <AssistantWidget
+        plan={plan}
+        context={{
+          surface: "dashboard",
+          plan,
+          workspace: workspaceTitle,
+          projectName: selectedStudioProject?.name,
+          projectUrl: effectiveStudioUrl,
+          platform: selectedStudioProject?.platform || "",
+        }}
+      />
+
       {activeStudioTool && studioToolMeta ? (
         <div className="pd-modal-backdrop" onClick={resetStudioTool}>
           <div className="pd-modal pd-modal-wide" onClick={event => event.stopPropagation()}>
             <div className="pd-modal-header">
               <div>
-                <div className="pd-modal-eyebrow">{studioToolMeta.eyebrow}</div>
-                <div className="pd-modal-title">{studioToolMeta.title}</div>
+                <div className="pd-modal-eyebrow">{rt(studioToolMeta.eyebrow)}</div>
+                <div className="pd-modal-title">{rt(studioToolMeta.title)}</div>
               </div>
               <button className="pd-modal-close" type="button" onClick={resetStudioTool}>X</button>
             </div>
             <div className="pd-modal-body">
               <div className="pd-studio-layout">
                 <div className="pd-studio-main">
-                  <div className="pd-helper-copy pd-studio-intro">{studioToolMeta.description}</div>
+                  <div className="pd-helper-copy pd-studio-intro">{rt(studioToolMeta.description)}</div>
 
                   <section className="pd-studio-block">
                     <div className="pd-studio-block-head">
                       <span className="pd-studio-step">01</span>
                       <div>
-                        <div className="pd-studio-block-title">Choose the source</div>
-                        <div className="pd-studio-block-copy">Pick an existing project or paste a live URL for the analysis run.</div>
+                        <div className="pd-studio-block-title">{rt("Choose the source")}</div>
+                        <div className="pd-studio-block-copy">{rt("Pick an existing project or paste a live URL for the analysis run.")}</div>
                       </div>
                     </div>
                     <div className="pd-field-grid">
                       <label className="pd-field-label">
-                        Source project
+                        {rt("Source project")}
                         <select
                           className="pd-field-select"
                           value={studioProjectId === "" ? "" : String(studioProjectId)}
@@ -2533,17 +2795,17 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                             if (nextProject?.clientName) setStudioAudience(nextProject.clientName)
                           }}
                         >
-                          <option value="">Manual URL</option>
+                          <option value="">{rt("Manual URL")}</option>
                           {normalizedProjects.map(project => (
                             <option key={project.id} value={project.id}>
                               {project.name}
                             </option>
                           ))}
                         </select>
-                        <span className="pd-field-hint">Selecting a project also pulls in its saved URL and client context.</span>
+                        <span className="pd-field-hint">{rt("Selecting a project also pulls in its saved URL and client context.")}</span>
                       </label>
                       <label className="pd-field-label">
-                        Website URL
+                        {rt("Website URL")}
                         <input
                           className="pd-field-input"
                           value={studioUrl}
@@ -2552,8 +2814,8 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                         />
                         <span className="pd-field-hint">
                           {studioNeedsLiveUrl
-                            ? "A live URL is required because this workflow runs a real audit before generating the plan."
-                            : "Optional if the selected project already has enough content for analysis."}
+                            ? rt("A live URL is required because this workflow runs a real audit before generating the plan.")
+                            : rt("Optional if the selected project already has enough content for analysis.")}
                         </span>
                       </label>
                     </div>
@@ -2563,47 +2825,47 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                     <div className="pd-studio-block-head">
                       <span className="pd-studio-step">02</span>
                       <div>
-                        <div className="pd-studio-block-title">Define the outcome</div>
-                        <div className="pd-studio-block-copy">Tell the tool what “good” looks like so the output is specific instead of generic.</div>
+                        <div className="pd-studio-block-title">{rt("Define the outcome")}</div>
+                        <div className="pd-studio-block-copy">{rt("Tell the tool what “good” looks like so the output is specific instead of generic.")}</div>
                       </div>
                     </div>
                     <div className="pd-field-grid">
                       <label className="pd-field-label">
-                        {studioToolMeta.goalLabel}
+                        {rt(studioToolMeta.goalLabel)}
                         <input className="pd-field-input" value={studioGoal} onChange={event => setStudioGoal(event.target.value)} />
                         <div className="pd-studio-chip-row">
                           {studioToolMeta.goalPresets.map(preset => (
                             <button key={preset} className="pd-studio-chip" type="button" onClick={() => setStudioGoal(preset)}>
-                              {preset}
+                              {rt(preset)}
                             </button>
                           ))}
                         </div>
                       </label>
                       <label className="pd-field-label">
-                        {studioToolMeta.audienceLabel}
+                        {rt(studioToolMeta.audienceLabel)}
                         <input className="pd-field-input" value={studioAudience} onChange={event => setStudioAudience(event.target.value)} />
                         <div className="pd-studio-chip-row">
                           {studioToolMeta.audiencePresets.map(preset => (
                             <button key={preset} className="pd-studio-chip" type="button" onClick={() => setStudioAudience(preset)}>
-                              {preset}
+                              {rt(preset)}
                             </button>
                           ))}
                         </div>
                       </label>
                       {studioToolMeta.extraFieldLabel ? (
                         <label className="pd-field-label pd-field-label-full">
-                          {studioToolMeta.extraFieldLabel}
+                          {rt(studioToolMeta.extraFieldLabel)}
                           <input
                             className="pd-field-input"
                             value={studioMarkets}
                             onChange={event => setStudioMarkets(event.target.value)}
-                            placeholder={studioToolMeta.extraFieldPlaceholder}
+                            placeholder={studioToolMeta.extraFieldPlaceholder ? rt(studioToolMeta.extraFieldPlaceholder) : undefined}
                           />
                           {studioToolMeta.extraFieldPresets?.length ? (
                             <div className="pd-studio-chip-row">
                               {studioToolMeta.extraFieldPresets.map(preset => (
                                 <button key={preset} className="pd-studio-chip" type="button" onClick={() => setStudioMarkets(preset)}>
-                                  {preset}
+                                  {rt(preset)}
                                 </button>
                               ))}
                             </div>
@@ -2617,17 +2879,17 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                     <div className="pd-studio-block-head">
                       <span className="pd-studio-step">03</span>
                       <div>
-                        <div className="pd-studio-block-title">Add context</div>
-                        <div className="pd-studio-block-copy">Use this to steer the output toward real constraints, hypotheses, or preferences.</div>
+                        <div className="pd-studio-block-title">{rt("Add context")}</div>
+                        <div className="pd-studio-block-copy">{rt("Use this to steer the output toward real constraints, hypotheses, or preferences.")}</div>
                       </div>
                     </div>
                     <label className="pd-field-label pd-field-label-full">
-                      Notes
+                      {rt("Notes")}
                       <textarea
                         className="pd-field-textarea"
                         value={studioNotes}
                         onChange={event => setStudioNotes(event.target.value)}
-                        placeholder={studioToolMeta.notePlaceholder}
+                        placeholder={rt(studioToolMeta.notePlaceholder)}
                       />
                     </label>
                   </section>
@@ -2636,8 +2898,10 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                     <div className="pd-studio-result">
                       <div className="pd-studio-head">
                         <div>
-                          <div className="pd-studio-kicker">Latest run</div>
-                          <div className="pd-studio-title">{studioResult.headline}</div>
+                          <div className="pd-studio-kicker">{rt("Latest run")}</div>
+                          <div className="pd-studio-title">
+                            {studioResult.headline === "Plan generated" ? rt("Plan generated") : studioResult.headline}
+                          </div>
                         </div>
                         <div className="pd-studio-pill">
                           {studioResult.audit?.url?.replace(/^https?:\/\//, "") || selectedStudioProject?.name || studioToolMeta.title}
@@ -2648,19 +2912,19 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                       {studioResult.audit ? (
                         <div className="pd-studio-score-grid">
                           <div className="pd-studio-score-card">
-                            <span className="pd-studio-score-label">Performance</span>
+                            <span className="pd-studio-score-label">{rt("Performance")}</span>
                             <strong>{studioResult.audit.scores.performance}</strong>
                           </div>
                           <div className="pd-studio-score-card">
-                            <span className="pd-studio-score-label">Accessibility</span>
+                            <span className="pd-studio-score-label">{rt("Accessibility")}</span>
                             <strong>{studioResult.audit.scores.accessibility}</strong>
                           </div>
                           <div className="pd-studio-score-card">
-                            <span className="pd-studio-score-label">SEO</span>
+                            <span className="pd-studio-score-label">{rt("SEO")}</span>
                             <strong>{studioResult.audit.scores.seo}</strong>
                           </div>
                           <div className="pd-studio-score-card">
-                            <span className="pd-studio-score-label">Best practices</span>
+                            <span className="pd-studio-score-label">{rt("Best practices")}</span>
                             <strong>{studioResult.audit.scores.bestPractices}</strong>
                           </div>
                         </div>
@@ -2701,7 +2965,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
 
                       {studioResult.audit?.opportunities?.length ? (
                         <section className="pd-studio-section">
-                          <div className="pd-studio-section-title">Audit opportunities</div>
+                          <div className="pd-studio-section-title">{rt("Audit opportunities")}</div>
                           <div className="pd-studio-bullet-list">
                             {studioResult.audit.opportunities.map(opportunity => (
                               <div key={opportunity.id} className="pd-studio-bullet-item">
@@ -2720,49 +2984,49 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
 
                 <aside className="pd-studio-guide">
                   <section className="pd-studio-guide-card">
-                    <div className="pd-studio-guide-title">What you’ll get</div>
+                    <div className="pd-studio-guide-title">{rt("What you’ll get")}</div>
                     <div className="pd-studio-guide-list">
                       {studioToolMeta.outcomes.map(item => (
                         <div key={item} className="pd-studio-guide-item">
                           <span className="pd-studio-guide-dot" />
-                          <span>{item}</span>
+                          <span>{rt(item)}</span>
                         </div>
                       ))}
                     </div>
                   </section>
 
                   <section className="pd-studio-guide-card">
-                    <div className="pd-studio-guide-title">This run uses</div>
+                    <div className="pd-studio-guide-title">{rt("This run uses")}</div>
                     <div className="pd-studio-chip-row pd-studio-chip-row-guide">
                       {studioToolMeta.systems.map(item => (
                         <span key={item} className="pd-studio-chip pd-studio-chip-passive">
-                          {item}
+                          {rt(item)}
                         </span>
                       ))}
                     </div>
                   </section>
 
                   <section className="pd-studio-guide-card">
-                    <div className="pd-studio-guide-title">Source snapshot</div>
+                    <div className="pd-studio-guide-title">{rt("Source snapshot")}</div>
                     <div className="pd-studio-source-grid">
                       <div className="pd-studio-source-card">
-                        <span className="pd-studio-source-label">Selected project</span>
-                        <strong className="pd-studio-source-value">{selectedStudioProject?.name || "Manual input"}</strong>
+                        <span className="pd-studio-source-label">{rt("Selected project")}</span>
+                        <strong className="pd-studio-source-value">{selectedStudioProject?.name || rt("Manual input")}</strong>
                       </div>
                       <div className="pd-studio-source-card">
-                        <span className="pd-studio-source-label">Live URL</span>
+                        <span className="pd-studio-source-label">{rt("Live URL")}</span>
                         <strong className="pd-studio-source-value">
-                          {effectiveStudioUrl ? effectiveStudioUrl.replace(/^https?:\/\//, "") : "Not set"}
+                          {effectiveStudioUrl ? effectiveStudioUrl.replace(/^https?:\/\//, "") : rt("Not set")}
                         </strong>
                       </div>
                       <div className="pd-studio-source-card">
-                        <span className="pd-studio-source-label">Project content</span>
-                        <strong className="pd-studio-source-value">{selectedStudioProjectText ? "Available" : "Missing"}</strong>
+                        <span className="pd-studio-source-label">{rt("Project content")}</span>
+                        <strong className="pd-studio-source-value">{selectedStudioProjectText ? rt("Available") : rt("Missing")}</strong>
                       </div>
                       <div className="pd-studio-source-card">
-                        <span className="pd-studio-source-label">Run status</span>
+                        <span className="pd-studio-source-label">{rt("Run status")}</span>
                         <strong className={`pd-studio-source-value ${studioSourceReady ? "is-ready" : "is-warn"}`}>
-                          {studioSourceReady ? "Ready to run" : studioNeedsLiveUrl ? "Needs URL" : "Needs content"}
+                          {studioSourceReady ? rt("Ready to run") : studioNeedsLiveUrl ? rt("Needs URL") : rt("Needs content")}
                         </strong>
                       </div>
                     </div>
@@ -2771,9 +3035,9 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
               </div>
             </div>
             <div className="pd-modal-actions">
-              <button className="pd-btn" type="button" onClick={resetStudioTool}>Close</button>
+              <button className="pd-btn" type="button" onClick={resetStudioTool}>{rt("Close")}</button>
               <button className="pd-btn pd-btn-primary" type="button" onClick={runStudioTool} disabled={studioRunning}>
-                {studioRunning ? "Running..." : studioToolMeta.actionLabel}
+                {studioRunning ? rt("Running...") : rt(studioToolMeta.actionLabel)}
               </button>
             </div>
           </div>
@@ -2785,8 +3049,8 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
           <div className="pd-modal" onClick={event => event.stopPropagation()}>
             <div className="pd-modal-header">
               <div>
-                <div className="pd-modal-eyebrow">Create</div>
-                <div className="pd-modal-title">New project</div>
+                <div className="pd-modal-eyebrow">{rt("Create")}</div>
+                <div className="pd-modal-title">{rt("New project")}</div>
               </div>
               <button className="pd-modal-close" type="button" onClick={resetNewProjectForm}>X</button>
             </div>
@@ -2800,26 +3064,26 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
               />
               <div className="pd-field-grid">
                 <label className="pd-field-label">
-                  Project name
+                  {rt("Project name")}
                   <input className="pd-field-input" value={newName} onChange={event => setNewName(event.target.value)} />
                 </label>
                 <label className="pd-field-label">
-                  Website URL
+                  {rt("Website URL")}
                   <input className="pd-field-input" value={newUrl} onChange={event => setNewUrl(event.target.value)} placeholder="https://..." />
                 </label>
                 <label className="pd-field-label">
-                  Client name
+                  {rt("Client name")}
                   <input className="pd-field-input" value={newClientName} onChange={event => setNewClientName(event.target.value)} />
                 </label>
                 <label className="pd-field-label">
-                  Due date
+                  {rt("Due date")}
                   <input className="pd-field-input" value={newDueAt} onChange={event => setNewDueAt(event.target.value)} type="date" />
                 </label>
                 <div className="pd-field-label pd-field-label-full">
-                  Upload file
+                  {rt("Upload file")}
                   <div className="pd-upload-row">
                     <button className="pd-btn" type="button" onClick={() => fileInputRef.current?.click()}>
-                      Upload HTML/SVG
+                      {rt("Upload HTML/SVG")}
                     </button>
                     {newUploadName ? <span className="pd-upload-name">{newUploadName}</span> : null}
                     {newUploadName ? (
@@ -2832,22 +3096,27 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                           if (fileInputRef.current) fileInputRef.current.value = ""
                         }}
                       >
-                        Clear
+                        {rt("Clear")}
                       </button>
                     ) : null}
                   </div>
-                  <span className="pd-field-hint">Current local upload support: `.html`, `.htm`, `.svg`.</span>
+                  <span className="pd-field-hint">{rt("Current local upload support: `.html`, `.htm`, `.svg`.")}</span>
                 </div>
                 <div className="pd-field-label pd-field-label-full">
-                  Assign team members
+                  {rt("Assign team members")}
                   {loadingAssignableMembers ? (
-                    <div className="pd-field-hint">Loading team members...</div>
+                    <div className="pd-field-hint">{rt("Loading team members...")}</div>
                   ) : assignableMembers.length ? (
                     <div className="pd-assignee-list">
                       {assignableMembers.map(member => {
                         const selected = newAssigneeEmails.includes(member.email)
                         const label = displayMemberName(member)
-                        const meta = [member.role, member.status === "pending" ? "pending" : ""].filter(Boolean).join(" · ")
+                        const meta = [
+                          member.role ? rt(String(member.role).toLowerCase()) : "",
+                          member.status === "pending" ? rt("pending") : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")
                         return (
                           <button
                             key={member.email}
@@ -2865,15 +3134,15 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                       })}
                     </div>
                   ) : (
-                    <span className="pd-field-hint">No team members yet. Invite them in Settings first.</span>
+                    <span className="pd-field-hint">{rt("No team members yet. Invite them in Settings first.")}</span>
                   )}
                 </div>
               </div>
             </div>
             <div className="pd-modal-actions">
-              <button className="pd-btn" type="button" onClick={resetNewProjectForm}>Cancel</button>
+              <button className="pd-btn" type="button" onClick={resetNewProjectForm}>{rt("Cancel")}</button>
               <button className="pd-btn pd-btn-primary" type="button" onClick={createProject} disabled={creatingProject}>
-                {creatingProject ? "Creating..." : "Create project"}
+                {creatingProject ? rt("Creating...") : rt("Create project")}
               </button>
             </div>
           </div>
@@ -2885,38 +3154,38 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
           <div className="pd-modal" onClick={event => event.stopPropagation()}>
             <div className="pd-modal-header">
               <div>
-                <div className="pd-modal-eyebrow">AI generator</div>
-                <div className="pd-modal-title">Generate landing page</div>
+                <div className="pd-modal-eyebrow">{rt("AI generator")}</div>
+                <div className="pd-modal-title">{rt("Generate landing page")}</div>
               </div>
               <button className="pd-modal-close" type="button" onClick={() => setShowLandingGenerator(false)}>X</button>
             </div>
             <div className="pd-modal-body">
               <div className="pd-field-grid">
                 <label className="pd-field-label">
-                  Product name
+                  {rt("Product name")}
                   <input className="pd-field-input" value={landingName} onChange={event => setLandingName(event.target.value)} />
                 </label>
                 <label className="pd-field-label">
-                  Target audience
+                  {rt("Target audience")}
                   <input className="pd-field-input" value={landingAudience} onChange={event => setLandingAudience(event.target.value)} />
                 </label>
                 <label className="pd-field-label pd-field-label-full">
-                  Description
+                  {rt("Description")}
                   <textarea className="pd-field-textarea" value={landingDesc} onChange={event => setLandingDesc(event.target.value)} />
                 </label>
                 <label className="pd-field-label">
-                  Language
+                  {rt("Language")}
                   <select className="pd-field-select" value={landingLang} onChange={event => setLandingLang(event.target.value as "english" | "german")}>
-                    <option value="english">English</option>
-                    <option value="german">German</option>
+                    <option value="english">{rt("English")}</option>
+                    <option value="german">{rt("German")}</option>
                   </select>
                 </label>
               </div>
             </div>
             <div className="pd-modal-actions">
-              <button className="pd-btn" type="button" onClick={() => setShowLandingGenerator(false)}>Cancel</button>
+              <button className="pd-btn" type="button" onClick={() => setShowLandingGenerator(false)}>{rt("Cancel")}</button>
               <button className="pd-btn pd-btn-primary" type="button" onClick={generateLandingPage} disabled={landingGenerating}>
-                {landingGenerating ? "Generating..." : "Generate"}
+                {landingGenerating ? rt("Generating...") : rt("Generate")}
               </button>
             </div>
           </div>
@@ -2928,28 +3197,28 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
           <div className="pd-modal" onClick={event => event.stopPropagation()}>
             <div className="pd-modal-header">
               <div>
-                <div className="pd-modal-eyebrow">Templates</div>
-                <div className="pd-modal-title">Extract template</div>
+                <div className="pd-modal-eyebrow">{rt("Templates")}</div>
+                <div className="pd-modal-title">{rt("Extract template")}</div>
               </div>
               <button className="pd-modal-close" type="button" onClick={() => setShowTemplateExtract(false)}>X</button>
             </div>
             <div className="pd-modal-body">
               <div className="pd-field-grid">
                 <label className="pd-field-label">
-                  Website URL
+                  {rt("Website URL")}
                   <input className="pd-field-input" value={templateUrl} onChange={event => setTemplateUrl(event.target.value)} placeholder="https://..." />
                 </label>
                 <label className="pd-field-label">
-                  Template name
-                  <input className="pd-field-input" value={templateName} onChange={event => setTemplateName(event.target.value)} placeholder="Optional" />
+                  {rt("Template name")}
+                  <input className="pd-field-input" value={templateName} onChange={event => setTemplateName(event.target.value)} placeholder={rt("Optional")} />
                 </label>
               </div>
               {templateExtractFeedback ? <div className="pd-helper-copy">{templateExtractFeedback}</div> : null}
             </div>
             <div className="pd-modal-actions">
-              <button className="pd-btn" type="button" onClick={() => setShowTemplateExtract(false)}>Cancel</button>
+              <button className="pd-btn" type="button" onClick={() => setShowTemplateExtract(false)}>{rt("Cancel")}</button>
               <button className="pd-btn pd-btn-primary" type="button" onClick={extractTemplate} disabled={templateExtracting}>
-                {templateExtracting ? "Extracting..." : "Save template"}
+                {templateExtracting ? rt("Extracting...") : rt("Save template")}
               </button>
             </div>
           </div>

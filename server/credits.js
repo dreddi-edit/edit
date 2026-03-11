@@ -7,6 +7,8 @@ const COSTS_EUR = {
   "claude-haiku-4-5-20251001":   { input: 0.3,  output: 1.5  },
   "gemini-2.5-flash":   { input: 0.09, output: 0.36 },
   "gemini-2.5-pro":     { input: 1.44, output: 4.32 },
+  "groq:llama-3.1-8b-instant": { input: 0.12, output: 0.24 },
+  "groq:llama-3.3-70b-versatile": { input: 0.9, output: 1.8 },
   "ollama:qwen2.5-coder:7b": { input: 0, output: 0 },
 }
 

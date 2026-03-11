@@ -15,6 +15,7 @@ import {
 import AuthScreen from "./components/AuthScreen"
 import ResetPasswordScreen from "./components/ResetPasswordScreen"
 import ProjectDashboard from "./components/ProjectDashboard"
+import AssistantWidget from "./components/AssistantWidget"
 import { toast, ToastContainer } from "./components/Toast"
 import { useRef, useState, useEffect, type CSSProperties } from 'react';
 import BlockOverlay from "./components/BlockOverlay";
@@ -925,6 +926,10 @@ const autoSave = async (html: string) => {
   const selectedTranslationLanguage =
     TOP_TRANSLATION_LANGUAGES.find((language) => language.code === translationTargetLanguage) ||
     TOP_TRANSLATION_LANGUAGES[0]
+  const selectedStructureItem =
+    structureItems.find((item) => item.rootId === selectedRootId) ||
+    structureItems.find((item) => item.isSelected) ||
+    null
   const editorShellStyle: CSSProperties = {
     height: "100vh",
     ["--editor-topbar-height" as string]: "58px",
@@ -1699,6 +1704,21 @@ useEffect(() => {
           onHtmlChange={commitLiveEditorHtml}
         />
       </div>
+      <AssistantWidget
+        plan={demoPlan}
+        context={{
+          surface: "editor",
+          plan: demoPlan,
+          workspace: "Editor",
+          projectName: currentProject?.name || "",
+          projectUrl: loadedUrl || currentProject?.url || "",
+          platform: currentPlatform,
+          exportMode,
+          selectedBlock: selectedStructureItem?.displayLabel || null,
+          warnings: exportWarnings.map((warning) => shortenText(warning.message, 72)),
+        }}
+        onUsage={trackUsage}
+      />
       <ToastContainer />
     </div>
   );

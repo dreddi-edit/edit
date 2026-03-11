@@ -18,6 +18,7 @@ import { registerProjectRoutes } from "./projects.js"
 import { createRateLimit } from "./rateLimit.js"
 import { registerSeoRoutes } from "./seo.js"
 import { registerTemplateRoutes } from "./templates.js"
+import { registerAssistantRoutes } from "./assistant.js"
 import {
   isValidationError,
   readEmail,
@@ -40,6 +41,7 @@ import {
   prepareWordPressBlockFiles,
   prepareWebComponentFile,
   prepareEmailHtml,
+  preparePlainTextEmail,
   prepareMarkdownFile,
   preparePdfFile,
   getExportSlug,
@@ -279,11 +281,13 @@ async function appendExportBundle(archive, exportMode, artifact, linkedProject) 
   archive.append(artifact.notes, { name: "DELIVERY_NOTES.md" })
 
   switch (exportMode) {
-    case "wp-theme":
+    case "wp-theme": {
+      const slug = getExportSlug(linkedProject)
       for (const file of prepareWordPressThemeFiles({ html: artifact.html, project: linkedProject })) {
-        archive.append(file.content, { name: file.name })
+        archive.append(file.content, { name: `${slug}/${file.name}` })
       }
       return
+    }
     case "wp-block": {
       const slug = getExportSlug(linkedProject)
       for (const file of prepareWordPressBlockFiles({ html: artifact.html, project: linkedProject })) {
@@ -292,13 +296,18 @@ async function appendExportBundle(archive, exportMode, artifact, linkedProject) 
       return
     }
     case "web-component": {
-      const { jsFile, readmeFile } = prepareWebComponentFile({ html: artifact.html })
+      const { jsFile, demoFile, readmeFile } = prepareWebComponentFile({ html: artifact.html, project: linkedProject })
       archive.append(jsFile.content, { name: jsFile.name })
+      archive.append(demoFile.content, { name: demoFile.name })
       archive.append(readmeFile.content, { name: readmeFile.name })
       return
     }
     case "email-newsletter":
       archive.append(await prepareEmailHtml(artifact.html), { name: "index.html" })
+      {
+        const plainText = preparePlainTextEmail({ html: artifact.html, project: linkedProject })
+        archive.append(plainText.content, { name: plainText.name })
+      }
       return
     case "markdown-content": {
       const markdownFile = prepareMarkdownFile({ html: artifact.html, project: linkedProject })
@@ -943,6 +952,7 @@ registerAuthRoutes(app)
 registerProjectRoutes(app)
 registerSeoRoutes(app)
 registerTemplateRoutes(app)
+registerAssistantRoutes(app, { aiRateLimit })
 registerCreditRoutes(app)
 registerSettingsRoutes(app)
 registerOrgRoutes(app)

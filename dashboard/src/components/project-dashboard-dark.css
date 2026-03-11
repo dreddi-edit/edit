@@ -130,6 +130,14 @@ body[data-theme="light"] .pd-ai-card:hover {
   box-shadow: 0 22px 42px rgba(15, 23, 42, 0.1);
 }
 
+body[data-theme="light"] .pd-ai-card.is-locked {
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--pd-ai-accent) 6%, transparent), transparent 44%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(244, 246, 248, 0.98)),
+    var(--pd-ai-surface);
+  border-color: rgba(15, 23, 42, 0.08);
+}
+
 body[data-theme="light"] .pd-ai-card-mark {
   border-color: color-mix(in srgb, var(--pd-ai-accent) 22%, rgba(15, 23, 42, 0.1));
   background: color-mix(in srgb, var(--pd-ai-accent) 10%, rgba(255, 255, 255, 0.96));
@@ -1314,6 +1322,19 @@ body[data-theme="light"] .pd-studio-result {
   box-shadow: 0 16px 38px rgba(0, 0, 0, 0.34);
 }
 
+.pd-ai-card.is-locked {
+  background:
+    radial-gradient(circle at top right, color-mix(in srgb, var(--pd-ai-accent) 8%, transparent), transparent 42%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0)),
+    linear-gradient(180deg, rgba(8, 11, 18, 0.94), rgba(8, 11, 18, 0.98));
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+.pd-ai-card.is-locked:hover {
+  border-color: color-mix(in srgb, var(--pd-ai-accent) 24%, rgba(255, 255, 255, 0.12));
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.28);
+}
+
 .pd-ai-card:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--pd-ai-accent) 58%, white);
   outline-offset: 2px;
@@ -1387,6 +1408,10 @@ body[data-theme="light"] .pd-studio-result {
   line-height: 1.55;
   color: var(--pd-text-2);
   flex: 1;
+}
+
+.pd-ai-card.is-locked .pd-ai-card-copy {
+  color: color-mix(in srgb, var(--pd-text-2) 82%, rgba(255, 255, 255, 0.5));
 }
 
 .pd-ai-card-category {
