@@ -3,6 +3,7 @@ import { toast } from "./Toast"
 import { errMsg } from "../utils/errMsg"
 import { getRequireApproval, getApprovalThreshold, setRequireApproval, setApprovalThreshold } from "../approval-settings"
 import { AVAILABLE_UI_LANGUAGES, useTranslation, type Language } from "../i18n/useTranslation"
+import { MODEL_CATEGORIES, getCategoryModels, type ModelCategoryId } from "../utils/modelCatalog"
 import {
   analyzeEntities,
   analyzeImage,
@@ -58,21 +59,16 @@ const TABS: Array<{ id: TabId; label: string }> = [
   { id: "google", label: "Google AI Suite" },
 ]
 
-const ALL_MODELS = [
-  { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6", provider: "anthropic" },
-  { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5", provider: "anthropic" },
-  { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash", provider: "gemini" },
-  { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro", provider: "gemini" },
-  { value: "groq:llama-3.3-70b-versatile", label: "Groq Llama 3.3 70B", provider: "groq" },
-  { value: "ollama:qwen2.5-coder:7b", label: "Ollama (lokal)", provider: "ollama" },
-]
-
 const PROVIDER_COLORS: Record<string, string> = {
   anthropic: "rgba(200,120,60,0.85)",
   gemini: "rgba(66,133,244,0.85)",
   groq: "rgba(139,92,246,0.85)",
   openai: "rgba(16,163,127,0.85)",
   ollama: "rgba(148,163,184,0.82)",
+  google: "rgba(66,133,244,0.85)",
+  vertex: "rgba(129,140,248,0.85)",
+  "google cloud": "rgba(96,165,250,0.85)",
+  openrouter: "rgba(236,72,153,0.85)",
 }
 
 function formatThreshold(value: number) {
@@ -130,6 +126,14 @@ export default function SettingsPanel({
   const [saving, setSaving] = useState(false)
   const [languageChoice, setLanguageChoice] = useState<Language>(lang)
   const [languageSaving, setLanguageSaving] = useState(false)
+  const [modelBrowserOpen, setModelBrowserOpen] = useState(true)
+  const [expandedModelCategories, setExpandedModelCategories] = useState<Record<ModelCategoryId, boolean>>({
+    chat: true,
+    image: false,
+    video: false,
+    code: false,
+    extras: false,
+  })
 
   const [myKeys, setMyKeys] = useState<ApiKey[]>([])
   const [detectInput, setDetectInput] = useState("")
@@ -235,6 +239,10 @@ export default function SettingsPanel({
       ? effectiveSettings.disabled_models.filter(entry => entry !== model)
       : [...effectiveSettings.disabled_models, model]
     void saveSettings({ disabled_models: disabledModels })
+  }
+
+  const toggleModelCategory = (category: ModelCategoryId) => {
+    setExpandedModelCategories(previous => ({ ...previous, [category]: !previous[category] }))
   }
 
   const handleThresholdChange = (value: string) => {
@@ -630,17 +638,82 @@ export default function SettingsPanel({
                     />
                   }
                 />
-                {ALL_MODELS.map(model => {
-                  const enabled = !effectiveSettings.disabled_models.includes(model.value)
-                  return (
-                    <SettingRow
-                      key={model.value}
-                      title={model.label}
-                      subtitle={model.provider}
-                      control={<Toggle checked={enabled} label={model.label} onChange={() => toggleModel(model.value)} />}
-                    />
-                  )
-                })}
+
+                <div className="draft-settings-model-browser">
+                  <button
+                    type="button"
+                    className={`draft-settings-model-browser-toggle ${modelBrowserOpen ? "is-open" : ""}`}
+                    onClick={() => setModelBrowserOpen(open => !open)}
+                  >
+                    <span>
+                      <strong>{t("Browse model categories")}</strong>
+                      <span className="draft-settings-model-browser-sub">
+                        {t("Open one category, then drill into the top 15 models for that capability.")}
+                      </span>
+                    </span>
+                    <span className="draft-settings-model-browser-arrow">{modelBrowserOpen ? "−" : "+"}</span>
+                  </button>
+
+                  {modelBrowserOpen ? (
+                    <div className="draft-settings-model-browser-body">
+                      {MODEL_CATEGORIES.map(category => {
+                        const categoryModels = getCategoryModels(category.id)
+                        const activeCount = categoryModels.filter(
+                          model => !effectiveSettings.disabled_models.includes(model.id)
+                        ).length
+
+                        return (
+                          <div key={category.id} className="draft-settings-model-category">
+                            <button
+                              type="button"
+                              className={`draft-settings-model-category-toggle ${expandedModelCategories[category.id] ? "is-open" : ""}`}
+                              onClick={() => toggleModelCategory(category.id)}
+                            >
+                              <span className="draft-settings-model-category-main">
+                                <span className="draft-settings-model-category-title">{t(category.label)}</span>
+                                <span className="draft-settings-model-category-sub">{t(category.description)}</span>
+                              </span>
+                              <span className="draft-settings-model-category-meta">
+                                {activeCount}/{categoryModels.length}
+                              </span>
+                            </button>
+
+                            {expandedModelCategories[category.id] ? (
+                              <div className="draft-settings-model-category-body">
+                                {categoryModels.map(model => {
+                                  const enabled = !effectiveSettings.disabled_models.includes(model.id)
+                                  const providerKey = model.provider.toLowerCase()
+                                  const accent = PROVIDER_COLORS[providerKey] || "rgba(148,163,184,0.82)"
+
+                                  return (
+                                    <div key={model.id} className="draft-settings-model-option">
+                                      <div className="draft-settings-model-option-copy">
+                                        <div className="draft-settings-model-option-title">{model.label}</div>
+                                        <div className="draft-settings-model-option-meta">
+                                          <span
+                                            className="draft-settings-pill"
+                                            style={{
+                                              background: `${accent}20`,
+                                              color: accent,
+                                              borderColor: `${accent}3d`,
+                                            }}
+                                          >
+                                            {model.provider}
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <Toggle checked={enabled} label={model.label} onChange={() => toggleModel(model.id)} />
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            ) : null}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  ) : null}
+                </div>
               </Section>
 
               <Section label={t("SEO Analysis")}>

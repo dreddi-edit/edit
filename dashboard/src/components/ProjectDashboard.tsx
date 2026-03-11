@@ -29,12 +29,14 @@ import {
   hasStudioAccess,
   type StudioToolId,
 } from "../utils/planAccess"
+import { getTopActiveModelsByCategory } from "../utils/modelCatalog"
 import { filesToImportEntries, summarizeImportPreview } from "../utils/projectImport"
 import "./project-dashboard-dark.css"
 
 const BASE = ""
 const CHECKLIST_KEY = "pd_dashboard_checklist_v1"
 const NOTES_KEY = "pd_dashboard_notes_v1"
+const GET_STARTED_OPEN_KEY = "pd_dashboard_get_started_open_v1"
 
 type DashboardStage = "all" | "draft" | "review" | "approved" | "shipped"
 type WorkspaceView = "ai-studio" | "projects" | "templates" | "exports"
@@ -62,6 +64,7 @@ type AIStudioService = {
   actionLabel: string
   status: string
 }
+type SettingsSnapshot = { disabled_models: string[] }
 type StudioAudit = {
   url: string
   scores: { performance: number; accessibility: number; seo: number; bestPractices: number }
@@ -441,8 +444,17 @@ const DASHBOARD_RUNTIME_STRINGS = Array.from(
       "Workspace",
       "Create",
       "AI models",
+      "Browse model categories",
       "Get started",
       "Activity",
+      "Chat",
+      "Image",
+      "Video",
+      "Code",
+      "Extras",
+      "No models active",
+      "Show checklist",
+      "Hide checklist",
       "AI Studio",
       "Projects",
       "Exports",
@@ -763,6 +775,21 @@ function loadNotes(): NoteItem[] {
 function saveNotes(items: NoteItem[]) {
   try {
     localStorage.setItem(NOTES_KEY, JSON.stringify(items))
+  } catch {}
+}
+
+function loadGetStartedOpen() {
+  try {
+    const raw = localStorage.getItem(GET_STARTED_OPEN_KEY)
+    return raw == null ? true : raw !== "0"
+  } catch {
+    return true
+  }
+}
+
+function saveGetStartedOpen(value: boolean) {
+  try {
+    localStorage.setItem(GET_STARTED_OPEN_KEY, value ? "1" : "0")
   } catch {}
 }
 
@@ -1635,9 +1662,10 @@ export default function ProjectDashboard({
   const [landingLang, setLandingLang] = useState<"english" | "german">("english")
   const [templateUrl, setTemplateUrl] = useState("")
   const [templateName, setTemplateName] = useState("")
-  const [ollamaStatus, setOllamaStatus] = useState<"checking" | "running" | "offline">("checking")
   const [checklist, setChecklist] = useState<ChecklistItem[]>(loadChecklist)
   const [notes, setNotes] = useState<NoteItem[]>(loadNotes)
+  const [getStartedOpen, setGetStartedOpen] = useState(loadGetStartedOpen)
+  const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsSnapshot>({ disabled_models: [] })
   const [newNote, setNewNote] = useState("")
   const [assignableMembers, setAssignableMembers] = useState<AssignableMember[]>([])
   const [loadingAssignableMembers, setLoadingAssignableMembers] = useState(false)
@@ -1652,6 +1680,10 @@ export default function ProjectDashboard({
   }, [notes])
 
   useEffect(() => {
+    saveGetStartedOpen(getStartedOpen)
+  }, [getStartedOpen])
+
+  useEffect(() => {
     setChecklist(prev =>
       prev.map(item => (item.id === "create" && projects.length > 0 ? { ...item, done: true } : item))
     )
@@ -1659,7 +1691,6 @@ export default function ProjectDashboard({
 
   useEffect(() => {
     loadDashboard()
-    checkOllama()
   }, [])
 
   useEffect(() => {
@@ -2384,11 +2415,12 @@ export default function ProjectDashboard({
   const loadDashboard = async () => {
     setLoading(true)
     try {
-      const [projectData, currentBalance, currentPlan, creditTransactions] = await Promise.all([
+      const [projectData, currentBalance, currentPlan, creditTransactions, settingsData] = await Promise.all([
         apiGetProjects(),
         apiGetBalance().catch(() => null),
         apiGetPlan().catch(() => null),
         apiGetCreditsTransactions().catch(() => ({ ok: false, transactions: [] as CreditTransaction[] })),
+        apiFetch<{ ok?: boolean; settings?: SettingsSnapshot }>("/api/settings").catch(() => null),
       ])
       setProjects(
         projectData.map(project => ({
@@ -2402,25 +2434,18 @@ export default function ProjectDashboard({
         onPlanChange?.(currentPlan)
       }
       if (creditTransactions.ok) setTransactions(creditTransactions.transactions ?? [])
+      if (settingsData?.settings) {
+        setSettingsSnapshot({
+          disabled_models: Array.isArray(settingsData.settings.disabled_models)
+            ? settingsData.settings.disabled_models
+            : [],
+        })
+      }
       await loadTemplates()
     } catch (error) {
       toast.error(errMsg(error))
     } finally {
       setLoading(false)
-    }
-  }
-
-  const checkOllama = async () => {
-    setOllamaStatus("checking")
-    try {
-      const response = await fetch("/api/ai/ollama-health", {
-        credentials: "include",
-        signal: AbortSignal.timeout(5000),
-      })
-      const data = await response.json()
-      setOllamaStatus(data?.ok ? "running" : "offline")
-    } catch {
-      setOllamaStatus("offline")
     }
   }
 
@@ -2705,17 +2730,8 @@ export default function ProjectDashboard({
     onLogout()
   }
 
-  const aiModelRows = [
-    { name: "Gemini 2.5 Flash", on: true },
-    { name: "Gemini 2.5 Pro", on: true },
-    { name: "Claude Sonnet 4.6", on: true },
-    { name: "Claude Opus 4.6", on: false },
-    { name: "GPT-4o", on: false },
-    { name: "GPT-4o mini", on: false },
-    { name: "Mistral Large", on: false },
-    { name: "Llama 3.3 70B", on: false },
-    { name: "Ollama (local)", on: ollamaStatus === "running" },
-  ]
+  const dashboardModelGroups = getTopActiveModelsByCategory(settingsSnapshot.disabled_models, 3)
+    .filter(group => group.models.length > 0)
 
   return (
     <div className="pd-shell">
@@ -2853,32 +2869,26 @@ export default function ProjectDashboard({
 
           <div className="pd-sidebar-section">{rt("AI models")}</div>
           <div className="pd-scroll-box">
-            {aiModelRows.map(model => (
-              <div key={model.name} className="pd-ai-row">
-                <span className="pd-ai-name">{model.name}</span>
-                <span className={`pd-ai-status ${model.on ? "is-on" : "is-off"}`}>
-                  <span className={`pd-dot ${model.on ? "is-on" : "is-off"}`} />
-                  {model.on ? rt("On") : rt("Off")}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          <div className="pd-sidebar-divider" />
-
-          <div className="pd-sidebar-section">{rt("Get started")}</div>
-          <div className="pd-scroll-box pd-scroll-box-tall">
-            {checklist.map(item => (
-              <button
-                key={item.id}
-                className="pd-checklist-item"
-                type="button"
-                onClick={() => updateChecklist(item.id, !item.done)}
-              >
-                <div className={`pd-checklist-box ${item.done ? "is-done" : ""}`}>{item.done ? "v" : ""}</div>
-                <span className={`pd-checklist-text ${item.done ? "is-done" : ""}`}>{rt(item.label)}</span>
-              </button>
-            ))}
+            {dashboardModelGroups.length ? (
+              dashboardModelGroups.map(group => (
+                <div key={group.id} className="pd-ai-group">
+                  <div className="pd-ai-group-head">
+                    <span className="pd-ai-group-title">{rt(group.label)}</span>
+                    <span className="pd-ai-group-meta">
+                      {group.models.length}/{group.activeCount}
+                    </span>
+                  </div>
+                  {group.models.map(model => (
+                    <div key={model.id} className="pd-ai-row">
+                      <span className="pd-ai-name">{model.label}</span>
+                      <span className="pd-ai-provider">{model.provider}</span>
+                    </div>
+                  ))}
+                </div>
+              ))
+            ) : (
+              <div className="pd-ai-empty">{rt("No models active")}</div>
+            )}
           </div>
 
           <div className="pd-sidebar-divider" />
@@ -2896,6 +2906,34 @@ export default function ProjectDashboard({
               </div>
             ))}
           </div>
+
+          <div className="pd-sidebar-divider" />
+
+          <button
+            className={`pd-sidebar-section-toggle ${getStartedOpen ? "is-open" : ""}`}
+            type="button"
+            onClick={() => setGetStartedOpen(open => !open)}
+          >
+            <span>{rt("Get started")}</span>
+            <span className="pd-sidebar-section-toggle-label">
+              {getStartedOpen ? rt("Hide checklist") : rt("Show checklist")}
+            </span>
+          </button>
+          {getStartedOpen ? (
+            <div className="pd-scroll-box pd-scroll-box-tall">
+              {checklist.map(item => (
+                <button
+                  key={item.id}
+                  className="pd-checklist-item"
+                  type="button"
+                  onClick={() => updateChecklist(item.id, !item.done)}
+                >
+                  <div className={`pd-checklist-box ${item.done ? "is-done" : ""}`}>{item.done ? "v" : ""}</div>
+                  <span className={`pd-checklist-text ${item.done ? "is-done" : ""}`}>{rt(item.label)}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
 
           <div className="pd-sidebar-footer">
             <div className="pd-sidebar-divider" />
@@ -3272,7 +3310,15 @@ export default function ProjectDashboard({
 
       <KeyboardShortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} theme={theme} />
       {showCredits ? <CreditsPanel onClose={() => { setShowCredits(false); loadDashboard() }} /> : null}
-      {showSettings ? <SettingsPanel onClose={() => setShowSettings(false)} onThemeChange={value => setTheme(value as "dark" | "light")} /> : null}
+      {showSettings ? (
+        <SettingsPanel
+          onClose={() => {
+            setShowSettings(false)
+            void loadDashboard()
+          }}
+          onThemeChange={value => setTheme(value as "dark" | "light")}
+        />
+      ) : null}
       {showInvite ? <ReferralInvite theme={theme} userEmail={user.email} onClose={() => setShowInvite(false)} /> : null}
 
       <AssistantWidget
