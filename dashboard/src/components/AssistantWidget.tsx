@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { apiAssistantChat, type AssistantContext, type AssistantMessage } from "../api/assistant"
 import type { Plan } from "../api/types"
 import { toast } from "./Toast"
@@ -27,7 +27,7 @@ function buildWelcomeMessage(context: AssistantContext, plan: Plan): WidgetMessa
   return {
     id: "welcome",
     role: "assistant",
-    content: `I’m your AI assistant for ${focus}. This widget uses the models available on your ${plan} plan only.`,
+    content: `I’m your AI assistant for ${focus}. Ask me about imports, exports, AI Studio, edits, translations, or the next best move.`,
   }
 }
 
@@ -65,6 +65,7 @@ export default function AssistantWidget({
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState("")
   const [loading, setLoading] = useState(false)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const allowedModels = useMemo(() => getAllowedAssistantModels(plan), [plan])
   const [model, setModel] = useState<AssistantModelId>(getDefaultAssistantModel(plan).id)
   const [messages, setMessages] = useState<WidgetMessage[]>(() => [buildWelcomeMessage(context, plan)])
@@ -87,8 +88,29 @@ export default function AssistantWidget({
     return () => observer.disconnect()
   }, [])
 
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const handleOpen = () => {
+      setOpen(true)
+      window.requestAnimationFrame(() => textareaRef.current?.focus())
+    }
+    window.addEventListener("assistant:open", handleOpen)
+    return () => window.removeEventListener("assistant:open", handleOpen)
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    const timer = window.setTimeout(() => textareaRef.current?.focus(), 40)
+    return () => window.clearTimeout(timer)
+  }, [open])
+
   const quickPrompts = getQuickPrompts(context)
   const currentModelMeta = allowedModels.find((item) => item.id === model) || allowedModels[0]
+  const currentSurfaceLabel =
+    context.surface === "editor"
+      ? context.projectName || t("Current page")
+      : context.workspace || t("Dashboard")
+  const warningPreview = (context.warnings || []).slice(0, 2)
 
   const sendMessage = async (prompt?: string) => {
     const text = String(prompt ?? input).trim()
@@ -140,55 +162,90 @@ export default function AssistantWidget({
     >
       {open ? (
         <div className="assistant-widget__panel" role="dialog" aria-label={t("Assistant")}>
-          <div className="assistant-widget__header">
-            <div>
-              <div className="assistant-widget__eyebrow">{t("Assistant")}</div>
-              <div className="assistant-widget__title">
-                {context.surface === "editor" ? t("Page copilot") : t("Workspace copilot")}
+          <div className="assistant-widget__hero">
+            <div className="assistant-widget__hero-top">
+              <div className="assistant-widget__eyebrow-row">
+                <span className="assistant-widget__eyebrow">{t("AI assistant")}</span>
+                <span className="assistant-widget__surface-pill">
+                  {context.surface === "editor" ? t("Page copilot") : t("Workspace copilot")}
+                </span>
+              </div>
+              <div className="assistant-widget__header-actions">
+                <span className="assistant-widget__plan">{plan.toUpperCase()}</span>
+                <button
+                  type="button"
+                  className="assistant-widget__icon-button"
+                  onClick={() => setMessages([buildWelcomeMessage(context, plan)])}
+                  title={t("Clear chat")}
+                >
+                  ↺
+                </button>
+                <button
+                  type="button"
+                  className="assistant-widget__icon-button"
+                  onClick={() => setOpen(false)}
+                  title={t("Close")}
+                >
+                  ×
+                </button>
               </div>
             </div>
-            <div className="assistant-widget__header-actions">
-              <span className="assistant-widget__plan">{plan.toUpperCase()}</span>
-              <button
-                type="button"
-                className="assistant-widget__icon-button"
-                onClick={() => setMessages([buildWelcomeMessage(context, plan)])}
-                title={t("Clear chat")}
-              >
-                ↺
-              </button>
-              <button
-                type="button"
-                className="assistant-widget__icon-button"
-                onClick={() => setOpen(false)}
-                title={t("Close")}
-              >
-                ×
-              </button>
-            </div>
-          </div>
 
-          <div className="assistant-widget__meta">
-            <div className="assistant-widget__context">
-              {context.surface === "editor"
-                ? context.projectName || t("Current page")
-                : context.workspace || t("Dashboard")}
+            <div className="assistant-widget__hero-main">
+              <div>
+                <div className="assistant-widget__title">
+                  {context.surface === "editor" ? t("Page copilot") : t("Workspace copilot")}
+                </div>
+                <div className="assistant-widget__subtitle">{t("Need a hand? Ask the copilot anytime.")}</div>
+              </div>
+              <div className="assistant-widget__hero-mark">
+                <span>AI</span>
+              </div>
             </div>
-            <select
-              className="assistant-widget__select"
-              value={model}
-              onChange={(event) => setModel(event.target.value as AssistantModelId)}
-            >
-              {allowedModels.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.label}
-                </option>
-              ))}
-            </select>
-          </div>
 
-          <div className="assistant-widget__hint">
-            {currentModelMeta.vibe}
+            <div className="assistant-widget__deck">
+              <div className="assistant-widget__context-card">
+                <div className="assistant-widget__card-label">{t("Current context")}</div>
+                <div className="assistant-widget__context-value">{currentSurfaceLabel}</div>
+                <div className="assistant-widget__context-meta">
+                  <span>{context.platform || t("Dashboard")}</span>
+                  {context.selectedBlock ? <span>{context.selectedBlock}</span> : null}
+                  {context.exportMode ? <span>{context.exportMode}</span> : null}
+                </div>
+                {warningPreview.length ? (
+                  <div className="assistant-widget__warning-stack">
+                    <div className="assistant-widget__warning-label">{t("Warnings in view")}</div>
+                    {warningPreview.map((warning) => (
+                      <div key={warning} className="assistant-widget__warning-chip">
+                        {warning}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="assistant-widget__model-card">
+                <label className="assistant-widget__card-label" htmlFor="assistant-model-select">
+                  {t("Model")}
+                </label>
+                <select
+                  id="assistant-model-select"
+                  className="assistant-widget__select"
+                  value={model}
+                  onChange={(event) => setModel(event.target.value as AssistantModelId)}
+                >
+                  {allowedModels.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
+                <div className="assistant-widget__model-vibe">{currentModelMeta.vibe}</div>
+                <div className="assistant-widget__model-provider">
+                  {currentModelMeta.provider} · {PLAN_META_LABEL[plan]}
+                </div>
+              </div>
+            </div>
           </div>
 
           <div className="assistant-widget__messages">
@@ -224,6 +281,7 @@ export default function AssistantWidget({
 
           <div className="assistant-widget__composer">
             <textarea
+              ref={textareaRef}
               className="assistant-widget__textarea"
               value={input}
               onChange={(event) => setInput(event.target.value)}
@@ -235,8 +293,8 @@ export default function AssistantWidget({
               }}
               placeholder={
                 context.surface === "editor"
-                  ? t("Ask about this page, export warnings, translation, or edits...")
-                  : t("Ask about plans, projects, AI Studio, or next steps...")
+                  ? t("Ask about this page, exports, warnings, or translations...")
+                  : t("Ask about plans, imports, AI Studio, or next steps...")
               }
             />
             <button
@@ -254,10 +312,17 @@ export default function AssistantWidget({
       <button type="button" className="assistant-widget__launcher" onClick={() => setOpen((value) => !value)}>
         <span className="assistant-widget__launcher-mark">AI</span>
         <span className="assistant-widget__launcher-copy">
-          <strong>{t("Assistant")}</strong>
+          <strong>{t("Open copilot")}</strong>
           <span>{currentModelMeta.label}</span>
         </span>
       </button>
     </div>
   )
+}
+
+const PLAN_META_LABEL: Record<Plan, string> = {
+  basis: "Basis",
+  starter: "Starter",
+  pro: "Pro",
+  scale: "Scale",
 }

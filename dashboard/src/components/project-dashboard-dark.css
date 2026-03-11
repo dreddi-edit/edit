@@ -1326,6 +1326,195 @@ body[data-theme="light"] .pd-studio-result {
   max-width: 980px;
 }
 
+.pd-onboarding {
+  max-width: 1040px;
+}
+
+.pd-onboarding__layout {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 18px;
+}
+
+.pd-onboarding__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.pd-onboarding__hero,
+.pd-onboarding__progress,
+.pd-onboarding__card {
+  border: 1px solid var(--pd-border-sub);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)),
+    var(--pd-bg-2);
+  padding: 16px;
+}
+
+.pd-onboarding__hero {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pd-onboarding__plan {
+  width: fit-content;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  background: var(--pd-blue-dim);
+  border: 1px solid var(--pd-blue-border);
+  color: var(--pd-blue);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pd-onboarding__headline {
+  font-size: 24px;
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: var(--pd-text);
+}
+
+.pd-onboarding__copy {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--pd-text-2);
+}
+
+.pd-onboarding__progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--pd-text-2);
+}
+
+.pd-onboarding__progress-head strong {
+  font-size: 18px;
+  letter-spacing: -0.03em;
+  color: var(--pd-text);
+}
+
+.pd-onboarding__progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pd-onboarding__progress-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 12px;
+  border: 1px solid var(--pd-border-sub);
+  background: var(--pd-bg-1);
+  color: var(--pd-text-2);
+  font-size: 11.5px;
+}
+
+.pd-onboarding__progress-item.is-done {
+  color: var(--pd-green);
+  border-color: var(--pd-green-border);
+  background: var(--pd-green-bg);
+}
+
+.pd-onboarding__progress-mark {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--pd-bg-3);
+  font-size: 10px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.pd-onboarding__progress-item.is-done .pd-onboarding__progress-mark {
+  background: rgba(74, 222, 128, 0.18);
+}
+
+.pd-onboarding__assistant-btn {
+  width: 100%;
+  min-height: 38px;
+}
+
+.pd-onboarding__cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.pd-onboarding__card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 188px;
+}
+
+.pd-onboarding__card-accent {
+  background:
+    radial-gradient(circle at top right, rgba(96, 165, 250, 0.12), transparent 44%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)),
+    var(--pd-bg-2);
+}
+
+.pd-onboarding__card-eyebrow {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--pd-text-3);
+}
+
+.pd-onboarding__card-title {
+  font-size: 18px;
+  line-height: 1.15;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--pd-text);
+}
+
+.pd-onboarding__card-copy {
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--pd-text-2);
+}
+
+.pd-onboarding__card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.pd-onboarding__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+body[data-theme="light"] .pd-onboarding__hero,
+body[data-theme="light"] .pd-onboarding__progress,
+body[data-theme="light"] .pd-onboarding__card {
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.05);
+}
+
 .pd-project-explorer__hero {
   display: flex;
   align-items: flex-start;
@@ -2528,6 +2717,14 @@ body[data-theme="light"] .pd-studio-result {
     display: none;
   }
 
+  .pd-onboarding__layout {
+    grid-template-columns: 1fr;
+  }
+
+  .pd-onboarding__cards {
+    grid-template-columns: 1fr;
+  }
+
   .pd-stats {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -2577,6 +2774,10 @@ body[data-theme="light"] .pd-studio-result {
   .pd-projects-grid,
   .pd-page-grid {
     grid-template-columns: 1fr;
+  }
+
+  .pd-onboarding__footer {
+    flex-direction: column;
   }
 
   .pd-studio-layout,

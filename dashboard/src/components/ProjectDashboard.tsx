@@ -36,7 +36,7 @@ import "./project-dashboard-dark.css"
 const BASE = ""
 const CHECKLIST_KEY = "pd_dashboard_checklist_v1"
 const NOTES_KEY = "pd_dashboard_notes_v1"
-const GET_STARTED_OPEN_KEY = "pd_dashboard_get_started_open_v1"
+const ONBOARDING_KEY_PREFIX = "pd_dashboard_onboarding_v2"
 
 type DashboardStage = "all" | "draft" | "review" | "approved" | "shipped"
 type WorkspaceView = "ai-studio" | "projects" | "templates" | "exports"
@@ -778,19 +778,8 @@ function saveNotes(items: NoteItem[]) {
   } catch {}
 }
 
-function loadGetStartedOpen() {
-  try {
-    const raw = localStorage.getItem(GET_STARTED_OPEN_KEY)
-    return raw == null ? true : raw !== "0"
-  } catch {
-    return true
-  }
-}
-
-function saveGetStartedOpen(value: boolean) {
-  try {
-    localStorage.setItem(GET_STARTED_OPEN_KEY, value ? "1" : "0")
-  } catch {}
+function onboardingStorageKey(userId: number) {
+  return `${ONBOARDING_KEY_PREFIX}:${userId}`
 }
 
 function formatExportDate(value: string) {
@@ -1406,6 +1395,129 @@ function ProjectExplorerModal({
   )
 }
 
+function DashboardOnboardingModal({
+  rt,
+  plan,
+  checklist,
+  onClose,
+  onNewProject,
+  onImport,
+  onStudio,
+  onSettings,
+  onAssistant,
+}: {
+  rt: (text: string) => string
+  plan: Plan
+  checklist: ChecklistItem[]
+  onClose: () => void
+  onNewProject: () => void
+  onImport: () => void
+  onStudio: () => void
+  onSettings: () => void
+  onAssistant: () => void
+}) {
+  const onboardingItems = checklist.filter((item) => ["create", "load", "ai", "export"].includes(item.id))
+  const completedCount = onboardingItems.filter((item) => item.done).length
+
+  return (
+    <div className="pd-modal-backdrop" onClick={onClose}>
+      <div className="pd-modal pd-modal-wide pd-onboarding" onClick={(event) => event.stopPropagation()}>
+        <div className="pd-modal-header">
+          <div>
+            <div className="pd-modal-eyebrow">{rt("First login onboarding")}</div>
+            <div className="pd-modal-title">{rt("Welcome to your workspace")}</div>
+          </div>
+          <button className="pd-modal-close" type="button" onClick={onClose} aria-label={rt("Close")}>X</button>
+        </div>
+        <div className="pd-modal-body">
+          <div className="pd-onboarding__layout">
+            <aside className="pd-onboarding__summary">
+              <div className="pd-onboarding__hero">
+                <div className="pd-onboarding__plan">{PLAN_META[plan].label}</div>
+                <div className="pd-onboarding__headline">{rt("One quick setup before you start shipping.")}</div>
+                <div className="pd-onboarding__copy">
+                  {rt("Get the first project in, explore AI Studio once, and then use the copilot for questions instead of a permanent checklist.")}
+                </div>
+              </div>
+
+              <div className="pd-onboarding__progress">
+                <div className="pd-onboarding__progress-head">
+                  <span>{rt("Setup progress")}</span>
+                  <strong>{completedCount}/{onboardingItems.length}</strong>
+                </div>
+                <div className="pd-onboarding__progress-list">
+                  {onboardingItems.map((item) => (
+                    <div key={item.id} className={`pd-onboarding__progress-item ${item.done ? "is-done" : ""}`}>
+                      <span className="pd-onboarding__progress-mark">{item.done ? "v" : "•"}</span>
+                      <span>{rt(item.label)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <button className="pd-btn pd-btn-primary pd-onboarding__assistant-btn" type="button" onClick={onAssistant}>
+                {rt("Ask copilot")}
+              </button>
+            </aside>
+
+            <div className="pd-onboarding__cards">
+              <section className="pd-onboarding__card">
+                <div className="pd-onboarding__card-eyebrow">{rt("Start")}</div>
+                <div className="pd-onboarding__card-title">{rt("Bring in your first website")}</div>
+                <div className="pd-onboarding__card-copy">
+                  {rt("Create a project, load a live URL, or import a site package.")}
+                </div>
+                <div className="pd-onboarding__card-actions">
+                  <button className="pd-btn pd-btn-primary" type="button" onClick={onNewProject}>{rt("New project")}</button>
+                  <button className="pd-btn" type="button" onClick={onImport}>{rt("Import website")}</button>
+                </div>
+              </section>
+
+              <section className="pd-onboarding__card">
+                <div className="pd-onboarding__card-eyebrow">{rt("AI Studio")}</div>
+                <div className="pd-onboarding__card-title">{rt("Explore AI Studio")}</div>
+                <div className="pd-onboarding__card-copy">
+                  {rt("Open one guided workflow and let the copilot explain what to do next.")}
+                </div>
+                <div className="pd-onboarding__card-actions">
+                  <button className="pd-btn pd-btn-primary" type="button" onClick={onStudio}>{rt("Open AI Studio")}</button>
+                </div>
+              </section>
+
+              <section className="pd-onboarding__card">
+                <div className="pd-onboarding__card-eyebrow">{rt("Workspace")}</div>
+                <div className="pd-onboarding__card-title">{rt("Tune your workspace")}</div>
+                <div className="pd-onboarding__card-copy">
+                  {rt("Pick theme, language, model access, approvals, and API preferences.")}
+                </div>
+                <div className="pd-onboarding__card-actions">
+                  <button className="pd-btn" type="button" onClick={onSettings}>{rt("Open settings")}</button>
+                </div>
+              </section>
+
+              <section className="pd-onboarding__card pd-onboarding__card-accent">
+                <div className="pd-onboarding__card-eyebrow">{rt("Copilot")}</div>
+                <div className="pd-onboarding__card-title">{rt("Ask the copilot anytime")}</div>
+                <div className="pd-onboarding__card-copy">
+                  {rt("Once onboarding is done, the assistant in the corner becomes your default help surface.")}
+                </div>
+                <div className="pd-onboarding__card-actions">
+                  <button className="pd-btn pd-btn-primary" type="button" onClick={onAssistant}>{rt("Open copilot")}</button>
+                </div>
+              </section>
+            </div>
+          </div>
+
+          <div className="pd-onboarding__footer">
+            <button className="pd-btn" type="button" onClick={onClose}>{rt("Skip onboarding")}</button>
+            <button className="pd-btn pd-btn-primary" type="button" onClick={onClose}>{rt("Finish onboarding")}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function TemplateCard({
   template,
   onUse,
@@ -1664,7 +1776,7 @@ export default function ProjectDashboard({
   const [templateName, setTemplateName] = useState("")
   const [checklist, setChecklist] = useState<ChecklistItem[]>(loadChecklist)
   const [notes, setNotes] = useState<NoteItem[]>(loadNotes)
-  const [getStartedOpen, setGetStartedOpen] = useState(loadGetStartedOpen)
+  const [showOnboarding, setShowOnboarding] = useState(false)
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsSnapshot>({ disabled_models: [] })
   const [newNote, setNewNote] = useState("")
   const [assignableMembers, setAssignableMembers] = useState<AssignableMember[]>([])
@@ -1680,14 +1792,31 @@ export default function ProjectDashboard({
   }, [notes])
 
   useEffect(() => {
-    saveGetStartedOpen(getStartedOpen)
-  }, [getStartedOpen])
-
-  useEffect(() => {
     setChecklist(prev =>
       prev.map(item => (item.id === "create" && projects.length > 0 ? { ...item, done: true } : item))
     )
   }, [projects.length])
+
+  useEffect(() => {
+    if (loading) return
+    let seen = false
+    try {
+      seen = localStorage.getItem(onboardingStorageKey(user.id)) === "1"
+    } catch {}
+    setShowOnboarding(!seen && projects.length === 0)
+  }, [loading, projects.length, user.id])
+
+  useEffect(() => {
+    if (!showOnboarding) return
+    const onboardingComplete = checklist
+      .filter((item) => ["create", "load", "ai", "export"].includes(item.id))
+      .every((item) => item.done)
+    if (!onboardingComplete) return
+    try {
+      localStorage.setItem(onboardingStorageKey(user.id), "1")
+    } catch {}
+    setShowOnboarding(false)
+  }, [checklist, showOnboarding, user.id])
 
   useEffect(() => {
     loadDashboard()
@@ -1929,6 +2058,17 @@ export default function ProjectDashboard({
 
   const updateChecklist = (id: string, done = true) => {
     setChecklist(prev => prev.map(item => (item.id === id ? { ...item, done } : item)))
+  }
+
+  const dismissOnboarding = () => {
+    try {
+      localStorage.setItem(onboardingStorageKey(user.id), "1")
+    } catch {}
+    setShowOnboarding(false)
+  }
+
+  const openAssistant = () => {
+    window.dispatchEvent(new CustomEvent("assistant:open"))
   }
 
   const resetNewProjectForm = () => {
@@ -2909,32 +3049,6 @@ export default function ProjectDashboard({
 
           <div className="pd-sidebar-divider" />
 
-          <button
-            className={`pd-sidebar-section-toggle ${getStartedOpen ? "is-open" : ""}`}
-            type="button"
-            onClick={() => setGetStartedOpen(open => !open)}
-          >
-            <span>{rt("Get started")}</span>
-            <span className="pd-sidebar-section-toggle-label">
-              {getStartedOpen ? rt("Hide checklist") : rt("Show checklist")}
-            </span>
-          </button>
-          {getStartedOpen ? (
-            <div className="pd-scroll-box pd-scroll-box-tall">
-              {checklist.map(item => (
-                <button
-                  key={item.id}
-                  className="pd-checklist-item"
-                  type="button"
-                  onClick={() => updateChecklist(item.id, !item.done)}
-                >
-                  <div className={`pd-checklist-box ${item.done ? "is-done" : ""}`}>{item.done ? "v" : ""}</div>
-                  <span className={`pd-checklist-text ${item.done ? "is-done" : ""}`}>{rt(item.label)}</span>
-                </button>
-              ))}
-            </div>
-          ) : null}
-
           <div className="pd-sidebar-footer">
             <div className="pd-sidebar-divider" />
             <button className="pd-sidebar-item" type="button" onClick={logout}>
@@ -3320,6 +3434,36 @@ export default function ProjectDashboard({
         />
       ) : null}
       {showInvite ? <ReferralInvite theme={theme} userEmail={user.email} onClose={() => setShowInvite(false)} /> : null}
+
+      {showOnboarding ? (
+        <DashboardOnboardingModal
+          rt={rt}
+          plan={plan}
+          checklist={checklist}
+          onClose={dismissOnboarding}
+          onNewProject={() => {
+            dismissOnboarding()
+            setShowNewProject(true)
+          }}
+          onImport={() => {
+            dismissOnboarding()
+            setShowNewProject(true)
+            setNewImportMode("crawl")
+          }}
+          onStudio={() => {
+            dismissOnboarding()
+            setActiveWorkspace("ai-studio")
+          }}
+          onSettings={() => {
+            dismissOnboarding()
+            setShowSettings(true)
+          }}
+          onAssistant={() => {
+            dismissOnboarding()
+            openAssistant()
+          }}
+        />
+      ) : null}
 
       <AssistantWidget
         plan={plan}
