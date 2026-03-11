@@ -485,13 +485,14 @@ app.post("/api/ai/rewrite-block", authMiddleware, aiRateLimit, async (req, res) 
     const instruction = readRequiredString(req.body?.instruction, "Instruction", { max: 4000 })
     const systemHint = readOptionalString(req.body?.systemHint, "System hint", { max: 2000, empty: "" })
     const model = readOptionalString(req.body?.model, "Model", { max: 80, empty: "" })
+    const approved = String(req.query.approved || req.body?.approved || "") === "1"
 
     let chosenModel = String(model || "auto")
 
     if (chosenModel === "auto") {
       const routing = await resolveModel(html, instruction)
 
-      if (routing.needsApproval) {
+      if (routing.needsApproval && !approved) {
         // Approval nötig – direkt in Response zurückgeben
         return res.json({
           ok: false,
@@ -508,7 +509,7 @@ app.post("/api/ai/rewrite-block", authMiddleware, aiRateLimit, async (req, res) 
       chosenModel = routing.model
     } else {
       // Check approval for non-auto models (except Ollama)
-      if (!chosenModel.startsWith("ollama:")) {
+      if (!chosenModel.startsWith("ollama:") && !approved) {
         const { estimateTokens } = await import("./autoRouter.js")
         const { inputTokens, outputTokens } = estimateTokens(html, instruction)
         const estCost = estimateCreditCost(chosenModel, inputTokens, outputTokens)
@@ -584,12 +585,13 @@ app.post("/api/ai/rewrite-block-stream", authMiddleware, aiRateLimit, async (req
     const instruction = readRequiredString(req.body?.instruction, "Instruction", { max: 4000 })
     const systemHint = readOptionalString(req.body?.systemHint, "System hint", { max: 2000, empty: "" })
     const model = readOptionalString(req.body?.model, "Model", { max: 80, empty: "" })
+    const approved = String(req.query.approved || req.body?.approved || "") === "1"
 
     let chosenModel = String(model || "auto")
 
     if (chosenModel === "auto") {
       const routing = await resolveModel(html, instruction)
-      if (routing.needsApproval) {
+      if (routing.needsApproval && !approved) {
         return res.json({
           ok: false,
           needsApproval: true,
@@ -604,7 +606,7 @@ app.post("/api/ai/rewrite-block-stream", authMiddleware, aiRateLimit, async (req
       chosenModel = routing.model
     } else {
       // Check approval for non-auto models (except Ollama)
-      if (!chosenModel.startsWith("ollama:")) {
+      if (!chosenModel.startsWith("ollama:") && !approved) {
         const { estimateTokens } = await import("./autoRouter.js")
         const { inputTokens, outputTokens } = estimateTokens(html, instruction)
         const estCost = estimateCreditCost(chosenModel, inputTokens, outputTokens)

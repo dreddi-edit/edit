@@ -332,6 +332,51 @@ function buildGroupPreviewHtml(doc: Document, el: HTMLElement): string {
 }
 
 function collectSplitRootSegments(rootEl: HTMLElement, win: Window): HTMLElement[] {
+  const rootRect = rootEl.getBoundingClientRect();
+  const minBandHeight = Math.max(72, Math.min(220, rootRect.height * 0.14));
+  const minBandWidth = Math.max(180, rootRect.width * 0.52);
+
+  const semanticCandidates = Array.from(
+    rootEl.querySelectorAll(
+      [
+        "section",
+        "article",
+        "form",
+        "header",
+        "footer",
+        "main",
+        "[class*='section']",
+        "[class*='hero']",
+        "[class*='contact']",
+        "[class*='feature']",
+        "[class*='story']",
+        "[class*='pricing']",
+        "[class*='faq']",
+        "[class*='content']",
+        "[class*='wrap']",
+        "[class*='group']",
+        "[class*='container']",
+      ].join(",")
+    )
+  ).filter((node): node is HTMLElement => {
+    if (!(node instanceof HTMLElement) || node === rootEl) return false;
+    if (!isMeaningfulVisibleNode(node, win)) return false;
+    const rect = node.getBoundingClientRect();
+    return rect.height >= minBandHeight && rect.width >= minBandWidth;
+  });
+
+  const semanticTopLevel = semanticCandidates
+    .filter((candidate) => !semanticCandidates.some((other) => other !== candidate && other.contains(candidate)))
+    .sort((a, b) => {
+      const aRect = a.getBoundingClientRect();
+      const bRect = b.getBoundingClientRect();
+      return aRect.top - bRect.top || aRect.left - bRect.left;
+    });
+
+  if (semanticTopLevel.length >= 2) {
+    return semanticTopLevel;
+  }
+
   const isSegment = (node: Element): node is HTMLElement => {
     if (!(node instanceof HTMLElement)) return false;
     const tag = node.tagName.toLowerCase();
@@ -340,18 +385,65 @@ function collectSplitRootSegments(rootEl: HTMLElement, win: Window): HTMLElement
     return node.getBoundingClientRect().height >= 36;
   };
 
+  const groupByVerticalBand = (nodes: HTMLElement[]) => {
+    const sorted = nodes
+      .slice()
+      .sort((a, b) => {
+        const aRect = a.getBoundingClientRect();
+        const bRect = b.getBoundingClientRect();
+        return aRect.top - bRect.top || aRect.left - bRect.left;
+      });
+
+    const groups: HTMLElement[][] = [];
+    for (const node of sorted) {
+      const rect = node.getBoundingClientRect();
+      const group = groups[groups.length - 1];
+      if (!group) {
+        groups.push([node]);
+        continue;
+      }
+      const referenceRects = group.map((entry) => entry.getBoundingClientRect());
+      const latestBottom = Math.max(...referenceRects.map((entry) => entry.bottom));
+      const earliestTop = Math.min(...referenceRects.map((entry) => entry.top));
+      const overlapsVertically = rect.top <= latestBottom - 12;
+      const isSameBand = overlapsVertically || Math.abs(rect.top - earliestTop) <= 36;
+      if (isSameBand) group.push(node);
+      else groups.push([node]);
+    }
+    return groups;
+  };
+
   let current: HTMLElement | null = rootEl;
   let segments: HTMLElement[] = [];
   let depth = 0;
 
   while (current && depth < 8) {
     segments = Array.from(current.children).filter(isSegment);
-    if (segments.length >= 2) return segments;
+    const bandGroups = groupByVerticalBand(segments);
+    const bandRepresentatives = bandGroups
+      .map((group) => {
+        if (group.length === 1) return group[0];
+        const fullWidth = group.find((node) => node.getBoundingClientRect().width >= minBandWidth);
+        return fullWidth || group[0];
+      })
+      .filter((node, index, all) => all.indexOf(node) === index);
+
+    if (bandRepresentatives.length >= 2) return bandRepresentatives;
     current = segments.length === 1 ? segments[0] : null;
     depth += 1;
   }
 
   const expandedSegments = collectExpandedChildElements(rootEl, win).filter((node) => node !== rootEl);
+  const expandedBands = groupByVerticalBand(expandedSegments)
+    .map((group) => {
+      if (group.length === 1) return group[0];
+      const widest = group
+        .slice()
+        .sort((left, right) => right.getBoundingClientRect().width - left.getBoundingClientRect().width)[0];
+      return widest || group[0];
+    })
+    .filter((node, index, all) => all.indexOf(node) === index);
+  if (expandedBands.length >= 2) return expandedBands;
   if (expandedSegments.length >= 2) return expandedSegments;
 
   return segments;
@@ -2781,6 +2873,7 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
         const resolvedModel = estimateAutoModel(model, htmlToSend, prompt);
         const estInputTokens = Math.max(120, Math.ceil((htmlToSend.length + prompt.length + 1200) / 4));
         const estOutputTokens = estimateOutputTokens(resolvedModel, estInputTokens);
+        let approvalGranted = false;
 
         if (!resolvedModel.startsWith("ollama:") && getRequireApproval()) {
           const approvalId = `approve_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -2807,6 +2900,7 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
             try { window.dispatchEvent(new CustomEvent("bo:left-ai-done")); } catch {}
             return
           }
+          approvalGranted = true;
         }
 
 
@@ -2818,7 +2912,8 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
             html: htmlToSend,
             instruction: prompt,
             systemHint: "Return only valid HTML.",
-            model: resolvedModel
+            model: resolvedModel,
+            approved: approvalGranted ? 1 : 0,
           }),
         });
 
