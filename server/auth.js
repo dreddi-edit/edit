@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs"
 import jwt from "jsonwebtoken"
 import db from "./db.js"
 import { logAudit } from "./auditLog.js"
+import { createRateLimit } from "./rateLimit.js"
 import {
   isValidationError,
   readEmail,
@@ -21,23 +22,36 @@ if (process.env.NODE_ENV === "production") {
   }
 }
 const COOKIE = "se_token"
-
-const loginAttempts = new Map()
-const RATE_WINDOW_MS = 15 * 60 * 1000
-const RATE_MAX = 10
-
-function rateLimitAuth(req, res, next) {
-  const key = (req.ip || req.socket?.remoteAddress || "unknown") + ":" + (req.body?.email || "")
-  const now = Date.now()
-  const bucket = loginAttempts.get(key) || { count: 0, resetAt: now + RATE_WINDOW_MS }
-  if (now > bucket.resetAt) bucket.count = 0
-  bucket.count++
-  if (bucket.count > RATE_MAX) {
-    return res.status(429).json({ ok: false, error: "Too many attempts. Try again in 15 minutes." })
-  }
-  loginAttempts.set(key, bucket)
-  next()
-}
+const authIdentifier = (req) => `${req.ip || req.socket?.remoteAddress || "unknown"}:${String(req.body?.email || "").toLowerCase()}`
+const authRateMessage = "Too many attempts. Try again in 15 minutes."
+const registerRateLimit = createRateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  keyPrefix: "auth-register",
+  message: authRateMessage,
+  keyFn: authIdentifier,
+})
+const loginRateLimit = createRateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  keyPrefix: "auth-login",
+  message: authRateMessage,
+  keyFn: authIdentifier,
+})
+const forgotPasswordRateLimit = createRateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  keyPrefix: "auth-forgot-password",
+  message: authRateMessage,
+  keyFn: authIdentifier,
+})
+const resetPasswordRateLimit = createRateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  keyPrefix: "auth-reset-password",
+  message: authRateMessage,
+  keyFn: authIdentifier,
+})
 
 export function authMiddleware(req, res, next) {
   const token = req.cookies?.[COOKIE] || req.headers["authorization"]?.replace("Bearer ", "")
@@ -53,7 +67,7 @@ export function authMiddleware(req, res, next) {
 export function registerAuthRoutes(app) {
 
   // Register (rate limited)
-  app.post("/api/auth/register", rateLimitAuth, async (req, res) => {
+  app.post("/api/auth/register", registerRateLimit, async (req, res) => {
     try {
       const email = readEmail(req.body?.email)
       const password = readPassword(req.body?.password)
@@ -76,7 +90,7 @@ export function registerAuthRoutes(app) {
   })
 
   // Login (rate limited)
-  app.post("/api/auth/login", rateLimitAuth, async (req, res) => {
+  app.post("/api/auth/login", loginRateLimit, async (req, res) => {
     try {
       const email = readEmail(req.body?.email)
       const password = readPassword(req.body?.password)
@@ -99,7 +113,7 @@ export function registerAuthRoutes(app) {
 
 
   // Passwort-Reset anfordern
-  app.post("/api/auth/forgot-password", rateLimitAuth, async (req, res) => {
+  app.post("/api/auth/forgot-password", forgotPasswordRateLimit, async (req, res) => {
     try {
       const email = readEmail(req.body?.email)
       const user = db.prepare("SELECT * FROM users WHERE lower(email) = ?").get(email)
@@ -121,7 +135,7 @@ export function registerAuthRoutes(app) {
   })
 
   // Passwort-Reset durchführen
-  app.post("/api/auth/reset-password", rateLimitAuth, async (req, res) => {
+  app.post("/api/auth/reset-password", resetPasswordRateLimit, async (req, res) => {
     try {
       const token = readRequiredString(req.body?.token, "Token", { max: 128 })
       const password = readPassword(req.body?.password)

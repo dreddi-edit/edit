@@ -63,10 +63,75 @@ function escapeTemplateLiteral(value) {
     .replace(/\$\{/g, "\\${");
 }
 
+const DEFAULT_FORM_ACTION_URL = process.env.EXPORT_FORM_ACTION_URL || "https://formspree.io/f/your-form-id"
+const DEFAULT_CTA_URL = process.env.EXPORT_CTA_URL || "https://example.com/contact"
+
+function ensurePortableInteractions(doc) {
+  if (!doc?.body) return
+
+  Array.from(doc.querySelectorAll("form")).forEach((form, formIndex) => {
+    const action = (form.getAttribute("action") || "").trim()
+    const method = (form.getAttribute("method") || "").trim()
+    const needsPlaceholderAction = !action || action === "#" || /^javascript:/i.test(action)
+
+    if (needsPlaceholderAction) {
+      form.setAttribute("action", DEFAULT_FORM_ACTION_URL)
+      form.setAttribute("data-site-editor-form-placeholder", "1")
+    }
+    if (!method) form.setAttribute("method", "post")
+
+    Array.from(form.querySelectorAll("input, textarea, select")).forEach((field, index) => {
+      const input = field
+      const tag = input.tagName.toLowerCase()
+      const inputType = String(input.getAttribute("type") || tag).toLowerCase()
+      if (["hidden", "submit", "button", "reset"].includes(inputType)) return
+      if (!input.getAttribute("name")) {
+        const fallbackName = deriveFieldLabel(input, form)
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "_")
+          .replace(/^_+|_+$/g, "")
+        input.setAttribute("name", fallbackName || `field_${formIndex + 1}_${index + 1}`)
+      }
+    })
+  })
+
+  Array.from(doc.querySelectorAll("a")).forEach((anchor) => {
+    const href = (anchor.getAttribute("href") || "").trim()
+    if (!href || href === "#" || /^javascript:/i.test(href)) {
+      anchor.setAttribute("href", DEFAULT_CTA_URL)
+      anchor.setAttribute("data-site-editor-cta-placeholder", "1")
+    }
+  })
+
+  Array.from(doc.querySelectorAll("button")).forEach((button) => {
+    const type = String(button.getAttribute("type") || "").toLowerCase()
+    if (type === "submit" || type === "reset" || button.closest("form")) return
+
+    const href =
+      button.getAttribute("data-site-editor-cta-url")
+      || button.getAttribute("data-cta-url")
+      || button.getAttribute("data-href")
+      || DEFAULT_CTA_URL
+
+    const anchor = doc.createElement("a")
+    anchor.setAttribute("href", href)
+    anchor.setAttribute("role", "button")
+    anchor.setAttribute("data-site-editor-cta-placeholder", "1")
+    anchor.innerHTML = button.innerHTML
+    if (button.className) anchor.className = button.className
+    Array.from(button.attributes).forEach((attribute) => {
+      if (["type", "onclick", "data-cta-url", "data-href", "data-site-editor-cta-url"].includes(attribute.name)) return
+      if (!anchor.hasAttribute(attribute.name)) anchor.setAttribute(attribute.name, attribute.value)
+    })
+    button.replaceWith(anchor)
+  })
+}
+
 function extractPortableDocumentParts(html) {
   const source = injectResponsiveViewport(decodeAssetProxyEverywhere(String(html || "")));
   const dom = new JSDOM(source);
   const doc = dom.window.document;
+  ensurePortableInteractions(doc);
   const title = (doc.querySelector("title")?.textContent || "").trim();
   const externalStylesheets = uniqueList(
     Array.from(doc.querySelectorAll('link[rel~="stylesheet"][href]'))
@@ -274,6 +339,12 @@ export function validateDeliveryArtifact({ html, url, platform, mode }) {
 
   if (/<form\b/i.test(source)) {
     push("forms-present", "info", "Forms are present. Submission handling may require platform-side configuration.");
+  }
+  if (/data-site-editor-form-placeholder=["']1["']/i.test(source)) {
+    push("form-action-placeholder", "warning", "At least one form uses a placeholder action URL and must be wired before launch.");
+  }
+  if (/data-site-editor-cta-placeholder=["']1["']/i.test(source)) {
+    push("cta-placeholder", "info", "At least one CTA uses a placeholder destination URL and should be reviewed before handoff.");
   }
 
   if (/<script\b/i.test(source) && normalizedPlatform !== "static") {

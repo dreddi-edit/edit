@@ -104,7 +104,7 @@ test("delivery validation warns on unresolved assets and embeds", () => {
 });
 
 test("format generators produce portable export artifacts", async () => {
-  const html = `<!DOCTYPE html><html><head><style>.hero{padding:24px}</style><link rel="stylesheet" href="https://cdn.example.com/site.css"></head><body><section data-block-id="hero" class="hero"><h1>Hello</h1><p>World</p><form><label for="email">Email</label><input id="email" type="email" required><button type="submit">Send</button></form></section></body></html>`;
+  const html = `<!DOCTYPE html><html><head><style>.hero{padding:24px}</style><link rel="stylesheet" href="https://cdn.example.com/site.css"></head><body><section data-block-id="hero" class="hero"><h1>Hello</h1><p>World</p><form><label for="email">Email</label><input id="email" type="email" required><button type="submit">Send</button></form><button class="cta">Talk to sales</button></section></body></html>`;
   const project = { name: "Launch Site" };
 
   const shopify = generateShopifySection(html);
@@ -119,6 +119,11 @@ test("format generators produce portable export artifacts", async () => {
   assert.ok(themeFiles.some((file) => file.name === "footer.php"));
   assert.ok(themeFiles.some((file) => file.name === "assets/site-editor-export.css"));
   assert.ok(themeFiles.some((file) => file.name === "template-parts/content-site-editor.php"));
+  const themeContent = themeFiles.find((file) => file.name === "template-parts/content-site-editor.php")?.content || "";
+  assert.match(themeContent, /data-site-editor-form-placeholder="1"/);
+  assert.match(themeContent, /https:\/\/formspree\.io\/f\/your-form-id/);
+  assert.match(themeContent, /data-site-editor-cta-placeholder="1"/);
+  assert.match(themeContent, /<a[^>]*role="button"[^>]*>Talk to sales<\/a>/);
 
   const blockFiles = prepareWordPressBlockFiles({ html, project });
   assert.ok(blockFiles.some((file) => file.name === "block.json"));

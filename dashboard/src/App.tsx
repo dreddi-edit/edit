@@ -288,20 +288,27 @@ export default function App() {
   const [loadingProjectPageId, setLoadingProjectPageId] = useState<string | null>(null)
   const [selectedComponent, setSelectedComponent] = useState<string>("")
   
-  // Simple undo history
   const [undoHistory, setUndoHistory] = useState<string[]>([])
-  
-  const undoPush = (html: string) => {
-    setUndoHistory(prev => [...prev.slice(-9), html]) // Keep last 10
+  const [redoHistory, setRedoHistory] = useState<string[]>([])
+  const undoHistoryRef = useRef<string[]>([])
+  const redoHistoryRef = useRef<string[]>([])
+
+  const syncEditorHistory = () => {
+    setUndoHistory([...undoHistoryRef.current])
+    setRedoHistory([...redoHistoryRef.current])
   }
-  
-  const undoPop = () => {
-    setUndoHistory(prev => {
-      if (prev.length <= 1) return prev
-      const newList = prev.slice(0, -1)
-      return newList
-    })
-    return undoHistory[undoHistory.length - 2] || null
+
+  const pushUndoState = (html: string) => {
+    const nextUndo = [...undoHistoryRef.current.slice(-19), html]
+    undoHistoryRef.current = nextUndo
+    redoHistoryRef.current = []
+    syncEditorHistory()
+  }
+
+  const resetEditorHistory = () => {
+    undoHistoryRef.current = []
+    redoHistoryRef.current = []
+    syncEditorHistory()
   }
   
   // AI approval queue
@@ -604,13 +611,49 @@ const autoSave = async (html: string) => {
     iframe.srcdoc = html || "<!doctype html><html><head></head><body></body></html>";
   };
 
-  const commitLiveEditorHtml = (html: string) => {
+  const applyEditorHtml = (
+    html: string,
+    options: { recordUndo?: boolean; resetHistory?: boolean; save?: boolean } = {},
+  ) => {
     const nextHtml = String(html || "")
     const prevHtml = currentHtmlRef.current
-    if (prevHtml && prevHtml !== nextHtml) undoPush(prevHtml)
+    if (options.resetHistory) {
+      resetEditorHistory()
+    } else if (options.recordUndo && prevHtml && prevHtml !== nextHtml) {
+      pushUndoState(prevHtml)
+    }
     skipNextLiveIframeSyncRef.current = true
+    currentHtmlRef.current = nextHtml
     setCurrentHtml(nextHtml)
-    autoSave(nextHtml)
+    if (options.save) autoSave(nextHtml)
+  }
+
+  const commitLiveEditorHtml = (html: string) => {
+    applyEditorHtml(html, { recordUndo: true, save: true })
+  }
+
+  const applyUndo = () => {
+    const previous = undoHistoryRef.current[undoHistoryRef.current.length - 1]
+    if (!previous) return
+    const current = currentHtmlRef.current
+    undoHistoryRef.current = undoHistoryRef.current.slice(0, -1)
+    if (current) {
+      redoHistoryRef.current = [...redoHistoryRef.current.slice(-19), current]
+    }
+    syncEditorHistory()
+    applyEditorHtml(previous, { save: true })
+  }
+
+  const applyRedo = () => {
+    const next = redoHistoryRef.current[redoHistoryRef.current.length - 1]
+    if (!next) return
+    const current = currentHtmlRef.current
+    redoHistoryRef.current = redoHistoryRef.current.slice(0, -1)
+    if (current) {
+      undoHistoryRef.current = [...undoHistoryRef.current.slice(-19), current]
+    }
+    syncEditorHistory()
+    applyEditorHtml(next, { save: true })
   }
 
   useEffect(() => {
@@ -646,7 +689,7 @@ const autoSave = async (html: string) => {
     setActivePageId(page.id)
     setUrl(page.url || project.url || "")
     setLoadedUrl(page.url || project.url || "")
-    setCurrentHtml(pageHtml)
+    applyEditorHtml(pageHtml, { resetHistory: true })
     setTranslationInfo(null)
     setCurrentPlatform(resolvePlatform(project.platform, page.url || project.url, pageHtml))
     setCurrentPlatformGuide(project.platformGuide ?? null)
@@ -699,7 +742,7 @@ const autoSave = async (html: string) => {
   const resetLoadedDocument = (nextUrl = "", nextPlatform: SitePlatform = "unknown") => {
     setUrl(nextUrl)
     setLoadedUrl("")
-    setCurrentHtml("")
+    applyEditorHtml("", { resetHistory: true })
     setProjectPages([])
     setActivePageId(null)
     setTranslationInfo(null)
@@ -738,7 +781,7 @@ const autoSave = async (html: string) => {
       const detectedPlatform = headerPlatform !== "unknown" ? headerPlatform : detectSitePlatform(resolvedUrl, html)
       setUrl(resolvedUrl)
       setLoadedUrl(resolvedUrl)
-      setCurrentHtml(html)
+      applyEditorHtml(html, { resetHistory: true })
       setCurrentPlatform(detectedPlatform)
       renderToIframe(html)
       setStatus("ok");
@@ -774,7 +817,7 @@ const autoSave = async (html: string) => {
     if (inlineHtml && hasMeaningfulProjectHtml(inlineHtml)) {
       setUrl(project.url || "")
       setLoadedUrl(project.url || "")
-      setCurrentHtml(inlineHtml)
+      applyEditorHtml(inlineHtml, { resetHistory: true })
       setCurrentPlatform(resolvePlatform(project.platform, project.url, inlineHtml))
       setCurrentPlatformGuide(project.platformGuide ?? null)
       setExportWarnings(project.latestExport?.manifest?.warnings || [])
@@ -791,7 +834,7 @@ const autoSave = async (html: string) => {
     if (!project.url && projectHtml) {
       setUrl("")
       setLoadedUrl("")
-      setCurrentHtml(projectHtml)
+      applyEditorHtml(projectHtml, { resetHistory: true })
       setCurrentPlatform(resolvePlatform(project.platform, project.url, projectHtml))
       setCurrentPlatformGuide(project.platformGuide ?? null)
       setExportWarnings(project.latestExport?.manifest?.warnings || [])
@@ -1024,6 +1067,24 @@ const autoSave = async (html: string) => {
     window.addEventListener("bo:ai-approval-request", onReq)
     return () => window.removeEventListener("bo:ai-approval-request", onReq)
   }, [])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (view !== "editor") return
+      const meta = event.metaKey || event.ctrlKey
+      if (!meta || event.altKey) return
+      const key = event.key.toLowerCase()
+      if (key !== "z") return
+      event.preventDefault()
+      if (event.shiftKey) {
+        applyRedo()
+        return
+      }
+      applyUndo()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [view])
 
 
   const isEdit = mode === "edit";
@@ -1307,13 +1368,19 @@ useEffect(() => {
 
           <button
             className="editor-btn"
-            onClick={() => {
-              const prev = undoPop()
-              if (prev) setCurrentHtml(prev)
-            }}
+            onClick={applyUndo}
             title="Undo latest change"
+            disabled={!undoHistory.length}
           >
             Undo
+          </button>
+          <button
+            className="editor-btn"
+            onClick={applyRedo}
+            title="Redo latest change"
+            disabled={!redoHistory.length}
+          >
+            Redo
           </button>
         </div>
 
