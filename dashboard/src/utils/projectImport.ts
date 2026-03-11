@@ -27,6 +27,7 @@ export async function filesToImportEntries(files: Iterable<File>): Promise<Proje
 }
 
 export function summarizeImportPreview(preview: ProjectImportPreview) {
+  if (preview.analysis?.overview) return preview.analysis.overview
   const pageCount = Array.isArray(preview.pages) ? preview.pages.length : 0
   const pageLabel = `${pageCount} page${pageCount === 1 ? "" : "s"}`
   const urlLabel = preview.url ? preview.url.replace(/^https?:\/\//i, "") : "local project"

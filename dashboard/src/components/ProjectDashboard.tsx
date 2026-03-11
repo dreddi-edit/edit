@@ -7,6 +7,7 @@ import {
   apiScanProjectPages,
   type Project,
   type ProjectAssignee,
+  type ProjectImportAnalysis,
   type ProjectPage,
 } from "../api/projects"
 import { apiGetPlan, apiGetBalance, apiGetCreditsTransactions } from "../api/credits"
@@ -577,6 +578,21 @@ const DASHBOARD_RUNTIME_STRINGS = Array.from(
       "Asset library",
       "Batch import images, videos, logos, and brand files.",
       "Imported source ready",
+      "Import check",
+      "Homepage",
+      "Pages to create",
+      "Content sources",
+      "Support files",
+      "Warnings",
+      "Not detected",
+      "No page templates detected",
+      "No separate copy sources found",
+      "No support files detected",
+      "confidence",
+      "styles",
+      "assets",
+      "and",
+      "more",
       "Clear import",
       "Easy imports now support live URL crawl, sitemap.xml, ZIP websites, folders, HTML, SVG, Markdown, DOCX, PDF briefs, screenshots, and asset libraries.",
       "Enter a website URL first.",
@@ -808,6 +824,14 @@ function displayMemberName(member?: Pick<ProjectAssignee, "name" | "email"> | nu
 
 function fileNameWithoutExtension(name: string) {
   return name.replace(/\.[^.]+$/, "")
+}
+
+function formatImportPathLabel(value: string) {
+  const normalized = String(value || "").replace(/^\/+/, "")
+  if (!normalized) return "/"
+  const segments = normalized.split("/").filter(Boolean)
+  if (segments.length <= 2) return normalized
+  return `${segments.slice(0, 2).join("/")}/.../${segments.at(-1)}`
 }
 
 function escapeHtml(value: string) {
@@ -1766,6 +1790,7 @@ export default function ProjectDashboard({
   const [newUploadPages, setNewUploadPages] = useState<ProjectPage[]>([])
   const [newUploadPlatform, setNewUploadPlatform] = useState<SitePlatform>("static")
   const [newImportSummary, setNewImportSummary] = useState("")
+  const [newImportAnalysis, setNewImportAnalysis] = useState<ProjectImportAnalysis | null>(null)
   const [newImportMode, setNewImportMode] = useState<ProjectImportMode>("crawl")
   const [newImporting, setNewImporting] = useState(false)
   const [landingName, setLandingName] = useState("")
@@ -2083,6 +2108,7 @@ export default function ProjectDashboard({
     setNewUploadPages([])
     setNewUploadPlatform("static")
     setNewImportSummary("")
+    setNewImportAnalysis(null)
     setNewImportMode("crawl")
     if (localFileInputRef.current) localFileInputRef.current.value = ""
     if (folderInputRef.current) folderInputRef.current.value = ""
@@ -2379,12 +2405,14 @@ export default function ProjectDashboard({
     pages?: ProjectPage[]
     platform?: SitePlatform
     summary?: string
+    analysis?: ProjectImportAnalysis
   }) => {
     setNewUploadHtml(preview.html || "")
     setNewUploadPages(preview.pages || [])
     setNewUploadPlatform(preview.platform || "static")
     setNewUploadName(preview.name || "")
     setNewImportSummary(preview.summary || summarizeImportPreview(preview))
+    setNewImportAnalysis(preview.analysis || null)
     if (!newName.trim() && preview.name) setNewName(preview.name)
     if (preview.url) setNewUrl(preview.url)
   }
@@ -2425,6 +2453,7 @@ export default function ProjectDashboard({
         kind: "entries",
         entries,
         title: fileNameWithoutExtension(file.name),
+        entryMode: "single-file",
       })
       applyImportPreview(preview)
       toast.success(preview.summary || `${rt("Loaded")} ${file.name}`)
@@ -2446,6 +2475,7 @@ export default function ProjectDashboard({
         entries,
         title: selectedFiles[0]?.webkitRelativePath?.split("/")[0] || rt("Imported folder"),
         summary: rt("Folder imported into project pages"),
+        entryMode: "folder",
       })
       applyImportPreview(preview)
       toast.success(preview.summary || rt("Folder imported"))
@@ -2526,6 +2556,7 @@ export default function ProjectDashboard({
         entries,
         title: rt("Asset library"),
         summary: rt("Asset library imported into one project page"),
+        entryMode: "assets",
       })
       applyImportPreview(preview)
       toast.success(preview.summary || rt("Asset library imported"))
@@ -3892,12 +3923,92 @@ export default function ProjectDashboard({
                     <div className="pd-import-summary">
                       <div className="pd-import-summary-head">
                         <strong>{newUploadName || rt("Imported source ready")}</strong>
-                        <span>{newImportSummary || summarizeImportPreview({ name: newUploadName || "", html: newUploadHtml, url: newUrl, pages: newUploadPages, platform: newUploadPlatform })}</span>
+                        <span>{newImportSummary || summarizeImportPreview({ name: newUploadName || "", html: newUploadHtml, url: newUrl, pages: newUploadPages, platform: newUploadPlatform, analysis: newImportAnalysis || undefined })}</span>
                       </div>
                       <div className="pd-import-summary-meta">
-                        <span>{(newUploadPages.length || (newUploadHtml ? 1 : 0))} {rt("pages")}</span>
+                        <span>{(newImportAnalysis?.pageCount || newUploadPages.length || (newUploadHtml ? 1 : 0))} {rt("pages")}</span>
                         <span>{getPlatformMeta(newUploadPlatform).label}</span>
+                        {newImportAnalysis?.projectType ? <span>{newImportAnalysis.projectType}</span> : null}
+                        {newImportAnalysis?.confidence ? <span>{rt("confidence")} · {newImportAnalysis.confidence}</span> : null}
                       </div>
+                      {newImportAnalysis ? (
+                        <div className="pd-import-analysis">
+                          <div className="pd-import-analysis-hero">
+                            <div className="pd-import-analysis-copy">
+                              <span className="pd-import-analysis-label">{rt("Import check")}</span>
+                              <strong>{newImportAnalysis.projectType}</strong>
+                              <p>{newImportAnalysis.overview || newImportSummary}</p>
+                            </div>
+                            <div className="pd-import-analysis-stats">
+                              <span>{newImportAnalysis.pageCount} {rt("pages")}</span>
+                              <span>{newImportAnalysis.styleCount} {rt("styles")}</span>
+                              <span>{newImportAnalysis.assetCount} {rt("assets")}</span>
+                            </div>
+                          </div>
+                          <div className="pd-import-analysis-grid">
+                            <div className="pd-import-analysis-card">
+                              <span className="pd-import-analysis-label">{rt("Homepage")}</span>
+                              <strong>{newImportAnalysis.homepageFile ? formatImportPathLabel(newImportAnalysis.homepageFile) : rt("Not detected")}</strong>
+                              <span>{newImportAnalysis.homepagePath || "/"}</span>
+                            </div>
+                            <div className="pd-import-analysis-card">
+                              <span className="pd-import-analysis-label">{rt("Pages to create")}</span>
+                              {newImportAnalysis.pageCandidates.length ? (
+                                <ul>
+                                  {newImportAnalysis.pageCandidates.slice(0, 5).map((entry) => (
+                                    <li key={entry}>{formatImportPathLabel(entry)}</li>
+                                  ))}
+                                  {newImportAnalysis.pageCandidates.length > 5 ? (
+                                    <li>{rt("and")} {newImportAnalysis.pageCandidates.length - 5} {rt("more")}</li>
+                                  ) : null}
+                                </ul>
+                              ) : (
+                                <span>{rt("No page templates detected")}</span>
+                              )}
+                            </div>
+                            <div className="pd-import-analysis-card">
+                              <span className="pd-import-analysis-label">{rt("Content sources")}</span>
+                              {newImportAnalysis.contentSources.length ? (
+                                <ul>
+                                  {newImportAnalysis.contentSources.slice(0, 5).map((entry) => (
+                                    <li key={entry}>{formatImportPathLabel(entry)}</li>
+                                  ))}
+                                  {newImportAnalysis.localeFiles?.length ? (
+                                    <li>{newImportAnalysis.localeFiles.slice(0, 2).join(" · ")}</li>
+                                  ) : null}
+                                </ul>
+                              ) : (
+                                <span>{rt("No separate copy sources found")}</span>
+                              )}
+                            </div>
+                            <div className="pd-import-analysis-card">
+                              <span className="pd-import-analysis-label">{rt("Support files")}</span>
+                              {newImportAnalysis.supportFiles.length ? (
+                                <ul>
+                                  {newImportAnalysis.supportFiles.slice(0, 5).map((entry) => (
+                                    <li key={entry}>{formatImportPathLabel(entry)}</li>
+                                  ))}
+                                  {newImportAnalysis.supportFiles.length > 5 ? (
+                                    <li>{rt("and")} {newImportAnalysis.supportFiles.length - 5} {rt("more")}</li>
+                                  ) : null}
+                                </ul>
+                              ) : (
+                                <span>{rt("No support files detected")}</span>
+                              )}
+                            </div>
+                          </div>
+                          {newImportAnalysis.warnings.length ? (
+                            <div className="pd-import-analysis-warnings">
+                              <span className="pd-import-analysis-label">{rt("Warnings")}</span>
+                              <ul>
+                                {newImportAnalysis.warnings.map((warning) => (
+                                  <li key={warning}>{warning}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                       <button
                         className="pd-btn"
                         type="button"
@@ -3907,6 +4018,7 @@ export default function ProjectDashboard({
                           setNewUploadPlatform("static")
                           setNewUploadName("")
                           setNewImportSummary("")
+                          setNewImportAnalysis(null)
                           if (localFileInputRef.current) localFileInputRef.current.value = ""
                           if (folderInputRef.current) folderInputRef.current.value = ""
                           if (zipInputRef.current) zipInputRef.current.value = ""

@@ -46,6 +46,21 @@ const PAGE_SKIP_EXTENSIONS = new Set([
   ".pdf", ".zip", ".xml", ".json", ".txt", ".css", ".js",
   ".mp4", ".mov", ".mp3", ".wav", ".webm", ".woff", ".woff2", ".ttf", ".eot", ".otf",
 ])
+const HOMEPAGE_TEMPLATE_NAMES = new Set(["index", "home", "homepage", "front-page", "front_page", "landing"])
+const CONTENT_SOURCE_SEGMENTS = new Set(["text", "texts", "copy", "content", "contents", "locale", "locales", "i18n", "translations"])
+const WORDPRESS_THEME_SIGNALS = new Set([
+  "functions.php",
+  "style.css",
+  "front-page.php",
+  "home.php",
+  "page.php",
+  "single.php",
+  "archive.php",
+  "theme.json",
+])
+const WORDPRESS_SUPPORT_NAMES = new Set(["functions", "header", "footer", "sidebar", "comments", "searchform", "theme", "screenshot"])
+const SHOPIFY_THEME_SEGMENTS = new Set(["sections", "snippets", "templates", "layout", "config"])
+const LOCALE_FILE_PATTERN = /(?:^|[._-])(en|de|fr|es|it|nl|pt|pl|cs|sv|no|da|fi|tr|ro|hu|el|ar|he|ja|ko|zh|uk|ru)(?:[._-]|$)/i
 
 function cleanText(value) {
   return String(value || "").replace(/\s+/g, " ").trim()
@@ -150,6 +165,65 @@ function normalizeEntryPath(entryName) {
     .replace(/^\/+/, "")
   const normalized = path.posix.normalize(raw).replace(/^(\.\.(\/|$))+/, "")
   return normalized === "." ? "" : normalized
+}
+
+function stripCommonRootPrefix(filePath, rootPrefix = "") {
+  const normalized = normalizeEntryPath(filePath)
+  const prefix = normalizeEntryPath(rootPrefix)
+  if (!prefix) return normalized
+  return normalized.startsWith(`${prefix}/`) ? normalized.slice(prefix.length + 1) : normalized
+}
+
+function detectCommonRootPrefix(paths) {
+  const segments = Array.isArray(paths)
+    ? paths
+        .map((entry) => normalizeEntryPath(entry).split("/").filter(Boolean))
+        .filter((parts) => parts.length > 1)
+    : []
+  if (!segments.length) return ""
+  const [first] = segments
+  const root = first[0]
+  if (!root) return ""
+  if (segments.every((parts) => parts[0] === root)) return root
+  return ""
+}
+
+function detectLocaleCode(filePath) {
+  const match = stripCommonRootPrefix(filePath).match(LOCALE_FILE_PATTERN)
+  return match?.[1]?.toLowerCase() || ""
+}
+
+function humanizeLocaleCode(code) {
+  const value = String(code || "").toLowerCase()
+  if (!value) return ""
+  return (
+    {
+      en: "English",
+      de: "German",
+      fr: "French",
+      es: "Spanish",
+      it: "Italian",
+      nl: "Dutch",
+      pt: "Portuguese",
+      pl: "Polish",
+      cs: "Czech",
+      sv: "Swedish",
+      no: "Norwegian",
+      da: "Danish",
+      fi: "Finnish",
+      tr: "Turkish",
+      ro: "Romanian",
+      hu: "Hungarian",
+      el: "Greek",
+      ar: "Arabic",
+      he: "Hebrew",
+      ja: "Japanese",
+      ko: "Korean",
+      zh: "Chinese",
+      uk: "Ukrainian",
+      ru: "Russian",
+    }[value] || value.toUpperCase()
+  )
 }
 
 function decodeReference(ref) {
@@ -456,20 +530,24 @@ function pickPrimaryPage(pages) {
   return pages.find((page) => page.path === "/" || /index/i.test(page.id)) || pages[0] || null
 }
 
-function buildPreviewFromPages({ name, url = "", pages = [], platform = "static", summary = "", source = "import" }) {
+function buildPreviewFromPages({ name, url = "", pages = [], platform = "static", summary = "", source = "import", analysis = null }) {
+  const preferredPlatform = cleanText(platform || "").toLowerCase()
   const primaryPage = pickPrimaryPage(pages)
   const normalized = normalizeProjectDocument({
     html: primaryPage?.html || "",
     url,
     platform,
   })
+  const resolvedPlatform = preferredPlatform && preferredPlatform !== "unknown"
+    ? preferredPlatform
+    : normalized.meta.platform || "static"
   const normalizedPages = pages.map((page) => {
     const pageHtml = String(page.html || "")
     const pageUrl = page.url || page.path || url || ""
     const normalizedPage = normalizeProjectDocument({
       html: pageHtml,
       url: /^https?:\/\//i.test(pageUrl) ? pageUrl : url || "",
-      platform: normalized.meta.platform || platform,
+      platform: resolvedPlatform,
     })
     return buildPageRecord({
       id: page.id,
@@ -486,8 +564,14 @@ function buildPreviewFromPages({ name, url = "", pages = [], platform = "static"
     url: normalized.meta.url || url || "",
     html: normalized.html,
     pages: normalizedPages,
-    platform: normalized.meta.platform || platform || "static",
+    platform: resolvedPlatform,
     summary: cleanText(summary) || `${source} import ready`,
+    analysis: analysis
+      ? {
+          ...analysis,
+          platform: resolvedPlatform,
+        }
+      : undefined,
   }
 }
 
@@ -529,17 +613,104 @@ function entryToBufferMap(entries) {
 function convertTextEntryToHtml(entryPath, text) {
   const ext = path.extname(entryPath).toLowerCase()
   const title = pathToTitle(entryPath)
+  const preprocessed = preprocessTemplateSource(entryPath, text)
   if (HTML_LIKE_FILE_EXTENSIONS.has(ext)) {
-    const cleaned = stripTemplateSyntax(text, ext)
+    const cleaned = stripTemplateSyntax(preprocessed, ext)
     if (/<html[\s>]/i.test(cleaned) || /<!doctype html/i.test(cleaned)) return cleaned
     if (looksLikeMarkupPage(cleaned)) return wrapMarkupFragment(title, cleaned)
     return wrapImportedHtml(title, `<pre>${escapeHtml(cleaned)}</pre>`, "Imported template")
   }
-  if (ext === ".svg") return wrapImportedHtml(title, `<div style="display:flex;justify-content:center;padding:24px;background:#fff;border-radius:24px;">${text}</div>`, "SVG import")
+  if (ext === ".svg") return wrapImportedHtml(title, `<div style="display:flex;justify-content:center;padding:24px;background:#fff;border-radius:24px;">${preprocessed}</div>`, "SVG import")
   if (TEXT_FILE_EXTENSIONS.has(ext)) {
-    return ext === ".txt" ? plainTextToHtml(text, title) : markdownToHtml(text, title)
+    return ext === ".txt" ? plainTextToHtml(preprocessed, title) : markdownToHtml(preprocessed, title)
   }
-  return wrapImportedHtml(title, `<pre>${escapeHtml(text)}</pre>`, "Imported file")
+  return wrapImportedHtml(title, `<pre>${escapeHtml(preprocessed)}</pre>`, "Imported file")
+}
+
+function preprocessTemplateSource(entryPath, text) {
+  const ext = path.extname(entryPath).toLowerCase()
+  let output = String(text || "")
+  if (!output) return output
+  if ([".php", ".phtml", ".php5"].includes(ext)) {
+    output = output.replace(
+      /<\?(?:php|=)?[\s\S]*?(?:get_template_directory_uri|get_stylesheet_directory_uri|get_theme_file_uri)\s*\([^)]*\)?[\s\S]*?\?>/gi,
+      ".",
+    )
+    output = output.replace(
+      /<\?(?:php|=)?[\s\S]*?(?:home_url|site_url)\s*\(\s*['"]([^'"]+)['"]\s*\)[\s\S]*?\?>/gi,
+      "$1",
+    )
+  }
+  return output
+}
+
+function isWordPressThemeSupportFile(entryPath) {
+  const relative = stripCommonRootPrefix(entryPath).toLowerCase()
+  const baseName = path.posix.basename(relative)
+  const name = baseName.replace(/\.[a-z0-9]+$/i, "")
+  if (WORDPRESS_THEME_SIGNALS.has(baseName) || WORDPRESS_SUPPORT_NAMES.has(name)) return true
+  return false
+}
+
+function isLikelyContentSource(entryPath) {
+  const relative = stripCommonRootPrefix(entryPath).toLowerCase()
+  const segments = relative.split("/").filter(Boolean)
+  if (segments.some((segment) => CONTENT_SOURCE_SEGMENTS.has(segment))) return true
+  const ext = path.extname(relative)
+  if (!TEXT_FILE_EXTENSIONS.has(ext)) return false
+  return Boolean(detectLocaleCode(relative))
+}
+
+function isHomepageTemplate(entryPath) {
+  const relative = stripCommonRootPrefix(entryPath).toLowerCase()
+  const baseName = path.posix.basename(relative, path.extname(relative))
+  return HOMEPAGE_TEMPLATE_NAMES.has(baseName)
+}
+
+function buildImportedPagePath(entryPath, rootPrefix = "") {
+  const relative = stripCommonRootPrefix(entryPath, rootPrefix)
+  const ext = path.extname(relative)
+  const directory = path.posix.dirname(relative)
+  const baseName = path.posix.basename(relative, ext)
+  if (isHomepageTemplate(relative)) return "/"
+
+  let slug = baseName
+  const wpNamedTemplate = slug.match(/^(?:page|single|archive|template)[-_](.+)$/i)
+  if (wpNamedTemplate?.[1]) slug = wpNamedTemplate[1]
+
+  const relativeDir = directory && directory !== "." ? directory : ""
+  const fullPath = [relativeDir, slug].filter(Boolean).join("/")
+  return `/${fullPath}`.replace(/\/index$/i, "/").replace(/\/{2,}/g, "/")
+}
+
+function getPageCandidatePriority(entryPath) {
+  const relative = stripCommonRootPrefix(entryPath).toLowerCase()
+  if (isHomepageTemplate(relative)) return 100
+  if (/front-page\.php$/i.test(relative)) return 120
+  if (/page[-_]/i.test(relative)) return 80
+  if (/single[-_]/i.test(relative)) return 72
+  if (/archive[-_]/i.test(relative)) return 68
+  if (/\.html?$/i.test(relative)) return 64
+  return 50
+}
+
+function buildAnalysisOverview(analysis) {
+  const pageCount = analysis.pageCandidates.length
+  const contentCount = analysis.contentSources.length
+  const supportCount = analysis.supportFiles.length
+  const parts = [
+    `Detected a ${analysis.projectType.toLowerCase()} with ${pageCount} editable page${pageCount === 1 ? "" : "s"}.`,
+  ]
+  if (analysis.homepageFile) {
+    parts.push(`${path.posix.basename(analysis.homepageFile)} will be used as the homepage.`)
+  }
+  if (contentCount) {
+    parts.push(`${contentCount} content source file${contentCount === 1 ? "" : "s"} will stay as references instead of becoming pages.`)
+  }
+  if (supportCount) {
+    parts.push(`${supportCount} support/template file${supportCount === 1 ? "" : "s"} will stay out of the page list.`)
+  }
+  return parts.join(" ")
 }
 
 function isLikelyPageEntry(entryPath) {
@@ -572,78 +743,221 @@ function isLikelyPageEntry(entryPath) {
   return true
 }
 
-function analyzeImportEntries(entries) {
-  const files = Array.isArray(entries) ? entries.map((entry) => normalizeEntryPath(entry.name)).filter(Boolean) : []
-  const htmlLike = []
-  const textPages = []
-  let cssCount = 0
-  let scriptCount = 0
-  let assetCount = 0
+function analyzeImportEntries(entries, options = {}) {
+  const { textEntries, assetEntries } = entryToBufferMap(entries)
+  const entryPaths = Array.isArray(entries) ? entries.map((entry) => normalizeEntryPath(entry.name)).filter(Boolean) : []
+  const rootPrefix = detectCommonRootPrefix(entryPaths)
+  const relativePaths = entryPaths.map((entryPath) => stripCommonRootPrefix(entryPath, rootPrefix))
+  const mode = cleanText(options.entryMode || "auto").toLowerCase()
+  const forceAssetLibrary = mode === "assets"
+  const hasHtmlLikeFiles = relativePaths.some((entryPath) => HTML_LIKE_FILE_EXTENSIONS.has(path.extname(entryPath).toLowerCase()))
+  const hasWordPressSignals = relativePaths.some((entryPath) => WORDPRESS_THEME_SIGNALS.has(entryPath.toLowerCase()))
+  const hasShopifySignals = relativePaths.some((entryPath) => {
+    const segments = entryPath.toLowerCase().split("/").filter(Boolean)
+    return segments.some((segment) => SHOPIFY_THEME_SEGMENTS.has(segment)) || /\.liquid$/i.test(entryPath)
+  })
+  const allowTextPages = mode === "single-file" || (!hasHtmlLikeFiles && !forceAssetLibrary)
+  const allowSvgPage = mode === "single-file"
 
-  for (const file of files) {
-    const ext = path.extname(file).toLowerCase()
-    if (HTML_LIKE_FILE_EXTENSIONS.has(ext)) {
-      htmlLike.push(file)
-      continue
-    }
-    if (TEXT_FILE_EXTENSIONS.has(ext) || ext === ".svg") {
-      textPages.push(file)
-      continue
-    }
+  const pageEntries = []
+  const supportFiles = []
+  const contentSources = []
+  const styleFiles = []
+  const scriptFiles = []
+  const assetFiles = []
+  const localeFiles = []
+
+  for (const entryPath of entryPaths) {
+    const relativePath = stripCommonRootPrefix(entryPath, rootPrefix)
+    const ext = path.extname(relativePath).toLowerCase()
     if (CSS_FILE_EXTENSIONS.has(ext)) {
-      cssCount += 1
+      styleFiles.push(relativePath)
       continue
     }
     if (SCRIPT_FILE_EXTENSIONS.has(ext)) {
-      scriptCount += 1
+      scriptFiles.push(relativePath)
       continue
     }
-    assetCount += 1
+    if (IMAGE_FILE_EXTENSIONS.has(ext) || MEDIA_FILE_EXTENSIONS.has(ext) || FONT_FILE_EXTENSIONS.has(ext)) {
+      if (ext === ".svg" && allowSvgPage && textEntries.has(entryPath) && entryPaths.length === 1) {
+        const html = inlineHtmlAssets(convertTextEntryToHtml(entryPath, textEntries.get(entryPath)?.text || ""), entryPath, assetEntries, textEntries)
+        pageEntries.push({
+          entryPath: relativePath,
+          pagePath: "/",
+          priority: 100,
+          name: extractDocumentTitleFromHtml(html, pathToTitle(relativePath)),
+          title: extractDocumentTitleFromHtml(html, pathToTitle(relativePath)),
+          html,
+        })
+      } else {
+        assetFiles.push(relativePath)
+      }
+      continue
+    }
+    if (TEXT_FILE_EXTENSIONS.has(ext)) {
+      const localeCode = detectLocaleCode(relativePath)
+      if (localeCode) localeFiles.push(`${relativePath} (${humanizeLocaleCode(localeCode)})`)
+      if (!allowTextPages || isLikelyContentSource(relativePath) || forceAssetLibrary) {
+        contentSources.push(relativePath)
+        continue
+      }
+      const html = inlineHtmlAssets(convertTextEntryToHtml(entryPath, textEntries.get(entryPath)?.text || ""), entryPath, assetEntries, textEntries)
+      pageEntries.push({
+        entryPath: relativePath,
+        pagePath: "/",
+        priority: 52,
+        name: extractDocumentTitleFromHtml(html, pathToTitle(relativePath)),
+        title: extractDocumentTitleFromHtml(html, pathToTitle(relativePath)),
+        html,
+      })
+      continue
+    }
+    if (!HTML_LIKE_FILE_EXTENSIONS.has(ext)) continue
+
+    const entry = textEntries.get(entryPath)
+    const preprocessed = preprocessTemplateSource(entryPath, entry?.text || "")
+    const cleaned = stripTemplateSyntax(preprocessed, ext)
+    const hasMarkup = /<!doctype html/i.test(cleaned) || /<html[\s>]/i.test(cleaned) || looksLikeMarkupPage(cleaned)
+    const homepageTemplate = isHomepageTemplate(relativePath)
+    const supportPath = !isLikelyPageEntry(relativePath) || isWordPressThemeSupportFile(relativePath)
+    const supportOnlyFile = !hasMarkup && supportPath
+    if (supportOnlyFile || forceAssetLibrary) {
+      supportFiles.push(relativePath)
+      continue
+    }
+    if (!hasMarkup && !homepageTemplate) {
+      supportFiles.push(relativePath)
+      continue
+    }
+    const rawHtml = convertTextEntryToHtml(entryPath, entry?.text || "")
+    const html = inlineHtmlAssets(rawHtml, entryPath, assetEntries, textEntries)
+    pageEntries.push({
+      entryPath: relativePath,
+      pagePath: buildImportedPagePath(relativePath, ""),
+      priority: getPageCandidatePriority(relativePath),
+      name: extractDocumentTitleFromHtml(html, pathToTitle(relativePath)),
+      title: extractDocumentTitleFromHtml(html, pathToTitle(relativePath)),
+      html,
+    })
   }
 
-  return {
-    fileCount: files.length,
-    htmlLikeCount: htmlLike.length,
-    textPageCount: textPages.length,
-    cssCount,
-    scriptCount,
-    assetCount,
+  const uniquePageEntries = []
+  const seenPagePaths = new Set()
+  for (const candidate of pageEntries.sort((left, right) => right.priority - left.priority || left.pagePath.localeCompare(right.pagePath))) {
+    const key = candidate.pagePath || "/"
+    if (seenPagePaths.has(key)) {
+      supportFiles.push(candidate.entryPath)
+      continue
+    }
+    seenPagePaths.add(key)
+    uniquePageEntries.push(candidate)
+  }
+
+  let platform = "static"
+  let projectType = "Static website bundle"
+  let confidence = "medium"
+  if (forceAssetLibrary) {
+    projectType = "Asset library"
+    confidence = "high"
+  } else if (hasWordPressSignals) {
+    platform = "wordpress"
+    projectType = "WordPress theme"
+    confidence = "high"
+  } else if (hasShopifySignals) {
+    platform = "shopify"
+    projectType = "Shopify theme bundle"
+    confidence = "high"
+  } else if (!uniquePageEntries.length && contentSources.length) {
+    projectType = "Content source bundle"
+    confidence = "medium"
+  }
+
+  const homepageEntry = uniquePageEntries.find((candidate) => candidate.pagePath === "/") || uniquePageEntries[0] || null
+  const warnings = []
+  if (!uniquePageEntries.length && assetFiles.length) warnings.push("No real page templates were found, so the upload will become an asset library.")
+  if (contentSources.length) warnings.push("Content source files will be kept as references instead of being turned into standalone pages.")
+  if (supportFiles.length) warnings.push("Support files and partial templates stay out of the editable page list.")
+  if (platform === "wordpress" && homepageEntry?.entryPath && !/front-page|home|index/i.test(homepageEntry.entryPath)) {
+    warnings.push("No dedicated front-page template was found, so the importer picked the strongest page candidate as the homepage.")
+  }
+
+  const analysis = {
+    projectType,
+    platform,
+    confidence,
+    homepageFile: homepageEntry?.entryPath || "",
+    homepagePath: homepageEntry?.pagePath || "",
+    pageCandidates: uniquePageEntries.map((entry) => entry.entryPath),
+    supportFiles: Array.from(new Set(supportFiles)).sort((left, right) => left.localeCompare(right)),
+    contentSources: Array.from(new Set(contentSources)).sort((left, right) => left.localeCompare(right)),
+    localeFiles: Array.from(new Set(localeFiles)).sort((left, right) => left.localeCompare(right)),
+    styleFiles: Array.from(new Set(styleFiles)).sort((left, right) => left.localeCompare(right)),
+    scriptFiles: Array.from(new Set(scriptFiles)).sort((left, right) => left.localeCompare(right)),
+    assetFiles: Array.from(new Set(assetFiles)).sort((left, right) => left.localeCompare(right)),
+    warnings,
+    fileCount: entryPaths.length,
+    pageCount: uniquePageEntries.length,
+    styleCount: styleFiles.length,
+    scriptCount: scriptFiles.length,
+    assetCount: assetFiles.length,
+    rootPrefix,
+    overview: "",
+  }
+
+  analysis.overview = buildAnalysisOverview(analysis)
+  return { analysis, pageEntries: uniquePageEntries, textEntries, assetEntries }
+}
+
+async function maybeGenerateImportOverview(analysis) {
+  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY
+  if (!key) return analysis.overview
+  if (analysis.fileCount > 80) return analysis.overview
+  try {
+    const prompt = [
+      "You are reviewing an uploaded website package before import.",
+      "Summarize what this upload is, which file should become the homepage, and which files should stay as support/content references.",
+      "Keep it under 90 words. Preserve filenames exactly. No markdown.",
+      `Project type: ${analysis.projectType}`,
+      `Platform: ${analysis.platform}`,
+      `Homepage file: ${analysis.homepageFile || "none"}`,
+      `Page candidates: ${(analysis.pageCandidates || []).slice(0, 12).join(", ") || "none"}`,
+      `Content sources: ${(analysis.contentSources || []).slice(0, 12).join(", ") || "none"}`,
+      `Support files: ${(analysis.supportFiles || []).slice(0, 12).join(", ") || "none"}`,
+      `Warnings: ${(analysis.warnings || []).join(" ") || "none"}`,
+    ].join("\n")
+    const generated = await callGemini({ prompt, model: "gemini-2.5-flash" })
+    const summary = cleanText(stripCodeFence(generated))
+    return summary || analysis.overview
+  } catch {
+    return analysis.overview
   }
 }
 
-function buildPagesFromEntries(entries, options = {}) {
-  const { textEntries, assetEntries } = entryToBufferMap(entries)
-  const analysis = analyzeImportEntries(entries)
-  const pageCandidates = []
+async function buildPagesFromEntries(entries, options = {}) {
+  const { analysis, pageEntries, assetEntries } = analyzeImportEntries(entries, options)
+  const pages = []
 
-  for (const [entryPath, entry] of textEntries) {
-    const ext = path.extname(entryPath).toLowerCase()
-    if (!HTML_LIKE_FILE_EXTENSIONS.has(ext) && ext !== ".svg" && !TEXT_FILE_EXTENSIONS.has(ext)) continue
-    if (!TEXT_FILE_EXTENSIONS.has(ext) && ext !== ".svg" && !isLikelyPageEntry(entryPath)) continue
-    const rawHtml = convertTextEntryToHtml(entryPath, entry.text)
-    const html = inlineHtmlAssets(rawHtml, entryPath, assetEntries, textEntries)
-    const pagePath = filePathToPagePath(entryPath)
-    const fileName = path.posix.basename(entryPath)
-    pageCandidates.push(
+  for (const entry of pageEntries) {
+    pages.push(
       buildPageRecord({
-        id: pathToPageId(entryPath),
-        name: extractDocumentTitleFromHtml(html, pathToTitle(fileName)),
-        title: extractDocumentTitleFromHtml(html, pathToTitle(fileName)),
-        path: pagePath,
-        url: pagePath,
-        html,
+        id: pathToPageId(entry.pagePath || entry.entryPath),
+        name: entry.name,
+        title: entry.title,
+        path: entry.pagePath || "/",
+        url: entry.pagePath || "/",
+        html: entry.html,
       }),
     )
   }
 
-  if (!pageCandidates.length) {
+  if (!pages.length) {
     const assetEntriesList = Array.from(assetEntries.values()).filter((entry) => {
       const ext = path.extname(entry.name).toLowerCase()
       return IMAGE_FILE_EXTENSIONS.has(ext) || MEDIA_FILE_EXTENSIONS.has(ext) || FONT_FILE_EXTENSIONS.has(ext)
     })
     if (!assetEntriesList.length) throw new Error("No importable pages or assets found in the uploaded files.")
     const html = buildAssetLibraryHtml(assetEntriesList, options.title || "Asset library")
-    pageCandidates.push(
+    pages.push(
       buildPageRecord({
         id: "assets",
         name: options.title || "Asset library",
@@ -653,26 +967,35 @@ function buildPagesFromEntries(entries, options = {}) {
         html,
       }),
     )
+    analysis.projectType = "Asset library"
+    analysis.platform = "static"
+    analysis.confidence = "high"
+    if (!analysis.homepageFile) {
+      analysis.homepageFile = "Generated asset library"
+      analysis.homepagePath = "/"
+    }
   }
 
-  pageCandidates.sort((left, right) => {
+  pages.sort((left, right) => {
     if (left.path === "/") return -1
     if (right.path === "/") return 1
     return left.path.localeCompare(right.path)
   })
 
+  analysis.overview = await maybeGenerateImportOverview(analysis)
   const summary =
-    pageCandidates.length > 0
-      ? `${pageCandidates.length} structured page${pageCandidates.length === 1 ? "" : "s"} from ${analysis.fileCount} file${analysis.fileCount === 1 ? "" : "s"} · ${analysis.cssCount} styles · ${analysis.scriptCount} scripts · ${analysis.assetCount} assets`
+    pages.length > 0
+      ? `${pages.length} structured page${pages.length === 1 ? "" : "s"} from ${analysis.fileCount} file${analysis.fileCount === 1 ? "" : "s"} · ${analysis.styleCount} styles · ${analysis.scriptCount} scripts · ${analysis.assetCount} assets`
       : options.summary || `${analysis.fileCount} files analyzed`
 
   return buildPreviewFromPages({
-    name: options.title || pathToTitle(pageCandidates[0]?.name || "Imported project"),
+    name: options.title || pathToTitle(pages[0]?.name || "Imported project"),
     url: "",
-    pages: pageCandidates,
-    platform: "static",
+    pages,
+    platform: analysis.platform || "static",
     summary,
     source: "Local",
+    analysis,
   })
 }
 
@@ -1071,9 +1394,10 @@ export async function buildProjectImportPreview(payload = {}) {
 
   if (kind === "entries") {
     const entries = Array.isArray(payload.entries) ? payload.entries : []
-    return buildPagesFromEntries(entries, {
+    return await buildPagesFromEntries(entries, {
       title: cleanText(payload.title || payload.fileName || "Imported files"),
       summary: cleanText(payload.summary || ""),
+      entryMode: cleanText(payload.entryMode || "auto"),
     })
   }
 
@@ -1081,9 +1405,10 @@ export async function buildProjectImportPreview(payload = {}) {
     const fileName = cleanText(payload.fileName || "site.zip")
     const buffer = readBase64Buffer(payload.contentBase64)
     const entries = await readZipEntries(buffer)
-    return buildPagesFromEntries(entries, {
+    return await buildPagesFromEntries(entries, {
       title: fileName.replace(/\.zip$/i, "") || "Imported ZIP site",
       summary: "ZIP website imported into project pages",
+      entryMode: "zip",
     })
   }
 
@@ -1097,11 +1422,12 @@ export async function buildProjectImportPreview(payload = {}) {
     if (/wordprocessingml/i.test(mimeType) || /\.docx$/i.test(fileName)) {
       return importDocxBrief(buffer, fileName)
     }
-    return buildPagesFromEntries(
+    return await buildPagesFromEntries(
       [{ name: fileName, mimeType, buffer }],
       {
         title: fileName.replace(/\.[a-z0-9]+$/i, "") || "Imported brief",
         summary: "Brief imported into one project page",
+        entryMode: "single-file",
       },
     )
   }

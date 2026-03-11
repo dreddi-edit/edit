@@ -71,6 +71,28 @@ export type ProjectImportEntry = {
   contentBase64: string
 }
 
+export type ProjectImportAnalysis = {
+  projectType: string
+  platform: SitePlatform
+  confidence: "low" | "medium" | "high"
+  homepageFile?: string
+  homepagePath?: string
+  overview?: string
+  warnings: string[]
+  pageCandidates: string[]
+  supportFiles: string[]
+  contentSources: string[]
+  localeFiles?: string[]
+  styleFiles?: string[]
+  scriptFiles?: string[]
+  assetFiles?: string[]
+  fileCount: number
+  pageCount: number
+  styleCount: number
+  scriptCount: number
+  assetCount: number
+}
+
 export type ProjectImportPreview = {
   name: string
   url: string
@@ -78,6 +100,7 @@ export type ProjectImportPreview = {
   pages: ProjectPage[]
   platform?: SitePlatform
   summary?: string
+  analysis?: ProjectImportAnalysis
 }
 
 export type Project = {
@@ -152,6 +175,7 @@ export async function apiCreateProject(
 export async function apiPreviewProjectImport(payload: {
   kind: "url" | "entries" | "zip" | "brief" | "screenshot"
   mode?: "single" | "crawl" | "sitemap"
+  entryMode?: "auto" | "single-file" | "folder" | "zip" | "assets"
   url?: string
   fileName?: string
   mimeType?: string

@@ -2185,7 +2185,7 @@ body[data-theme="light"] .pd-onboarding__card {
 
 .pd-import-summary {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   border: 1px solid var(--pd-border-sub);
@@ -2222,6 +2222,121 @@ body[data-theme="light"] .pd-onboarding__card {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--pd-text-3);
+}
+
+.pd-import-analysis {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pd-import-analysis-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 8px;
+  border-top: 1px solid var(--pd-border-sub);
+}
+
+.pd-import-analysis-copy {
+  min-width: 240px;
+  flex: 1 1 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pd-import-analysis-copy strong {
+  font-size: 13px;
+  color: var(--pd-text);
+}
+
+.pd-import-analysis-copy p {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--pd-text-3);
+}
+
+.pd-import-analysis-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--pd-text-3);
+}
+
+.pd-import-analysis-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.pd-import-analysis-stats span {
+  padding: 7px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--pd-border-sub);
+  background: rgba(255,255,255,0.02);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pd-text-2);
+}
+
+.pd-import-analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.pd-import-analysis-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 110px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--pd-border-sub);
+  background: rgba(255,255,255,0.02);
+}
+
+.pd-import-analysis-card strong,
+.pd-import-analysis-card span,
+.pd-import-analysis-card li {
+  font-size: 11px;
+  color: var(--pd-text-2);
+}
+
+.pd-import-analysis-card strong {
+  color: var(--pd-text);
+}
+
+.pd-import-analysis-card ul,
+.pd-import-analysis-warnings ul {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pd-import-analysis-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(245, 158, 11, 0.28);
+  background: rgba(245, 158, 11, 0.08);
+}
+
+.pd-import-analysis-warnings li {
+  font-size: 11px;
+  color: var(--pd-text-2);
 }
 
 .pd-upload-name {
