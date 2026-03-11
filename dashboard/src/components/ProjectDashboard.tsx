@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react"
-import { apiGetProjects, apiCreateProject, apiDeleteProject, type Project, type ProjectAssignee } from "../api/projects"
+import { apiGetProjects, apiCreateProject, apiDeleteProject, apiScanProjectPages, type Project, type ProjectAssignee, type ProjectPage } from "../api/projects"
 import { apiGetPlan, apiGetBalance, apiGetCreditsTransactions } from "../api/credits"
 import { apiFetch } from "../api/client"
 import CreditsPanel from "./CreditsPanel"
@@ -808,6 +808,108 @@ function normalizeThumbnailUrl(thumbnail?: string | null) {
   return thumbnail.startsWith("http") ? thumbnail : `${BASE}${thumbnail}`
 }
 
+function stripProjectHtml(value?: string) {
+  return String(value || "")
+}
+
+function extractHtmlTitle(html?: string) {
+  const source = stripProjectHtml(html)
+  if (!source) return ""
+  const titleMatch =
+    source.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)?.[1]
+    || source.match(/<meta[^>]+name=["']twitter:title["'][^>]+content=["']([^"']+)["']/i)?.[1]
+    || source.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]
+    || source.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)?.[1]
+    || ""
+  return plainTextFromHtml(titleMatch)
+}
+
+function resolvePreviewUrl(candidate?: string, baseUrl?: string) {
+  const raw = String(candidate || "").trim()
+  if (!raw) return ""
+  if (/^(data:|blob:|https?:\/\/)/i.test(raw)) return raw
+  if (raw.startsWith("/asset?")) return `${BASE}${raw}`
+  try {
+    return new URL(raw, baseUrl || window.location.origin).toString()
+  } catch {
+    if (raw.startsWith("/")) return `${BASE}${raw}`
+    return ""
+  }
+}
+
+function extractPreviewImageFromHtml(html?: string, baseUrl?: string) {
+  const source = stripProjectHtml(html)
+  if (!source) return ""
+  const candidate =
+    source.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)?.[1]
+    || source.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i)?.[1]
+    || source.match(/<img[^>]+src=["']([^"']+)["']/i)?.[1]
+    || ""
+  return resolvePreviewUrl(candidate, baseUrl)
+}
+
+function getPrimaryProjectPage(project: Project) {
+  return (project.pages || []).find((page) => page.path === "/") || project.pages?.[0] || null
+}
+
+function getProjectDisplayName(project: Project) {
+  const provided = String(project.name || "").trim()
+  const candidateTitle = getPrimaryProjectPage(project)?.title || extractHtmlTitle(getPrimaryProjectPage(project)?.html) || extractHtmlTitle(project.html)
+  if (provided.length > 2) return provided
+  if (candidateTitle) return candidateTitle
+  if (provided) return provided
+  return (project.url || "Project").replace(/^https?:\/\//, "").replace(/\/$/, "")
+}
+
+function getProjectPreviewImage(project: Project) {
+  const primaryPage = getPrimaryProjectPage(project)
+  return normalizeThumbnailUrl(project.thumbnail)
+    || extractPreviewImageFromHtml(primaryPage?.html, primaryPage?.url || project.url)
+    || extractPreviewImageFromHtml(project.html, project.url)
+    || ""
+}
+
+type ProjectPageTreeNode = {
+  key: string
+  label: string
+  page?: ProjectPage
+  children: ProjectPageTreeNode[]
+}
+
+function buildProjectPageTree(pages: ProjectPage[]) {
+  const root: ProjectPageTreeNode = {
+    key: "__root__",
+    label: "Home",
+    page: pages.find((page) => page.path === "/"),
+    children: [],
+  }
+
+  for (const page of pages.filter((entry) => entry.path !== "/").sort((left, right) => left.path.localeCompare(right.path))) {
+    const segments = page.path.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean)
+    let cursor = root
+    let currentPath = ""
+
+    for (let index = 0; index < segments.length; index += 1) {
+      currentPath += `/${segments[index]}`
+      let child = cursor.children.find((entry) => entry.key === currentPath)
+      if (!child) {
+        child = {
+          key: currentPath,
+          label: index === segments.length - 1 ? (page.title || page.name || segments[index]) : segments[index].replace(/[-_]+/g, " "),
+          children: [],
+        }
+        cursor.children.push(child)
+      }
+      cursor = child
+    }
+
+    cursor.label = page.title || page.name || cursor.label
+    cursor.page = page
+  }
+
+  return root
+}
+
 function matchesStage(filter: DashboardStage, stage?: string) {
   if (filter === "all") return true
   if (filter === "review") return stage === "internal_review" || stage === "client_review"
@@ -1018,41 +1120,56 @@ function buildSpendBuckets(transactions: CreditTransaction[], range: SpendRange)
 
 function ProjectCard({
   project,
-  onOpen,
+  onInspect,
   onDelete,
   rt,
 }: {
   project: Project
-  onOpen: () => void
+  onInspect: () => void
   onDelete: () => void
   rt: (text: string) => string
 }) {
   const platformMeta = getPlatformMeta(project.platform)
-  const initials = project.name.slice(0, 2).toUpperCase()
+  const displayName = getProjectDisplayName(project)
+  const previewImage = getProjectPreviewImage(project)
+  const [imageFailed, setImageFailed] = useState(false)
+  const effectivePreviewImage = imageFailed ? "" : previewImage
+  const initials = displayName.slice(0, 2).toUpperCase()
   const seoScore = mockSeoScore(project)
   const seoClass = seoScore == null ? "" : seoScore > 85 ? "" : seoScore > 60 ? "mid" : "low"
   const assigneeSummary = project.assignees?.length
     ? `${displayMemberName(project.assignees[0])}${project.assignees.length > 1 ? ` +${project.assignees.length - 1}` : ""}`
     : ""
 
+  useEffect(() => {
+    setImageFailed(false)
+  }, [previewImage])
+
   return (
     <article
       className="pd-card"
-      onClick={onOpen}
-      onKeyDown={event => event.key === "Enter" && onOpen()}
+      onClick={onInspect}
+      onKeyDown={event => event.key === "Enter" && onInspect()}
       tabIndex={0}
       role="button"
-      aria-label={`Open project ${project.name}`}
+      aria-label={`Inspect project ${displayName}`}
     >
       <div
         className="pd-card-thumb"
         style={{
-          background: project.thumbnail
-            ? `url(${project.thumbnail}) center/cover`
-            : gradientFromName(project.name),
+          background: gradientFromName(displayName),
         }}
       >
-        {!project.thumbnail ? (
+        {effectivePreviewImage ? (
+          <img
+            src={effectivePreviewImage}
+            alt={displayName}
+            className="pd-card-thumb-image"
+            loading="lazy"
+            onError={() => setImageFailed(true)}
+          />
+        ) : null}
+        {!effectivePreviewImage ? (
           <span className="pd-card-initials" style={{ color: platformMeta.accent }}>
             {initials}
           </span>
@@ -1075,10 +1192,11 @@ function ProjectCard({
         ) : null}
       </div>
       <div className="pd-card-body">
-        <div className="pd-card-name">{project.name}</div>
+        <div className="pd-card-name">{displayName}</div>
         <div className="pd-card-url">{(project.url || "local-project").replace(/^https?:\/\//, "")}</div>
         <div className="pd-card-tags">
           <span className={`pd-tag ${workflowClass(project.workflowStage)}`}>{rt(titleCaseFallback(workflowLabel(project.workflowStage)))}</span>
+          {project.pages?.length ? <span className="pd-tag">{project.pages.length} {rt("pages")}</span> : null}
           {project.clientName ? <span className="pd-tag">{rt("Client")} · {project.clientName}</span> : null}
           {assigneeSummary ? <span className="pd-tag">{rt("Assigned")} · {assigneeSummary}</span> : null}
         </div>
@@ -1089,6 +1207,133 @@ function ProjectCard({
         </div>
       </div>
     </article>
+  )
+}
+
+function ProjectPageTreeBranch({
+  node,
+  depth,
+  onOpenPage,
+}: {
+  node: ProjectPageTreeNode
+  depth: number
+  onOpenPage: (pageId: string) => void
+}) {
+  const page = node.page
+  return (
+    <div className="pd-page-tree-branch" style={{ "--pd-tree-depth": String(depth) } as CSSProperties}>
+      <div className="pd-page-tree-row">
+        <div className="pd-page-tree-copy">
+          <strong>{node.label}</strong>
+          <span>{page?.path || node.key.replace(/^__root__$/, "/")}</span>
+        </div>
+        {page ? (
+          <button className="pd-page-open-btn" onClick={() => onOpenPage(page.id)}>
+            Open
+          </button>
+        ) : null}
+      </div>
+      {node.children.length ? (
+        <div className="pd-page-tree-children">
+          {node.children.map((child) => (
+            <ProjectPageTreeBranch key={child.key} node={child} depth={depth + 1} onOpenPage={onOpenPage} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function ProjectExplorerModal({
+  project,
+  rt,
+  view,
+  scanning,
+  onChangeView,
+  onRescan,
+  onOpenPage,
+  onOpenHome,
+  onClose,
+}: {
+  project: Project
+  rt: (text: string) => string
+  view: "grid" | "tree"
+  scanning: boolean
+  onChangeView: (view: "grid" | "tree") => void
+  onRescan: () => void
+  onOpenPage: (pageId: string) => void
+  onOpenHome: () => void
+  onClose: () => void
+}) {
+  const pages = project.pages || []
+  const tree = buildProjectPageTree(pages)
+  const displayName = getProjectDisplayName(project)
+
+  return (
+    <div className="pd-modal-backdrop" onClick={onClose}>
+      <div className="pd-modal pd-modal-wide pd-project-explorer" onClick={(event) => event.stopPropagation()}>
+        <div className="pd-modal-header">
+          <div>
+            <div className="pd-modal-eyebrow">{rt("Project pages")}</div>
+            <div className="pd-modal-title">{displayName}</div>
+          </div>
+          <button className="pd-modal-close" onClick={onClose} aria-label={rt("Close")}>X</button>
+        </div>
+        <div className="pd-modal-body">
+          <div className="pd-project-explorer__hero">
+            <div>
+              <div className="pd-project-explorer__url">{(project.url || "local-project").replace(/^https?:\/\//, "")}</div>
+              <div className="pd-project-explorer__meta">
+                {pages.length ? `${pages.length} ${rt("pages found")}` : rt("No scanned pages yet")}
+              </div>
+            </div>
+            <div className="pd-project-explorer__actions">
+              <button
+                className={`pd-segment-btn ${view === "grid" ? "is-active" : ""}`}
+                onClick={() => onChangeView("grid")}
+              >
+                {rt("Grid")}
+              </button>
+              <button
+                className={`pd-segment-btn ${view === "tree" ? "is-active" : ""}`}
+                onClick={() => onChangeView("tree")}
+              >
+                {rt("Smart tree")}
+              </button>
+              <button className="pd-btn" onClick={onRescan} disabled={scanning}>
+                {scanning ? rt("Scanning...") : pages.length ? rt("Rescan pages") : rt("Scan pages")}
+              </button>
+              <button className="pd-btn pd-btn-primary" onClick={onOpenHome}>
+                {rt("Open homepage")}
+              </button>
+            </div>
+          </div>
+
+          {pages.length ? (
+            view === "grid" ? (
+              <div className="pd-page-grid">
+                {pages.map((page) => (
+                  <button key={page.id} className="pd-page-card" onClick={() => onOpenPage(page.id)}>
+                    <div className="pd-page-card-title">{page.title || page.name}</div>
+                    <div className="pd-page-card-path">{page.path}</div>
+                    <div className="pd-page-card-state">{page.html ? rt("Saved page") : rt("Load and open")}</div>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="pd-page-tree">
+                <ProjectPageTreeBranch node={tree} depth={0} onOpenPage={onOpenPage} />
+              </div>
+            )
+          ) : (
+            <div className="pd-page-empty">
+              <strong>{rt("No internal pages yet")}</strong>
+              <span>{rt("Run a page scan to map the website into this project.")}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -1272,7 +1517,7 @@ export default function ProjectDashboard({
   user: User
   plan?: Plan
   onPlanChange?: (plan: Plan) => void
-  onOpen: (p: Project) => void
+  onOpen: (p: Project, pageId?: string | null) => void
   onLogout: () => void
 }) {
   const { t, lang } = useTranslation()
@@ -1305,6 +1550,10 @@ export default function ProjectDashboard({
   const [showNewProject, setShowNewProject] = useState(false)
   const [showLandingGenerator, setShowLandingGenerator] = useState(false)
   const [showTemplateExtract, setShowTemplateExtract] = useState(false)
+  const [projectExplorerId, setProjectExplorerId] = useState<number | null>(null)
+  const [projectExplorerView, setProjectExplorerView] = useState<"grid" | "tree">(
+    () => (localStorage.getItem("se_project_pages_view") as "grid" | "tree") || "grid"
+  )
   const [activeStudioTool, setActiveStudioTool] = useState<StudioTool | null>(null)
   const [creatingProject, setCreatingProject] = useState(false)
   const [landingGenerating, setLandingGenerating] = useState(false)
@@ -1312,6 +1561,7 @@ export default function ProjectDashboard({
   const [studioRunning, setStudioRunning] = useState(false)
   const [downloadingExportId, setDownloadingExportId] = useState<number | null>(null)
   const [templateExtractFeedback, setTemplateExtractFeedback] = useState("")
+  const [scanningProjectId, setScanningProjectId] = useState<number | null>(null)
   const [studioProjectId, setStudioProjectId] = useState<number | "">("")
   const [studioUrl, setStudioUrl] = useState("")
   const [studioGoal, setStudioGoal] = useState("")
@@ -1409,6 +1659,10 @@ export default function ProjectDashboard({
   }, [currentPlan, plan])
 
   useEffect(() => {
+    localStorage.setItem("se_project_pages_view", projectExplorerView)
+  }, [projectExplorerView])
+
+  useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault()
@@ -1490,6 +1744,7 @@ export default function ProjectDashboard({
   }
 
   const recentExports = exportedProjects.slice(0, 5)
+  const explorerProject = normalizedProjects.find(project => project.id === projectExplorerId) || null
   const templateCounts = {
     all: templates.length,
     wordpress: templates.filter(template => matchesTemplateFilter("wordpress", template)).length,
@@ -1965,9 +2220,41 @@ export default function ProjectDashboard({
     }
   }
 
-  const handleOpenProject = (project: Project) => {
+  const handleOpenProject = (project: Project, pageId?: string | null) => {
     updateChecklist("load", true)
-    onOpen(project)
+    onOpen(project, pageId)
+  }
+
+  const openProjectExplorer = (project: Project) => {
+    setProjectExplorerId(project.id)
+    if (project.url && !(project.pages || []).length) {
+      void rescanProjectPages(project)
+    }
+  }
+
+  const rescanProjectPages = async (project: Project) => {
+    if (!project.id || !project.url || scanningProjectId === project.id) return
+    setScanningProjectId(project.id)
+    try {
+      const scannedProject = await apiScanProjectPages(project.id)
+      const normalizedProject = {
+        ...scannedProject,
+        thumbnail: normalizeThumbnailUrl(scannedProject.thumbnail),
+      }
+      setProjects((previous) =>
+        previous.map((candidate) => (candidate.id === project.id ? { ...candidate, ...normalizedProject } : candidate))
+      )
+      setProjectExplorerId(project.id)
+      toast.success(
+        normalizedProject.pages?.length
+          ? `${normalizedProject.pages.length} ${rt("pages found")}`
+          : rt("No internal pages found")
+      )
+    } catch (error) {
+      toast.error(errMsg(error))
+    } finally {
+      setScanningProjectId(null)
+    }
   }
 
   const createProject = async () => {
@@ -2612,7 +2899,7 @@ export default function ProjectDashboard({
                     key={project.id}
                     project={project}
                     rt={rt}
-                    onOpen={() => handleOpenProject(project)}
+                    onInspect={() => openProjectExplorer(project)}
                     onDelete={() => deleteProject(project.id, project.name)}
                   />
                 ))}
@@ -2741,6 +3028,26 @@ export default function ProjectDashboard({
           </div>
         </main>
       </div>
+
+      {explorerProject ? (
+        <ProjectExplorerModal
+          project={explorerProject}
+          rt={rt}
+          view={projectExplorerView}
+          scanning={scanningProjectId === explorerProject.id}
+          onChangeView={setProjectExplorerView}
+          onRescan={() => void rescanProjectPages(explorerProject)}
+          onOpenHome={() => {
+            setProjectExplorerId(null)
+            handleOpenProject(explorerProject)
+          }}
+          onOpenPage={(pageId) => {
+            setProjectExplorerId(null)
+            handleOpenProject(explorerProject, pageId)
+          }}
+          onClose={() => setProjectExplorerId(null)}
+        />
+      ) : null}
 
       <CommandPalette
         open={commandPaletteOpen}

@@ -749,7 +749,7 @@ const autoSave = async (html: string) => {
     }
   };
 
-  const handleOpenProject = async (p: Project) => {
+  const handleOpenProject = async (p: Project, initialPageId?: string | null) => {
     const project = await apiGetProject(p.id).catch(() => p)
     setCurrentProject(project)
     setTranslationInfo(null)
@@ -760,7 +760,11 @@ const autoSave = async (html: string) => {
 
     const projectHtml = String(project.html ?? "")
     const inlineHtml = projectHtml.trim()
-    const defaultPage = findDefaultProjectPage(project.pages || [])
+    const requestedPage =
+      initialPageId
+        ? (project.pages || []).find((page) => page.id === initialPageId) || null
+        : null
+    const defaultPage = requestedPage || findDefaultProjectPage(project.pages || [])
 
     if (defaultPage) {
       await loadScannedProjectPage(project, defaultPage)
@@ -1545,42 +1549,6 @@ useEffect(() => {
                 <div className="editor-panel__url">
                   {loadedUrl ? loadedUrl.replace(/^https?:\/\//, "") : "Load a site or open a project"}
                 </div>
-
-                {currentProject?.url ? (
-                  <div className="editor-panel__page-tools">
-                    <div className="editor-panel__page-count">
-                      {projectPages.length ? `${projectPages.length} pages in project` : "Single-page project"}
-                    </div>
-                    <button
-                      className="editor-btn editor-btn--panel editor-btn--panel-muted"
-                      onClick={() => void scanProjectPages(currentProject, !projectPages.length)}
-                      disabled={scanningPages}
-                    >
-                      {scanningPages ? "Scanning..." : projectPages.length ? "Rescan links" : "Scan internal links"}
-                    </button>
-                  </div>
-                ) : null}
-
-                {projectPages.length > 0 ? (
-                  <div className="editor-panel__page-list">
-                    {projectPages.map((page) => (
-                      <button
-                        key={page.id}
-                        type="button"
-                        className={`editor-panel__page-item ${selectedProjectPage?.id === page.id ? "is-active" : ""}`}
-                        onClick={() => void loadScannedProjectPage(currentProject as Project, page)}
-                      >
-                        <span className="editor-panel__page-item-copy">
-                          <strong>{page.name}</strong>
-                          <span>{page.path}</span>
-                        </span>
-                        <span className="editor-panel__page-item-state">
-                          {loadingProjectPageId === page.id ? "..." : page.html ? "Saved" : "Load"}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
 
                 <div className="editor-panel__note">
                   {currentPlatformGuide?.safeEditScope || "Live block editing stays inside the current overlay scope."}
