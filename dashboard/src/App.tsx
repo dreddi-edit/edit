@@ -491,14 +491,32 @@ const assignPlan = async (userId: number, userEmail: string) => {
   if (!["basis", "starter", "pro", "scale"].includes(normalized)) { alert("Invalid plan"); return }
   const plan = normalized as "basis" | "starter" | "pro" | "scale"
   setAdminUserPlans(prev => ({ ...prev, [userId]: plan }))
-  fetch(`/api/admin/users/${userId}/set-plan`, {
-    method: "POST", credentials: "include",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ plan })
-  }).then(r => r.json()).then(d => {
-    if (d.ok) { if (authUser && authUser !== "loading" && authUser.id === userId) setDemoPlan(plan); alert(`✅ Plan "${plan}" saved`) }
-    else { alert("Failed: " + d.error) }
-  }).catch(() => alert("Network error"))
+  try {
+    const response = await fetch(`/api/admin/users/${userId}/set-plan`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ plan }),
+    })
+    const data = await response.json()
+    if (!data.ok) {
+      setAdminUserPlans(prev => ({ ...prev, [userId]: current }))
+      alert("Failed: " + data.error)
+      return
+    }
+
+    await loadAdminUsers()
+
+    if (authUser && authUser !== "loading" && authUser.id === userId) {
+      const refreshedPlan = await apiGetPlan().catch(() => null)
+      setDemoPlan(refreshedPlan || plan)
+    }
+
+    alert(`✅ Plan "${plan}" saved`)
+  } catch {
+    setAdminUserPlans(prev => ({ ...prev, [userId]: current }))
+    alert("Network error")
+  }
 }
 
 const createUser = async () => {
@@ -1095,6 +1113,8 @@ useEffect(() => {
     <>
       <ProjectDashboard
         user={authUser as User}
+        plan={demoPlan}
+        onPlanChange={setDemoPlan}
         onOpen={handleOpenProject}
         onLogout={() => { setAuthUser(null); setView("auth") }}
       />

@@ -1262,7 +1262,19 @@ function AIStudioCard({
   )
 }
 
-export default function ProjectDashboard({ user, onOpen, onLogout }: { user: User; onOpen: (p: Project) => void; onLogout: () => void }) {
+export default function ProjectDashboard({
+  user,
+  plan: currentPlan,
+  onPlanChange,
+  onOpen,
+  onLogout,
+}: {
+  user: User
+  plan?: Plan
+  onPlanChange?: (plan: Plan) => void
+  onOpen: (p: Project) => void
+  onLogout: () => void
+}) {
   const { t, lang } = useTranslation()
   const rt = useRuntimeTranslations(lang, DASHBOARD_RUNTIME_STRINGS, t)
   const exportSectionRef = useRef<HTMLDivElement | null>(null)
@@ -1272,7 +1284,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
   const [transactions, setTransactions] = useState<CreditTransaction[]>([])
   const [loading, setLoading] = useState(true)
   const [balance, setBalance] = useState<number | null>(null)
-  const [plan, setPlan] = useState<Plan>("basis")
+  const [plan, setPlan] = useState<Plan>(currentPlan || "basis")
   const [theme, setTheme] = useState<"dark" | "light">(
     (localStorage.getItem("se_theme") as "dark" | "light") || "dark"
   )
@@ -1389,6 +1401,12 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
     localStorage.setItem("se_theme", theme)
     document.body.setAttribute("data-theme", theme)
   }, [theme])
+
+  useEffect(() => {
+    if (currentPlan && currentPlan !== plan) {
+      setPlan(currentPlan)
+    }
+  }, [currentPlan, plan])
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -1920,7 +1938,10 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
         }))
       )
       setBalance(currentBalance)
-      if (currentPlan) setPlan(currentPlan)
+      if (currentPlan) {
+        setPlan(currentPlan)
+        onPlanChange?.(currentPlan)
+      }
       if (creditTransactions.ok) setTransactions(creditTransactions.transactions ?? [])
       await loadTemplates()
     } catch (error) {
