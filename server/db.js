@@ -328,7 +328,10 @@ runMigration("20260310_projects_last_export_mode", () => {
 })
 runMigration("20260310_projects_last_export_warning_count", () => {
 execMigrationSql(`ALTER TABLE projects ADD COLUMN last_export_warning_count INTEGER DEFAULT 0`)
-execMigrationSql(`ALTER TABLE projects ADD COLUMN pages_json TEXT DEFAULT '[]'`)
+})
+runMigration("20260311_projects_pages_json", () => {
+  execMigrationSql(`ALTER TABLE projects ADD COLUMN pages_json TEXT DEFAULT '[]'`)
+  execMigrationSql(`UPDATE projects SET pages_json = COALESCE(pages_json, '[]')`)
 })
 runMigration("20260310_project_exports_table", () => {
   execMigrationSql(`

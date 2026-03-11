@@ -340,13 +340,102 @@ function collectSplitRootSegments(rootEl: HTMLElement, win: Window): HTMLElement
     return node.getBoundingClientRect().height >= 36;
   };
 
-  let segments = Array.from(rootEl.children).filter(isSegment);
-  if (segments.length <= 1 && segments[0]) {
-    const nested = Array.from(segments[0].children).filter(isSegment);
-    if (nested.length >= 2) segments = nested;
+  let current: HTMLElement | null = rootEl;
+  let segments: HTMLElement[] = [];
+  let depth = 0;
+
+  while (current && depth < 8) {
+    segments = Array.from(current.children).filter(isSegment);
+    if (segments.length >= 2) return segments;
+    current = segments.length === 1 ? segments[0] : null;
+    depth += 1;
   }
 
+  const expandedSegments = collectExpandedChildElements(rootEl, win).filter((node) => node !== rootEl);
+  if (expandedSegments.length >= 2) return expandedSegments;
+
   return segments;
+}
+
+function findEditableFieldWrapper(node: HTMLElement, scope: HTMLElement): HTMLElement | null {
+  const selectors = [
+    "label",
+    ".wpforms-field",
+    ".gfield",
+    ".form-field",
+    ".field",
+    ".jetpack-field",
+    ".contact-form__input-group",
+    "p",
+    "li",
+    "div",
+  ];
+  for (const selector of selectors) {
+    const match = node.closest(selector) as HTMLElement | null;
+    if (match && match !== scope && scope.contains(match)) return match;
+  }
+  return node.parentElement && node.parentElement !== scope ? node.parentElement : null;
+}
+
+function getEditableFormFieldRecords(scope: HTMLElement) {
+  const doc = scope.ownerDocument;
+  const labels = Array.from(doc.querySelectorAll("label")) as HTMLLabelElement[];
+  const fields = Array.from(scope.querySelectorAll("input, textarea, select"))
+    .filter((node) => String((node as HTMLElement).getAttribute("type") || "").toLowerCase() !== "hidden") as HTMLElement[];
+
+  return fields.map((node) => {
+    const currentId = node.getAttribute("id") || "";
+    let labelEl =
+      (currentId ? labels.find((label) => label.getAttribute("for") === currentId) || null : null) ||
+      ((node.closest("label") as HTMLLabelElement | null) || null);
+    if (labelEl && !scope.contains(labelEl) && !labelEl.closest("form")) {
+      labelEl = null;
+    }
+    return {
+      node,
+      labelEl,
+      wrapper: findEditableFieldWrapper(node, scope),
+    };
+  });
+}
+
+function setFormLabelText(labelEl: HTMLLabelElement | null, fieldNode: HTMLElement, text: string) {
+  if (!labelEl) return;
+  const nextText = String(text || "").trim();
+  if (!nextText) return;
+
+  if (!labelEl.contains(fieldNode)) {
+    labelEl.textContent = nextText;
+    return;
+  }
+
+  const textNodes = Array.from(labelEl.childNodes).filter((node) => node.nodeType === Node.TEXT_NODE);
+  if (textNodes[0]) {
+    textNodes[0].textContent = `${nextText} `;
+    textNodes.slice(1).forEach((node) => node.remove());
+  } else {
+    labelEl.insertBefore(labelEl.ownerDocument.createTextNode(`${nextText} `), labelEl.firstChild);
+  }
+}
+
+function sanitizeFieldId(value: string) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function findPrimaryTextTarget(el: HTMLElement): HTMLElement | null {
+  const tag = el.tagName.toLowerCase();
+  if (/^h[1-6]$/.test(tag) || ["p", "span", "li", "label", "figcaption", "blockquote", "small", "strong", "em"].includes(tag)) {
+    return el;
+  }
+  const directChild = Array.from(el.children).find((child) =>
+    /^(h[1-6]|p|span|li|label|figcaption|blockquote)$/i.test(child.tagName)
+  ) as HTMLElement | undefined;
+  if (directChild) return directChild;
+  return el.querySelector("h1,h2,h3,h4,h5,h6,p,span,li,label,figcaption,blockquote,strong,em") as HTMLElement | null;
 }
 
 function getBlockKind(el: Element, label: string): string {
@@ -1772,7 +1861,13 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
       const label = pickLabel(node, discoveries);
       const explicitParentId = opts?.parentId ?? null;
       const inferredParentId = explicitParentId || (node.parentElement?.closest("[data-block-id]") as HTMLElement | null)?.getAttribute("data-block-id") || null;
-      let id = node.getAttribute("data-block-id") || prevByPath.get(pathSignature) || "";
+      const previousPathId = prevByPath.get(pathSignature) || "";
+      let id = node.getAttribute("data-block-id") || "";
+
+      if (!id && previousPathId) {
+        const canReuseSubId = explicitParentId ? previousPathId.startsWith(`${explicitParentId}${SUB_BLOCK_TOKEN}`) : !previousPathId.includes(SUB_BLOCK_TOKEN);
+        if (canReuseSubId) id = previousPathId;
+      }
 
       if (!id) {
         if (explicitParentId) {
@@ -2925,7 +3020,7 @@ const applyEdit = useCallback(() => {
     // Save history before applying changes
     pushHistorySnapshot(doc);
     
-    const chosen = blocks.find(b => b.id === selectedId);
+    const chosen = blocksRef.current.find(b => b.id === selectedId);
     if (!chosen) return;
     const el = doc.querySelector(chosen.selector) as HTMLElement | null;
     if (!el) return;
@@ -2936,7 +3031,11 @@ const applyEdit = useCallback(() => {
         const spanNode = btnNode.querySelector("span") as HTMLElement | null;
         if (spanNode) spanNode.textContent = editValue;
         else btnNode.childNodes.forEach(n => { if (n.nodeType === Node.TEXT_NODE) n.textContent = editValue; });
-        if (editLink) (btnNode as HTMLAnchorElement).href = editLink;
+        if ("href" in btnNode) {
+          const nextHref = (editLink || "").trim();
+          if (nextHref) (btnNode as HTMLAnchorElement).setAttribute("href", nextHref);
+          else (btnNode as HTMLAnchorElement).removeAttribute("href");
+        }
         (btnNode as HTMLElement).style.backgroundColor = editBg;
         (btnNode as HTMLElement).style.color = editColor;
         if (editFontSize) (btnNode as HTMLElement).style.fontSize = editFontSize;
@@ -2944,7 +3043,7 @@ const applyEdit = useCallback(() => {
     } else if (panelType === "heading-list") {
       const heading = ["H1","H2","H3","H4"].includes(el.tagName)
         ? el : el.querySelector("h1,h2,h3,h4") as HTMLElement | null;
-      if (heading && editHeading) heading.textContent = editHeading;
+      if (heading) heading.textContent = editHeading;
 
       const listEl = ["UL","OL"].includes(el.tagName)
         ? el : el.querySelector("ul,ol") as HTMLElement | null;
@@ -3011,24 +3110,67 @@ const applyEdit = useCallback(() => {
           anchors.slice(items.length).forEach((a) => a.remove());
         }
       }
+    } else if (panelType === "form-fields") {
+      const items = (editFormFields || [])
+        .map((item) => ({
+          label: String(item?.label || "").trim(),
+          name: String(item?.name || "").trim(),
+          placeholder: String(item?.placeholder || "").trim(),
+          type: String(item?.type || "text").trim() || "text",
+        }))
+        .filter((item) => item.label || item.name || item.placeholder);
+
+      let records = getEditableFormFieldRecords(el);
+      if (records.length) {
+        while (records.length > items.length && records.length > 0) {
+          const record = records.pop();
+          const target = record?.wrapper || record?.node;
+          target?.remove();
+        }
+
+        while (records.length < items.length && records.length > 0) {
+          const base = records[records.length - 1];
+          const source = (base.wrapper || base.node).cloneNode(true) as HTMLElement;
+          (base.wrapper || base.node).parentElement?.insertBefore(source, (base.wrapper || base.node).nextSibling);
+          records = getEditableFormFieldRecords(el);
+        }
+
+        records = getEditableFormFieldRecords(el);
+        records.slice(0, items.length).forEach((record, index) => {
+          const item = items[index];
+          const field = record.node as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+          const nextName = item.name;
+          const nextId = sanitizeFieldId(nextName || field.getAttribute("id") || `field-${index + 1}`);
+
+          if (field.tagName.toLowerCase() === "input") {
+            field.setAttribute("type", item.type || "text");
+          }
+          if (item.placeholder) field.setAttribute("placeholder", item.placeholder);
+          else field.removeAttribute("placeholder");
+
+          if (nextName) field.setAttribute("name", nextName);
+          else field.removeAttribute("name");
+
+          if (nextId) {
+            field.setAttribute("id", nextId);
+            if (record.labelEl?.getAttribute("for")) record.labelEl.setAttribute("for", nextId);
+          }
+
+          if (item.label) {
+            setFormLabelText(record.labelEl, field, item.label);
+            if (!record.labelEl) field.setAttribute("aria-label", item.label);
+          }
+        });
+      }
     } else {
       const text = (editValue || "").trim();
-      const tag = el.tagName.toLowerCase();
-      const cls = el.getAttribute("class") || "";
-      const isButtonLike = cls.includes("wp-block-button") || cls.includes("wp-block-button__link") ||
-        tag === "a" || tag === "button" || el.getAttribute("role") === "button";
-      if (isButtonLike) {
-        const inner = el.querySelector("span") as HTMLElement | null;
-        if (inner) inner.textContent = text; else el.textContent = text;
-      } else {
-        const leaf = el.querySelector("h1,h2,h3,p,span,li") as HTMLElement | null;
-        if (leaf) leaf.textContent = text; else el.textContent = text;
-      }
+      const target = findPrimaryTextTarget(el) || el;
+      target.textContent = text;
     }
 
     commitDocumentMutation(doc, { preserveSelectionId: selectedId });
-  }, [getDoc, selectedId, blocks, editValue, editLink, editBg, editColor, editFontSize,
-      panelType, editHeading, editBullets, editImgSrc, editNavLinks, isButtonSelected, commitDocumentMutation, pushHistorySnapshot]);
+  }, [getDoc, selectedId, editValue, editLink, editBg, editColor, editFontSize,
+      panelType, editHeading, editBullets, editImgSrc, editNavLinks, editFormFields, commitDocumentMutation, pushHistorySnapshot]);
 
   const aiLayoutAnalyze = async () => {
     const doc = getDoc();
