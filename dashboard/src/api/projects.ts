@@ -46,6 +46,14 @@ export type WorkflowEvent = {
   email?: string
 }
 
+export type ProjectAssignee = {
+  email: string
+  name?: string
+  role?: string
+  status?: string
+  source?: string
+}
+
 export type Project = {
   id: number
   name: string
@@ -65,6 +73,7 @@ export type Project = {
   lastExportWarningCount?: number
   platformGuide?: PlatformGuide
   latestExport?: LatestExport | null
+  assignees?: ProjectAssignee[]
   updated_at: string
   created_at: string
 }
@@ -90,7 +99,7 @@ export async function apiCreateProject(
   url: string,
   html: string,
   platform?: SitePlatform,
-  extras: Partial<Pick<Project, "clientName" | "workflowStage" | "deliveryStatus" | "dueAt">> = {}
+  extras: Partial<Pick<Project, "clientName" | "workflowStage" | "deliveryStatus" | "dueAt" | "assignees">> = {}
 ): Promise<Project> {
   const d = await apiFetch<CreateProjectRes>(`${BASE}/api/projects`, {
     method: "POST",

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { apiGetProjects, apiCreateProject, apiDeleteProject, type Project } from "../api/projects"
+import { apiGetProjects, apiCreateProject, apiDeleteProject, type Project, type ProjectAssignee } from "../api/projects"
 import { apiGetPlan, apiGetBalance, apiGetCreditsTransactions } from "../api/credits"
 import { apiFetch } from "../api/client"
 import CreditsPanel from "./CreditsPanel"
@@ -30,6 +30,7 @@ type Template = { id: number; name: string; url?: string; platform?: SitePlatfor
 type ChecklistItem = { id: string; label: string; done: boolean }
 type NoteItem = { id: string; text: string; done: boolean }
 type SpendBreakdownItem = { label: string; amount: number; percent: number }
+type AssignableMember = ProjectAssignee
 
 const DEFAULT_CHECKLIST: ChecklistItem[] = [
   { id: "create", label: "Create first project", done: false },
@@ -113,6 +114,62 @@ function workflowClass(stage?: string) {
   return "draft"
 }
 
+function displayMemberName(member?: Pick<ProjectAssignee, "name" | "email"> | null) {
+  if (!member) return ""
+  return member.name || member.email.split("@")[0] || member.email
+}
+
+function fileNameWithoutExtension(name: string) {
+  return name.replace(/\.[^.]+$/, "")
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+}
+
+function wrapLocalMarkup(filename: string, text: string) {
+  const title = escapeHtml(fileNameWithoutExtension(filename) || "Imported file")
+  if (/<svg[\s>]/i.test(text)) {
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${title}</title>
+    <style>
+      html, body { margin: 0; min-height: 100%; background: #101010; }
+      body { display: grid; place-items: center; padding: 24px; }
+      svg { max-width: 100%; max-height: calc(100vh - 48px); height: auto; }
+    </style>
+  </head>
+  <body>${text}</body>
+</html>`
+  }
+
+  if (/<html[\s>]/i.test(text) || /<!doctype html/i.test(text)) return text
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${title}</title>
+  </head>
+  <body>${text}</body>
+</html>`
+}
+
+function normalizeThumbnailUrl(thumbnail?: string | null) {
+  if (!thumbnail) return undefined
+  const managedMatch = thumbnail.match(/^https:\/\/storage\.googleapis\.com\/[^/]+\/thumbnails\/([^/?#]+)$/)
+  if (managedMatch?.[1]) return `${BASE}/thumbnails/${managedMatch[1]}`
+  return thumbnail.startsWith("http") ? thumbnail : `${BASE}${thumbnail}`
+}
+
 function matchesStage(filter: DashboardStage, stage?: string) {
   if (filter === "all") return true
   if (filter === "review") return stage === "internal_review" || stage === "client_review"
@@ -169,7 +226,31 @@ function exportModeLabel(mode?: string) {
   if (mode === "wp-placeholder") return "WP"
   if (mode === "html-clean") return "HTML"
   if (mode === "html-raw") return "RAW"
+  if (mode === "shopify-section") return "SHOP"
+  if (mode === "wp-theme") return "THEME"
+  if (mode === "wp-block") return "BLOCK"
+  if (mode === "web-component") return "WC"
+  if (mode === "email-newsletter") return "EMAIL"
+  if (mode === "markdown-content") return "MD"
+  if (mode === "pdf-print") return "PDF"
   return "ZIP"
+}
+
+function exportFilename(response: Response, mode?: string) {
+  const disposition = response.headers.get("Content-Disposition") || ""
+  const match = disposition.match(/filename="?([^"]+)"?/i)
+  if (match?.[1]) return match[1]
+  if (mode === "wp-placeholder") return "site_wp_placeholders.zip"
+  if (mode === "html-clean") return "site_html_clean.zip"
+  if (mode === "html-raw") return "site_html_raw.zip"
+  if (mode === "shopify-section") return "shopify_section.zip"
+  if (mode === "wp-theme") return "wordpress_theme.zip"
+  if (mode === "wp-block") return "wordpress_block_plugin.zip"
+  if (mode === "web-component") return "web_component_embed.zip"
+  if (mode === "email-newsletter") return "email_newsletter.zip"
+  if (mode === "markdown-content") return "content_markdown.zip"
+  if (mode === "pdf-print") return "design_preview.pdf"
+  return "site_export.zip"
 }
 
 function exportReadiness(project: Project) {
@@ -290,6 +371,9 @@ function ProjectCard({
   const initials = project.name.slice(0, 2).toUpperCase()
   const seoScore = mockSeoScore(project)
   const seoClass = seoScore == null ? "" : seoScore > 85 ? "" : seoScore > 60 ? "mid" : "low"
+  const assigneeSummary = project.assignees?.length
+    ? `${displayMemberName(project.assignees[0])}${project.assignees.length > 1 ? ` +${project.assignees.length - 1}` : ""}`
+    : ""
 
   return (
     <article
@@ -336,6 +420,7 @@ function ProjectCard({
         <div className="pd-card-tags">
           <span className={`pd-tag ${workflowClass(project.workflowStage)}`}>{workflowLabel(project.workflowStage)}</span>
           {project.clientName ? <span className="pd-tag">Client · {project.clientName}</span> : null}
+          {assigneeSummary ? <span className="pd-tag">Assigned · {assigneeSummary}</span> : null}
         </div>
         <div className="pd-card-date">
           {project.lastExportAt ? `Last export · ${formatExportDate(project.lastExportAt)}` : `Updated ${formatUpdatedDate(project.updated_at)}`}
@@ -470,6 +555,7 @@ function ExportCard({
 export default function ProjectDashboard({ user, onOpen, onLogout }: { user: User; onOpen: (p: Project) => void; onLogout: () => void }) {
   const { t } = useTranslation()
   const exportSectionRef = useRef<HTMLDivElement | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
   const [transactions, setTransactions] = useState<CreditTransaction[]>([])
@@ -505,6 +591,9 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
   const [newUrl, setNewUrl] = useState("")
   const [newClientName, setNewClientName] = useState("")
   const [newDueAt, setNewDueAt] = useState("")
+  const [newAssigneeEmails, setNewAssigneeEmails] = useState<string[]>([])
+  const [newUploadHtml, setNewUploadHtml] = useState("")
+  const [newUploadName, setNewUploadName] = useState("")
   const [landingName, setLandingName] = useState("")
   const [landingDesc, setLandingDesc] = useState("")
   const [landingAudience, setLandingAudience] = useState("")
@@ -515,6 +604,9 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
   const [checklist, setChecklist] = useState<ChecklistItem[]>(loadChecklist)
   const [notes, setNotes] = useState<NoteItem[]>(loadNotes)
   const [newNote, setNewNote] = useState("")
+  const [assignableMembers, setAssignableMembers] = useState<AssignableMember[]>([])
+  const [loadingAssignableMembers, setLoadingAssignableMembers] = useState(false)
+  const requestedThumbnailIds = useRef<Set<number>>(new Set())
 
   useEffect(() => {
     saveChecklist(checklist)
@@ -534,6 +626,43 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
     loadDashboard()
     checkOllama()
   }, [])
+
+  useEffect(() => {
+    if (!showNewProject || assignableMembers.length || loadingAssignableMembers) return
+    void loadAssignableMembers()
+  }, [showNewProject, assignableMembers.length, loadingAssignableMembers])
+
+  useEffect(() => {
+    const candidates = projects
+      .filter(project => project.url && !project.thumbnail && !requestedThumbnailIds.current.has(project.id))
+      .slice(0, 2)
+    if (!candidates.length) return
+
+    let cancelled = false
+    const run = async () => {
+      for (const project of candidates) {
+        requestedThumbnailIds.current.add(project.id)
+        try {
+          const response = await apiFetch<{ ok: boolean; thumbnail?: string }>("/api/screenshot", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: project.url, project_id: project.id }),
+          })
+          if (!cancelled && response?.ok && response.thumbnail) {
+            const normalizedThumbnail = normalizeThumbnailUrl(response.thumbnail)
+            setProjects(previous =>
+              previous.map(item => (item.id === project.id ? { ...item, thumbnail: normalizedThumbnail } : item))
+            )
+          }
+        } catch {}
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [projects])
 
   useEffect(() => {
     localStorage.setItem("se_theme", theme)
@@ -673,6 +802,57 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
     setChecklist(prev => prev.map(item => (item.id === id ? { ...item, done } : item)))
   }
 
+  const resetNewProjectForm = () => {
+    setShowNewProject(false)
+    setNewName("")
+    setNewUrl("")
+    setNewClientName("")
+    setNewDueAt("")
+    setNewAssigneeEmails([])
+    setNewUploadHtml("")
+    setNewUploadName("")
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
+  const loadAssignableMembers = async () => {
+    setLoadingAssignableMembers(true)
+    try {
+      const response = await apiFetch<{ ok: boolean; members?: AssignableMember[] }>("/api/projects/assignee-options")
+      if (response?.ok) setAssignableMembers(response.members ?? [])
+    } catch {
+      setAssignableMembers([{ email: user.email, name: user.name || user.email, role: "owner", source: "owner", status: "accepted" }])
+    } finally {
+      setLoadingAssignableMembers(false)
+    }
+  }
+
+  const toggleAssignee = (email: string) => {
+    setNewAssigneeEmails(previous =>
+      previous.includes(email) ? previous.filter(value => value !== email) : [...previous, email]
+    )
+  }
+
+  const handleUploadProjectFile = async (file?: File | null) => {
+    if (!file) return
+    const extension = file.name.split(".").pop()?.toLowerCase() || ""
+    if (!["html", "htm", "svg"].includes(extension)) {
+      toast.warning("Upload currently supports .html, .htm, or .svg files.")
+      return
+    }
+
+    try {
+      const text = await file.text()
+      if (!text.trim()) throw new Error("Uploaded file is empty.")
+      const html = wrapLocalMarkup(file.name, text)
+      setNewUploadHtml(html)
+      setNewUploadName(file.name)
+      if (!newName.trim()) setNewName(fileNameWithoutExtension(file.name))
+      toast.success(`Loaded ${file.name}`)
+    } catch (error) {
+      toast.error(errMsg(error))
+    }
+  }
+
   const loadTemplates = async () => {
     try {
       const response = await apiFetch<{ ok: boolean; templates?: Template[] }>("/api/templates")
@@ -680,11 +860,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
         setTemplates(
           (response.templates ?? []).map(template => ({
             ...template,
-            thumbnail: template.thumbnail
-              ? template.thumbnail.startsWith("http")
-                ? template.thumbnail
-                : `${BASE}${template.thumbnail}`
-              : undefined,
+            thumbnail: normalizeThumbnailUrl(template.thumbnail),
           }))
         )
       }
@@ -705,11 +881,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
       setProjects(
         projectData.map(project => ({
           ...project,
-          thumbnail: project.thumbnail
-            ? project.thumbnail.startsWith("http")
-              ? project.thumbnail
-              : `${BASE}${project.thumbnail}`
-            : undefined,
+          thumbnail: normalizeThumbnailUrl(project.thumbnail),
         }))
       )
       setBalance(currentBalance)
@@ -749,18 +921,18 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
     }
     setCreatingProject(true)
     try {
-      const project = await apiCreateProject(newName.trim(), newUrl.trim(), "", undefined, {
+      const selectedAssignees = newAssigneeEmails
+        .map(email => assignableMembers.find(member => member.email === email) || { email })
+        .map(member => ({ email: member.email, role: member.role || "editor" }))
+      const project = await apiCreateProject(newName.trim(), newUrl.trim(), newUploadHtml, undefined, {
         clientName: newClientName.trim() || "",
         dueAt: newDueAt || "",
+        assignees: selectedAssignees,
       })
       updateChecklist("create", true)
       if (newUrl.trim()) updateChecklist("load", true)
       setProjects(prev => [project, ...prev.filter(candidate => candidate.id !== project.id)])
-      setShowNewProject(false)
-      setNewName("")
-      setNewUrl("")
-      setNewClientName("")
-      setNewDueAt("")
+      resetNewProjectForm()
       toast.success(t("Project created"))
       await loadDashboard()
     } catch (error) {
@@ -950,12 +1122,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
       const fileUrl = URL.createObjectURL(blob)
       const anchor = document.createElement("a")
       anchor.href = fileUrl
-      anchor.download =
-        project.lastExportMode === "wp-placeholder"
-          ? "site_wp_placeholders.zip"
-          : project.lastExportMode === "html-clean"
-          ? "site_html_clean.zip"
-          : "site_html_raw.zip"
+      anchor.download = exportFilename(response, project.lastExportMode)
       document.body.appendChild(anchor)
       anchor.click()
       anchor.remove()
@@ -1482,16 +1649,23 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
       {showInvite ? <ReferralInvite theme={theme} userEmail={user.email} onClose={() => setShowInvite(false)} /> : null}
 
       {showNewProject ? (
-        <div className="pd-modal-backdrop" onClick={() => setShowNewProject(false)}>
+        <div className="pd-modal-backdrop" onClick={resetNewProjectForm}>
           <div className="pd-modal" onClick={event => event.stopPropagation()}>
             <div className="pd-modal-header">
               <div>
                 <div className="pd-modal-eyebrow">Create</div>
                 <div className="pd-modal-title">New project</div>
               </div>
-              <button className="pd-modal-close" type="button" onClick={() => setShowNewProject(false)}>X</button>
+              <button className="pd-modal-close" type="button" onClick={resetNewProjectForm}>X</button>
             </div>
             <div className="pd-modal-body">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".html,.htm,.svg,text/html,image/svg+xml"
+                hidden
+                onChange={event => void handleUploadProjectFile(event.target.files?.[0] || null)}
+              />
               <div className="pd-field-grid">
                 <label className="pd-field-label">
                   Project name
@@ -1509,10 +1683,63 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                   Due date
                   <input className="pd-field-input" value={newDueAt} onChange={event => setNewDueAt(event.target.value)} type="date" />
                 </label>
+                <div className="pd-field-label pd-field-label-full">
+                  Upload file
+                  <div className="pd-upload-row">
+                    <button className="pd-btn" type="button" onClick={() => fileInputRef.current?.click()}>
+                      Upload HTML/SVG
+                    </button>
+                    {newUploadName ? <span className="pd-upload-name">{newUploadName}</span> : null}
+                    {newUploadName ? (
+                      <button
+                        className="pd-btn"
+                        type="button"
+                        onClick={() => {
+                          setNewUploadHtml("")
+                          setNewUploadName("")
+                          if (fileInputRef.current) fileInputRef.current.value = ""
+                        }}
+                      >
+                        Clear
+                      </button>
+                    ) : null}
+                  </div>
+                  <span className="pd-field-hint">Current local upload support: `.html`, `.htm`, `.svg`.</span>
+                </div>
+                <div className="pd-field-label pd-field-label-full">
+                  Assign team members
+                  {loadingAssignableMembers ? (
+                    <div className="pd-field-hint">Loading team members...</div>
+                  ) : assignableMembers.length ? (
+                    <div className="pd-assignee-list">
+                      {assignableMembers.map(member => {
+                        const selected = newAssigneeEmails.includes(member.email)
+                        const label = displayMemberName(member)
+                        const meta = [member.role, member.status === "pending" ? "pending" : ""].filter(Boolean).join(" · ")
+                        return (
+                          <button
+                            key={member.email}
+                            type="button"
+                            className={`pd-assignee-chip${selected ? " is-selected" : ""}`}
+                            onClick={() => toggleAssignee(member.email)}
+                          >
+                            <span className="pd-assignee-avatar">{label.slice(0, 2).toUpperCase()}</span>
+                            <span className="pd-assignee-copy">
+                              <span className="pd-assignee-name">{label}</span>
+                              <span className="pd-assignee-meta">{meta || member.email}</span>
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  ) : (
+                    <span className="pd-field-hint">No team members yet. Invite them in Settings first.</span>
+                  )}
+                </div>
               </div>
             </div>
             <div className="pd-modal-actions">
-              <button className="pd-btn" type="button" onClick={() => setShowNewProject(false)}>Cancel</button>
+              <button className="pd-btn" type="button" onClick={resetNewProjectForm}>Cancel</button>
               <button className="pd-btn pd-btn-primary" type="button" onClick={createProject} disabled={creatingProject}>
                 {creatingProject ? "Creating..." : "Create project"}
               </button>

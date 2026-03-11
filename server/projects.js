@@ -1,9 +1,11 @@
 import db from "./db.js"
 import { authMiddleware } from "./auth.js"
 import { logAudit } from "./auditLog.js"
+import { normalizeManagedThumbnailUrl } from "./cloudStorage.js"
 import { sendShareLink } from "./email.js"
 import { getPlatformGuide, normalizeProjectDocument } from "./siteMeta.js"
 import {
+  ValidationError,
   isValidationError,
   readEmail,
   readId,
@@ -26,7 +28,18 @@ const WORKFLOW_TRANSITIONS = {
   shipped: ["approved"],
 }
 
-function mapProjectRow(row) {
+function mapAssigneeRow(row) {
+  if (!row) return row
+  return {
+    email: row.email || row.member_email || row.invite_email || "",
+    name: row.name || "",
+    role: row.role || "editor",
+    status: row.status || "accepted",
+    source: row.source || "project",
+  }
+}
+
+function mapProjectRow(row, assignees = []) {
   if (!row) return row
   const workflowStage = row.workflow_stage || row.workflow_status || "draft"
   const deliveryStatus = row.delivery_status || "not_exported"
@@ -34,6 +47,7 @@ function mapProjectRow(row) {
     ...row,
     ownerUserId: row.user_id,
     clientName: row.client_name || "",
+    thumbnail: normalizeManagedThumbnailUrl(row.thumbnail),
     workflowStage,
     deliveryStatus,
     dueAt: row.due_at || "",
@@ -42,7 +56,99 @@ function mapProjectRow(row) {
     lastExportMode: row.last_export_mode || "",
     lastExportWarningCount: Number(row.last_export_warning_count || 0),
     platformGuide: getPlatformGuide(row.platform || "unknown"),
+    assignees,
   }
+}
+
+function getProjectAssigneeMap(projectIds) {
+  const ids = Array.from(new Set(projectIds.map(value => Number(value)).filter(value => Number.isInteger(value) && value > 0)))
+  const map = new Map(ids.map(id => [id, []]))
+  if (!ids.length) return map
+
+  const placeholders = ids.map(() => "?").join(", ")
+  const rows = db.prepare(
+    `SELECT pa.project_id, pa.member_email, pa.role, u.name, COALESCE(u.email, pa.member_email) AS email
+     FROM project_assignees pa
+     LEFT JOIN users u ON lower(u.email) = lower(pa.member_email)
+     WHERE pa.project_id IN (${placeholders})
+     ORDER BY pa.created_at ASC, pa.id ASC`
+  ).all(...ids)
+
+  for (const row of rows) {
+    if (!map.has(row.project_id)) map.set(row.project_id, [])
+    map.get(row.project_id).push(mapAssigneeRow(row))
+  }
+  return map
+}
+
+function getProjectAssignees(projectId) {
+  return getProjectAssigneeMap([projectId]).get(Number(projectId)) || []
+}
+
+function readProjectAssignees(value) {
+  if (value === undefined) return undefined
+  if (value == null || value === "") return []
+  if (!Array.isArray(value)) throw new ValidationError("Assignees ungültig")
+
+  const deduped = new Map()
+  for (const item of value) {
+    const email = readEmail(item?.email ?? item, "Assignee")
+    const role = readOptionalString(item?.role, "Rolle", { max: 40, empty: "editor" }) || "editor"
+    if (!deduped.has(email)) {
+      deduped.set(email, { email, role })
+    }
+  }
+  return Array.from(deduped.values()).slice(0, 24)
+}
+
+function syncProjectAssignees(projectId, assignees = []) {
+  const replaceAssignments = db.transaction((entries) => {
+    db.prepare("DELETE FROM project_assignees WHERE project_id = ?").run(projectId)
+    const insert = db.prepare("INSERT INTO project_assignees (project_id, member_email, role) VALUES (?, ?, ?)")
+    for (const entry of entries) insert.run(projectId, entry.email, entry.role || "editor")
+  })
+  replaceAssignments(assignees)
+}
+
+function listAssignableMembers(user) {
+  const membersByEmail = new Map()
+  const addMember = (row) => {
+    const mapped = mapAssigneeRow(row)
+    const key = mapped.email.toLowerCase()
+    if (!mapped.email || membersByEmail.has(key)) return
+    membersByEmail.set(key, mapped)
+  }
+
+  addMember({
+    email: user.email,
+    name: user.name || user.email,
+    role: "owner",
+    status: "accepted",
+    source: "owner",
+  })
+
+  const teamMembers = db.prepare(
+    `SELECT tm.member_email, tm.role, u.name, COALESCE(u.email, tm.member_email) AS email
+     FROM team_members tm
+     LEFT JOIN users u ON lower(u.email) = lower(tm.member_email)
+     WHERE tm.owner_id = ?
+     ORDER BY tm.invited_at DESC`
+  ).all(user.id)
+  for (const member of teamMembers) addMember({ ...member, status: "accepted", source: "team" })
+
+  const orgs = db.prepare("SELECT id FROM organisations WHERE owner_id = ?").all(user.id)
+  for (const org of orgs) {
+    const members = db.prepare(
+      `SELECT om.invite_email, om.role, om.status, u.name, COALESCE(u.email, om.invite_email) AS email
+       FROM org_members om
+       LEFT JOIN users u ON u.id = om.user_id
+       WHERE om.org_id = ?
+       ORDER BY om.invited_at DESC`
+    ).all(org.id)
+    for (const member of members) addMember({ ...member, source: "organisation" })
+  }
+
+  return Array.from(membersByEmail.values())
 }
 
 function canTransitionWorkflow(fromStage, toStage) {
@@ -55,13 +161,14 @@ function canTransitionWorkflow(fromStage, toStage) {
 function archiveProjectRecord(projectId, userId) {
   const project = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, userId)
   if (!project) return null
+  const assignees = getProjectAssignees(projectId)
   const versions = db.prepare("SELECT * FROM project_versions WHERE project_id = ? ORDER BY created_at DESC").all(projectId)
   const exports = db.prepare("SELECT * FROM project_exports WHERE project_id = ? ORDER BY created_at DESC").all(projectId)
   const workflowEvents = db.prepare("SELECT * FROM project_workflow_events WHERE project_id = ? ORDER BY created_at DESC").all(projectId)
   const shares = db.prepare("SELECT * FROM project_shares WHERE project_id = ? ORDER BY created_at DESC").all(projectId)
   const result = db.prepare(
     "INSERT INTO deleted_projects (original_project_id, user_id, name, archive_json) VALUES (?, ?, ?, ?)"
-  ).run(projectId, userId, project.name || "Project", JSON.stringify({ project, versions, exports, workflowEvents, shares }))
+  ).run(projectId, userId, project.name || "Project", JSON.stringify({ project, assignees, versions, exports, workflowEvents, shares }))
   return result.lastInsertRowid
 }
 
@@ -90,7 +197,12 @@ export function registerProjectRoutes(app) {
          WHERE user_id = ? ORDER BY pinned DESC, ${orderCol}`
       ).all(req.user.id)
     }
-    res.json({ ok: true, projects: projects.map(mapProjectRow) })
+    const assigneeMap = getProjectAssigneeMap(projects.map(project => project.id))
+    res.json({ ok: true, projects: projects.map(project => mapProjectRow(project, assigneeMap.get(project.id) || [])) })
+  })
+
+  app.get("/api/projects/assignee-options", authMiddleware, (req, res) => {
+    res.json({ ok: true, members: listAssignableMembers(req.user) })
   })
 
   // Einzelnes Projekt laden
@@ -106,7 +218,7 @@ export function registerProjectRoutes(app) {
       try { manifest = JSON.parse(latestExport.manifest_json || "{}") } catch {}
       exportInfo = { ...latestExport, manifest }
     }
-    res.json({ ok: true, project: mapProjectRow(project), latestExport: exportInfo })
+    res.json({ ok: true, project: mapProjectRow(project, getProjectAssignees(project.id)), latestExport: exportInfo })
   })
 
   app.get("/api/projects/deleted", authMiddleware, (req, res) => {
@@ -166,6 +278,8 @@ export function registerProjectRoutes(app) {
       )
 
       const newProjectId = Number(insert.lastInsertRowid)
+      const assignees = Array.isArray(payload?.assignees) ? readProjectAssignees(payload.assignees) : []
+      syncProjectAssignees(newProjectId, assignees)
       const versions = Array.isArray(payload?.versions) ? payload.versions : []
       for (const version of versions) {
         db.prepare("INSERT INTO project_versions (project_id, html, created_at) VALUES (?, ?, ?)").run(
@@ -190,7 +304,7 @@ export function registerProjectRoutes(app) {
       db.prepare("DELETE FROM deleted_projects WHERE id = ? AND user_id = ?").run(archiveId, req.user.id)
       logAudit({ userId: req.user.id, action: "project.restore_deleted", targetType: "project", targetId: newProjectId, meta: { archiveId } })
       const restored = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(newProjectId, req.user.id)
-      res.json({ ok: true, project: mapProjectRow(restored) })
+      res.json({ ok: true, project: mapProjectRow(restored, getProjectAssignees(newProjectId)) })
     } catch (error) {
       if (isValidationError(error)) return res.status(400).json({ ok: false, error: error.message })
       res.status(500).json({ ok: false, error: error.message })
@@ -208,6 +322,7 @@ export function registerProjectRoutes(app) {
       const dueAt = readOptionalIsoDate(req.body?.dueAt ?? req.body?.due_at, "Due date")
       const workflowStage = readOptionalEnum(req.body?.workflowStage ?? req.body?.workflow_stage, WORKFLOW_STAGES, "Workflow Stage", "draft") || "draft"
       const deliveryStatus = readOptionalEnum(req.body?.deliveryStatus ?? req.body?.delivery_status, DELIVERY_STATUSES, "Delivery status", "not_exported") || "not_exported"
+      const assignees = readProjectAssignees(req.body?.assignees) || []
       const normalized = normalizeProjectDocument({ html, url, platform })
       const result = db.prepare(
         `INSERT INTO projects (
@@ -226,6 +341,7 @@ export function registerProjectRoutes(app) {
         deliveryStatus,
         dueAt || null
       )
+      syncProjectAssignees(result.lastInsertRowid, assignees)
       db.prepare(
         "INSERT INTO project_workflow_events (project_id, user_id, from_stage, to_stage, comment) VALUES (?, ?, ?, ?, ?)"
       ).run(result.lastInsertRowid, req.user.id, null, workflowStage, "Project created")
@@ -234,10 +350,15 @@ export function registerProjectRoutes(app) {
         action: "project.create",
         targetType: "project",
         targetId: result.lastInsertRowid,
-        meta: { name, platform: normalized.meta.platform, workflowStage, deliveryStatus },
+        meta: { name, platform: normalized.meta.platform, workflowStage, deliveryStatus, assigneeCount: assignees.length },
       })
       const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(result.lastInsertRowid)
-      res.json({ ok: true, id: result.lastInsertRowid, platform: normalized.meta.platform, project: mapProjectRow(project) })
+      res.json({
+        ok: true,
+        id: result.lastInsertRowid,
+        platform: normalized.meta.platform,
+        project: mapProjectRow(project, getProjectAssignees(result.lastInsertRowid)),
+      })
     } catch (error) {
       if (isValidationError(error)) return res.status(400).json({ ok: false, error: error.message })
       res.status(500).json({ ok: false, error: error.message })
@@ -281,6 +402,7 @@ export function registerProjectRoutes(app) {
       const deliveryStatus = req.body?.deliveryStatus === undefined && req.body?.delivery_status === undefined
         ? undefined
         : readOptionalEnum(req.body?.deliveryStatus ?? req.body?.delivery_status, DELIVERY_STATUSES, "Delivery status", undefined)
+      const assignees = readProjectAssignees(req.body?.assignees)
 
       const nextHtmlInput = html !== undefined ? html : project.html
       const nextUrlInput = url !== undefined ? url : project.url
@@ -347,6 +469,7 @@ export function registerProjectRoutes(app) {
         projectId,
         req.user.id
       )
+      if (assignees !== undefined) syncProjectAssignees(projectId, assignees)
 
       const updated = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, req.user.id)
       logAudit({
@@ -354,9 +477,9 @@ export function registerProjectRoutes(app) {
         action: "project.update",
         targetType: "project",
         targetId: projectId,
-        meta: { workflowStage: nextWorkflowStage, deliveryStatus: nextDeliveryStatus, platform: nextPlatform },
+        meta: { workflowStage: nextWorkflowStage, deliveryStatus: nextDeliveryStatus, platform: nextPlatform, assigneeCount: assignees?.length },
       })
-      res.json({ ok: true, project: mapProjectRow(updated) })
+      res.json({ ok: true, project: mapProjectRow(updated, getProjectAssignees(projectId)) })
     } catch (error) {
       if (isValidationError(error)) return res.status(400).json({ ok: false, error: error.message })
       res.status(500).json({ ok: false, error: error.message })
@@ -377,6 +500,7 @@ export function registerProjectRoutes(app) {
         db.prepare("DELETE FROM project_workflow_events WHERE project_id = ?").run(projectId)
         db.prepare("DELETE FROM project_exports WHERE project_id = ?").run(projectId)
         db.prepare("DELETE FROM project_versions WHERE project_id = ?").run(projectId)
+        db.prepare("DELETE FROM project_assignees WHERE project_id = ?").run(projectId)
         db.prepare("DELETE FROM projects WHERE id = ? AND user_id = ?").run(projectId, req.user.id)
         return archiveId
       })
@@ -394,6 +518,7 @@ export function registerProjectRoutes(app) {
   app.post("/api/projects/:id/duplicate", authMiddleware, (req, res) => {
     const p = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(req.params.id, req.user.id)
     if (!p) return res.status(404).json({ ok: false, error: "Projekt nicht gefunden" })
+    const assignees = getProjectAssignees(req.params.id)
     const result = db.prepare(
       `INSERT INTO projects (
         user_id, name, client_name, url, html, platform, workflow_status, workflow_stage,
@@ -412,12 +537,18 @@ export function registerProjectRoutes(app) {
       p.due_at || null,
       p.thumbnail || null
     )
+    syncProjectAssignees(result.lastInsertRowid, assignees)
     db.prepare(
       "INSERT INTO project_workflow_events (project_id, user_id, from_stage, to_stage, comment) VALUES (?, ?, ?, ?, ?)"
     ).run(result.lastInsertRowid, req.user.id, null, "draft", "Project duplicated")
     logAudit({ userId: req.user.id, action: "project.duplicate", targetType: "project", targetId: result.lastInsertRowid, meta: { sourceProjectId: req.params.id } })
     const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(result.lastInsertRowid)
-    res.json({ ok: true, id: result.lastInsertRowid, platform: p.platform || "unknown", project: mapProjectRow(project) })
+    res.json({
+      ok: true,
+      id: result.lastInsertRowid,
+      platform: p.platform || "unknown",
+      project: mapProjectRow(project, getProjectAssignees(result.lastInsertRowid)),
+    })
   })
 
   // Shareable preview - create link (body: { email?: string } to email client)
@@ -530,7 +661,7 @@ export function registerProjectRoutes(app) {
       `).run(stage, stage, nextDeliveryStatus, stage, stage, projectId, req.user.id)
 
       const updated = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, req.user.id)
-      res.json({ ok: true, project: mapProjectRow(updated) })
+      res.json({ ok: true, project: mapProjectRow(updated, getProjectAssignees(projectId)) })
     } catch (error) {
       if (isValidationError(error)) return res.status(400).json({ ok: false, error: error.message })
       res.status(500).json({ ok: false, error: error.message })

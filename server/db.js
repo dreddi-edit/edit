@@ -49,6 +49,17 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (user_id) REFERENCES users(id)
   );
+
+  CREATE TABLE IF NOT EXISTS project_assignees (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    member_email TEXT NOT NULL,
+    role TEXT DEFAULT 'editor',
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (project_id) REFERENCES projects(id)
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_project_assignees_unique ON project_assignees(project_id, member_email);
+  CREATE INDEX IF NOT EXISTS idx_project_assignees_project ON project_assignees(project_id, created_at);
 `)
 
 // User Settings + API Keys
