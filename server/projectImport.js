@@ -4,11 +4,43 @@ import { normalizeProjectDocument, normalizeSiteUrl } from "./siteMeta.js"
 const MAX_SITE_PAGES = 16
 const MAX_SITEMAP_FILES = 6
 const HTML_FILE_EXTENSIONS = new Set([".html", ".htm"])
+const HTML_LIKE_FILE_EXTENSIONS = new Set([
+  ".html", ".htm", ".xhtml",
+  ".php", ".phtml", ".php5",
+  ".liquid", ".twig", ".njk", ".nunjucks",
+  ".hbs", ".handlebars", ".mustache", ".ejs", ".erb",
+  ".aspx", ".jsp",
+])
 const TEXT_FILE_EXTENSIONS = new Set([".md", ".markdown", ".txt"])
 const IMAGE_FILE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".avif", ".ico"])
 const MEDIA_FILE_EXTENSIONS = new Set([".mp4", ".webm", ".mov", ".mp3", ".wav", ".ogg"])
 const FONT_FILE_EXTENSIONS = new Set([".woff", ".woff2", ".ttf", ".otf", ".eot"])
 const CSS_FILE_EXTENSIONS = new Set([".css"])
+const SCRIPT_FILE_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx"])
+const NON_PAGE_TEMPLATE_NAMES = new Set([
+  "header",
+  "footer",
+  "functions",
+  "function",
+  "style",
+  "styles",
+  "scripts",
+  "script",
+  "nav",
+  "navbar",
+  "menu",
+  "sidebar",
+  "layout",
+  "_layout",
+  "_app",
+  "_document",
+  "app",
+  "document",
+  "snippet",
+  "snippets",
+  "partial",
+  "partials",
+])
 const PAGE_SKIP_EXTENSIONS = new Set([
   ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico",
   ".pdf", ".zip", ".xml", ".json", ".txt", ".css", ".js",
@@ -49,8 +81,10 @@ function guessMimeType(name, explicit = "") {
   if (explicit) return explicit
   const ext = path.extname(String(name || "")).toLowerCase()
   if (HTML_FILE_EXTENSIONS.has(ext)) return "text/html"
+  if (HTML_LIKE_FILE_EXTENSIONS.has(ext)) return "text/html"
   if (ext === ".svg") return "image/svg+xml"
   if (CSS_FILE_EXTENSIONS.has(ext)) return "text/css"
+  if (SCRIPT_FILE_EXTENSIONS.has(ext)) return "application/javascript"
   if (TEXT_FILE_EXTENSIONS.has(ext)) return "text/plain"
   if ([".png"].includes(ext)) return "image/png"
   if ([".jpg", ".jpeg"].includes(ext)) return "image/jpeg"
@@ -187,6 +221,36 @@ function inlineHtmlAssets(html, filePath, assets, textEntries) {
   })
 
   return output
+}
+
+function stripTemplateSyntax(text, ext = "") {
+  let output = String(text || "")
+  if (!output) return output
+  if ([".php", ".phtml", ".php5"].includes(ext)) {
+    output = output.replace(/<\?(?:php|=)?[\s\S]*?\?>/gi, "")
+  }
+  if ([".liquid", ".twig", ".njk", ".nunjucks", ".hbs", ".handlebars", ".mustache"].includes(ext)) {
+    output = output
+      .replace(/\{%-?[\s\S]*?-?%\}/g, "")
+      .replace(/\{\{-?[\s\S]*?-?\}\}/g, "")
+      .replace(/\{#-?[\s\S]*?-?#\}/g, "")
+  }
+  if ([".ejs", ".erb", ".aspx", ".jsp"].includes(ext)) {
+    output = output.replace(/<%[\s\S]*?%>/g, "")
+  }
+  return output
+}
+
+function looksLikeMarkupPage(text) {
+  const source = String(text || "")
+  if (!source.trim()) return false
+  if (/<(?:html|body|main|section|article|header|footer|nav|aside|form|div)\b/i.test(source)) return true
+  if (/<(?:h1|h2|h3|p|ul|ol|li|img|picture|video|table)\b/i.test(source)) return true
+  return false
+}
+
+function wrapMarkupFragment(title, body) {
+  return wrapImportedHtml(title, body, "Imported markup")
 }
 
 function markdownToHtml(markdown, title = "Document") {
@@ -436,7 +500,14 @@ function entryToBufferMap(entries) {
     if (!entryPath || entryPath.startsWith("__MACOSX/")) continue
     const mimeType = guessMimeType(entryPath, entry.mimeType)
     const buffer = entry.buffer || readBase64Buffer(entry.contentBase64)
-    if (TEXT_FILE_EXTENSIONS.has(path.extname(entryPath).toLowerCase()) || HTML_FILE_EXTENSIONS.has(path.extname(entryPath).toLowerCase()) || CSS_FILE_EXTENSIONS.has(path.extname(entryPath).toLowerCase()) || path.extname(entryPath).toLowerCase() === ".svg") {
+    const ext = path.extname(entryPath).toLowerCase()
+    if (
+      TEXT_FILE_EXTENSIONS.has(ext)
+      || HTML_LIKE_FILE_EXTENSIONS.has(ext)
+      || CSS_FILE_EXTENSIONS.has(ext)
+      || SCRIPT_FILE_EXTENSIONS.has(ext)
+      || ext === ".svg"
+    ) {
       textEntries.set(entryPath, {
         name: entryPath,
         mimeType,
@@ -458,7 +529,12 @@ function entryToBufferMap(entries) {
 function convertTextEntryToHtml(entryPath, text) {
   const ext = path.extname(entryPath).toLowerCase()
   const title = pathToTitle(entryPath)
-  if (HTML_FILE_EXTENSIONS.has(ext)) return String(text || "")
+  if (HTML_LIKE_FILE_EXTENSIONS.has(ext)) {
+    const cleaned = stripTemplateSyntax(text, ext)
+    if (/<html[\s>]/i.test(cleaned) || /<!doctype html/i.test(cleaned)) return cleaned
+    if (looksLikeMarkupPage(cleaned)) return wrapMarkupFragment(title, cleaned)
+    return wrapImportedHtml(title, `<pre>${escapeHtml(cleaned)}</pre>`, "Imported template")
+  }
   if (ext === ".svg") return wrapImportedHtml(title, `<div style="display:flex;justify-content:center;padding:24px;background:#fff;border-radius:24px;">${text}</div>`, "SVG import")
   if (TEXT_FILE_EXTENSIONS.has(ext)) {
     return ext === ".txt" ? plainTextToHtml(text, title) : markdownToHtml(text, title)
@@ -466,21 +542,93 @@ function convertTextEntryToHtml(entryPath, text) {
   return wrapImportedHtml(title, `<pre>${escapeHtml(text)}</pre>`, "Imported file")
 }
 
+function isLikelyPageEntry(entryPath) {
+  const normalized = normalizeEntryPath(entryPath)
+  if (!normalized) return false
+  const lower = normalized.toLowerCase()
+  if (
+    lower.includes("/partials/")
+    || lower.includes("/partial/")
+    || lower.includes("/includes/")
+    || lower.includes("/include/")
+    || lower.includes("/snippets/")
+    || lower.includes("/snippet/")
+    || lower.includes("/components/")
+    || lower.includes("/component/")
+    || lower.includes("/fragments/")
+    || lower.includes("/fragment/")
+    || lower.includes("/sections/")
+    || lower.includes("/section/")
+    || lower.startsWith("components/")
+    || lower.startsWith("partials/")
+    || lower.startsWith("includes/")
+    || lower.startsWith("snippets/")
+    || lower.startsWith("sections/")
+  ) {
+    return false
+  }
+  const baseName = path.posix.basename(lower, path.extname(lower))
+  if (NON_PAGE_TEMPLATE_NAMES.has(baseName)) return false
+  return true
+}
+
+function analyzeImportEntries(entries) {
+  const files = Array.isArray(entries) ? entries.map((entry) => normalizeEntryPath(entry.name)).filter(Boolean) : []
+  const htmlLike = []
+  const textPages = []
+  let cssCount = 0
+  let scriptCount = 0
+  let assetCount = 0
+
+  for (const file of files) {
+    const ext = path.extname(file).toLowerCase()
+    if (HTML_LIKE_FILE_EXTENSIONS.has(ext)) {
+      htmlLike.push(file)
+      continue
+    }
+    if (TEXT_FILE_EXTENSIONS.has(ext) || ext === ".svg") {
+      textPages.push(file)
+      continue
+    }
+    if (CSS_FILE_EXTENSIONS.has(ext)) {
+      cssCount += 1
+      continue
+    }
+    if (SCRIPT_FILE_EXTENSIONS.has(ext)) {
+      scriptCount += 1
+      continue
+    }
+    assetCount += 1
+  }
+
+  return {
+    fileCount: files.length,
+    htmlLikeCount: htmlLike.length,
+    textPageCount: textPages.length,
+    cssCount,
+    scriptCount,
+    assetCount,
+  }
+}
+
 function buildPagesFromEntries(entries, options = {}) {
   const { textEntries, assetEntries } = entryToBufferMap(entries)
+  const analysis = analyzeImportEntries(entries)
   const pageCandidates = []
 
   for (const [entryPath, entry] of textEntries) {
     const ext = path.extname(entryPath).toLowerCase()
-    if (!HTML_FILE_EXTENSIONS.has(ext) && ext !== ".svg" && !TEXT_FILE_EXTENSIONS.has(ext)) continue
+    if (!HTML_LIKE_FILE_EXTENSIONS.has(ext) && ext !== ".svg" && !TEXT_FILE_EXTENSIONS.has(ext)) continue
+    if (!TEXT_FILE_EXTENSIONS.has(ext) && ext !== ".svg" && !isLikelyPageEntry(entryPath)) continue
     const rawHtml = convertTextEntryToHtml(entryPath, entry.text)
     const html = inlineHtmlAssets(rawHtml, entryPath, assetEntries, textEntries)
     const pagePath = filePathToPagePath(entryPath)
+    const fileName = path.posix.basename(entryPath)
     pageCandidates.push(
       buildPageRecord({
         id: pathToPageId(entryPath),
-        name: extractDocumentTitleFromHtml(html, pathToTitle(entryPath)),
-        title: extractDocumentTitleFromHtml(html, pathToTitle(entryPath)),
+        name: extractDocumentTitleFromHtml(html, pathToTitle(fileName)),
+        title: extractDocumentTitleFromHtml(html, pathToTitle(fileName)),
         path: pagePath,
         url: pagePath,
         html,
@@ -513,12 +661,17 @@ function buildPagesFromEntries(entries, options = {}) {
     return left.path.localeCompare(right.path)
   })
 
+  const summary =
+    pageCandidates.length > 0
+      ? `${pageCandidates.length} structured page${pageCandidates.length === 1 ? "" : "s"} from ${analysis.fileCount} file${analysis.fileCount === 1 ? "" : "s"} · ${analysis.cssCount} styles · ${analysis.scriptCount} scripts · ${analysis.assetCount} assets`
+      : options.summary || `${analysis.fileCount} files analyzed`
+
   return buildPreviewFromPages({
     name: options.title || pathToTitle(pageCandidates[0]?.name || "Imported project"),
     url: "",
     pages: pageCandidates,
     platform: "static",
-    summary: options.summary || `${pageCandidates.length} page${pageCandidates.length === 1 ? "" : "s"} imported from files`,
+    summary,
     source: "Local",
   })
 }
