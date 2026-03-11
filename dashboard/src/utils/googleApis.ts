@@ -188,19 +188,42 @@ export const translateTexts = async (
   options: { format?: "text" | "html" } = {}
 ): Promise<TranslationData[]> => {
   if (!Array.isArray(texts) || texts.length === 0) return [];
-  const data = await apiCall(`https://translation.googleapis.com/language/translate/v2?key=${apiKey}`, {
-    method: 'POST',
-    body: JSON.stringify({
-      q: texts,
-      target: targetLang,
-      format: options.format || "text",
-    })
-  });
+  const allResults: TranslationData[] = []
+  let batch: string[] = []
+  let batchChars = 0
 
-  return (data.data?.translations || []).map((entry: any) => ({
-    translatedText: entry?.translatedText || "",
-    detectedSourceLanguage: entry?.detectedSourceLanguage || "",
-  }));
+  const flush = async () => {
+    if (!batch.length) return
+    const data = await apiCall(`https://translation.googleapis.com/language/translate/v2?key=${apiKey}`, {
+      method: 'POST',
+      body: JSON.stringify({
+        q: batch,
+        target: targetLang,
+        format: options.format || "text",
+      })
+    });
+
+    allResults.push(
+      ...(data.data?.translations || []).map((entry: any) => ({
+        translatedText: entry?.translatedText || "",
+        detectedSourceLanguage: entry?.detectedSourceLanguage || "",
+      }))
+    )
+    batch = []
+    batchChars = 0
+  }
+
+  for (const text of texts) {
+    const normalized = String(text || "")
+    if (batch.length >= 32 || batchChars + normalized.length > 4500) {
+      await flush()
+    }
+    batch.push(normalized)
+    batchChars += normalized.length
+  }
+
+  await flush()
+  return allResults
 };
 
 export const translateText = async (text: string, targetLang: string): Promise<TranslationData> => {

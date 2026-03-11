@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react"
 import { toast } from "./Toast"
 import { errMsg } from "../utils/errMsg"
 import { getRequireApproval, getApprovalThreshold, setRequireApproval, setApprovalThreshold } from "../approval-settings"
-import { useTranslation, type Language } from "../i18n/useTranslation"
+import { AVAILABLE_UI_LANGUAGES, useTranslation, type Language } from "../i18n/useTranslation"
 import {
   analyzeEntities,
   analyzeImage,
@@ -52,7 +52,7 @@ type DetectedKey = {
 }
 
 const TABS: Array<{ id: TabId; label: string }> = [
-  { id: "general", label: "Allgemein" },
+  { id: "general", label: "General" },
   { id: "apikeys", label: "API Keys" },
   { id: "org", label: "Organisation" },
   { id: "google", label: "Google AI Suite" },
@@ -117,7 +117,7 @@ export default function SettingsPanel({
   onClose: () => void
   onThemeChange: (theme: string) => void
 }) {
-  const { lang, setLang } = useTranslation()
+  const { lang, setLang, t } = useTranslation()
   const [tab, setTab] = useState<TabId>("general")
   const [settings, setSettings] = useState<Settings | null>(null)
   const [approvalOn, setApprovalOn] = useState(getRequireApproval())
@@ -128,6 +128,8 @@ export default function SettingsPanel({
   const [seoLoading, setSeoLoading] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [languageChoice, setLanguageChoice] = useState<Language>(lang)
+  const [languageSaving, setLanguageSaving] = useState(false)
 
   const [myKeys, setMyKeys] = useState<ApiKey[]>([])
   const [detectInput, setDetectInput] = useState("")
@@ -158,6 +160,10 @@ export default function SettingsPanel({
       theme: (localStorage.getItem("se_theme") as "dark" | "light") || "dark",
       disabled_models: [],
     } satisfies Settings)
+
+  useEffect(() => {
+    setLanguageChoice(lang)
+  }, [lang])
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -501,7 +507,7 @@ export default function SettingsPanel({
       >
         <div className="draft-settings-header">
           <div className="draft-settings-title" id="settings-title">
-            Einstellungen
+            {t("Settings")}
           </div>
           <button type="button" className="draft-settings-close" onClick={onClose} aria-label="Close settings">
             X
@@ -516,7 +522,7 @@ export default function SettingsPanel({
               className={`draft-settings-tab ${tab === entry.id ? "active" : ""}`}
               onClick={() => setTab(entry.id)}
             >
-              {entry.label}
+              {t(entry.label)}
             </button>
           ))}
         </div>
@@ -525,11 +531,11 @@ export default function SettingsPanel({
         <div className="draft-settings-content">
           {tab === "general" ? (
             <>
-              <Section label="Erscheinungsbild">
+              <Section label={t("Appearance")}>
                 <div className="draft-settings-button-group">
                   {[
-                    { value: "dark", label: "Dark" },
-                    { value: "light", label: "Hell" },
+                    { value: "dark", label: t("Dark") },
+                    { value: "light", label: t("Light") },
                   ].map(option => (
                     <button
                       key={option.value}
@@ -540,41 +546,54 @@ export default function SettingsPanel({
                     >
                       {option.label}
                       <span className="draft-settings-toggle-sub">
-                        {effectiveSettings.theme === option.value ? "Aktiv" : ""}
+                        {effectiveSettings.theme === option.value ? t("Active") : ""}
                       </span>
                     </button>
                   ))}
                 </div>
               </Section>
 
-              <Section label="Sprache">
-                <div className="draft-settings-button-group">
-                  {[
-                    { value: "en", label: "EN" },
-                    { value: "de", label: "DE" },
-                    { value: "es", label: "ES" },
-                  ].map(option => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      className={`draft-settings-toggle-button ${lang === option.value ? "active" : ""}`}
-                      onClick={() => setLang(option.value as Language)}
-                    >
-                      {option.label}
-                      <span className="draft-settings-toggle-sub">{lang === option.value ? "Aktiv" : ""}</span>
-                    </button>
-                  ))}
+              <Section label={t("Language")}>
+                <div className="draft-settings-input-row draft-settings-input-row--stack-mobile">
+                  <select
+                    className="draft-settings-select"
+                    value={languageChoice}
+                    onChange={event => setLanguageChoice(event.target.value)}
+                    aria-label="UI language"
+                  >
+                    {AVAILABLE_UI_LANGUAGES.map(option => (
+                      <option key={option.code} value={option.code}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    className="draft-settings-action-button"
+                    disabled={languageSaving || languageChoice === lang}
+                    onClick={() => {
+                      setLanguageSaving(true)
+                      void setLang(languageChoice)
+                        .catch(error => toast.error(errMsg(error)))
+                        .finally(() => setLanguageSaving(false))
+                    }}
+                  >
+                    {languageSaving ? t("Translating...") : t("Apply language")}
+                  </button>
                 </div>
+                <p className="draft-settings-description" style={{ marginTop: 10, marginBottom: 0 }}>
+                  {t("Built-in for EN/DE/ES, Google-powered language packs for the rest of the top 50 languages.")}
+                </p>
               </Section>
 
-              <Section label="KI Request Approval">
+              <Section label={t("AI Request Approval")}>
                 <SettingRow
-                  title="Bestätigung vor Cloud-Requests"
-                  subtitle={approvalOn ? "Kosten werden vor jedem API-Call angezeigt" : "Alle Requests gehen direkt durch"}
+                  title={t("Approval before cloud requests")}
+                  subtitle={approvalOn ? t("Costs are shown before every API call") : t("All requests go through directly")}
                   control={
                     <Toggle
                       checked={approvalOn}
-                      label="Bestätigung vor Cloud-Requests"
+                      label={t("Approval before cloud requests")}
                       onChange={value => {
                         setApprovalOn(value)
                         setRequireApproval(value)
@@ -599,14 +618,14 @@ export default function SettingsPanel({
                 />
               </Section>
 
-              <Section label="KI Modelle">
+              <Section label={t("AI Models")}>
                 <SettingRow
-                  title="Nur eigenen API Key nutzen"
-                  subtitle={onlyOwnKey ? "Eigene Keys werden bevorzugt" : "System- und eigene Keys sind nutzbar"}
+                  title={t("Only use your own API key")}
+                  subtitle={onlyOwnKey ? t("Own keys are preferred") : t("System and own keys can be used")}
                   control={
                     <Toggle
                       checked={onlyOwnKey}
-                      label="Nur eigenen API Key nutzen"
+                      label={t("Only use your own API key")}
                       onChange={setOnlyOwnKey}
                     />
                   }
@@ -624,14 +643,14 @@ export default function SettingsPanel({
                 })}
               </Section>
 
-              <Section label="SEO Analysis">
+              <Section label={t("SEO Analysis")}>
                 <button
                   type="button"
                   className="draft-settings-seo-button"
                   onClick={() => void analyzeSeo()}
                   disabled={seoLoading || loading}
                 >
-                  {seoLoading ? "..." : "🔍"} Analyze SEO
+                  {seoLoading ? "..." : "🔍"} {t("Analyze SEO")}
                 </button>
                 {seoData ? (
                   <ResultCard>
@@ -649,7 +668,7 @@ export default function SettingsPanel({
                 System-Keys.
               </p>
 
-              <Section label="Key hinzufügen">
+              <Section label={t("Add key")}>
                 <div className="draft-settings-input-row">
                   <input
                     className="draft-settings-text-input draft-settings-text-input--mono"
@@ -667,7 +686,7 @@ export default function SettingsPanel({
                     onClick={() => void detectKey()}
                     disabled={detecting}
                   >
-                    {detecting ? "Prüfen..." : "Erkennen"}
+                    {detecting ? t("Check...") : t("Detect")}
                   </button>
                 </div>
 

@@ -106,22 +106,16 @@ const WORKFLOW_STAGE_OPTIONS: Array<{ value: WorkflowStage; label: string }> = [
   { value: "approved", label: "Approved" },
   { value: "shipped", label: "Shipped" },
 ]
-const structureMoveButtonStyle: CSSProperties = {
-  height: 28,
-  width: 28,
-  borderRadius: 8,
-  border: "1px solid rgba(148,163,184,0.18)",
-  background: "rgba(255,255,255,0.04)",
-  color: "white",
-  fontSize: 12,
-  fontWeight: 800,
-  cursor: "pointer",
-}
-
 function titleCaseFallback(value: string): string {
   return String(value || "")
     .replace(/[-_]+/g, " ")
     .replace(/\b\w/g, (match) => match.toUpperCase())
+}
+
+function shortenText(value: string, max = 92): string {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim()
+  if (normalized.length <= max) return normalized
+  return `${normalized.slice(0, max - 1).trimEnd()}…`
 }
 
 function parseRgbChannels(color: string): [number, number, number] | null {
@@ -337,6 +331,7 @@ const [adminLoading, setAdminLoading] = useState(false)
     detectedSourceLanguage: string
     translatedCount: number
   } | null>(null)
+  const [showExportWarnings, setShowExportWarnings] = useState(false)
 
   const demoPlanMeta: Record<"basis" | "starter" | "pro" | "scale", {
     label: string
@@ -390,7 +385,6 @@ const [adminLoading, setAdminLoading] = useState(false)
     },
   }
 
-  const activePlanMeta = demoPlanMeta[demoPlan]
   const [exportMode, setExportMode] = useState<ExportMode>("wp-placeholder")
   const [exporting, setExporting] = useState(false)
   const [leftAiPrompt, setLeftAiPrompt] = useState("")
@@ -816,6 +810,12 @@ const autoSave = async (html: string) => {
   }, [loadedUrl, currentPlatform])
 
   useEffect(() => {
+    if (!exportWarnings.length) {
+      setShowExportWarnings(false)
+    }
+  }, [exportWarnings])
+
+  useEffect(() => {
     localStorage.setItem("se_translate_lang", translationTargetLanguage)
     setTranslationInfo(null)
   }, [translationTargetLanguage])
@@ -1115,21 +1115,6 @@ useEffect(() => {
 
           <div className="editor-toolbar__identity">
             <div className="editor-toolbar__label">Site Editor</div>
-            <div className="editor-toolbar__project">
-              {currentProject?.name || loadedUrl.replace(/^https?:\/\//, "") || "No project loaded"}
-            </div>
-          </div>
-
-          <div
-            className="editor-pill editor-pill--plan"
-            style={{
-              borderColor: activePlanMeta.border,
-              background: activePlanMeta.bg,
-              color: activePlanMeta.accent,
-            }}
-          >
-            <span className="editor-pill__dot" style={{ background: activePlanMeta.accent }} />
-            Plan {activePlanMeta.label}
           </div>
         </div>
 
@@ -1255,29 +1240,6 @@ useEffect(() => {
             </button>
           </div>
 
-          <div className="editor-export-picker">
-            <select
-              className="editor-select editor-select--language"
-              value={translationTargetLanguage}
-              onChange={e => setTranslationTargetLanguage(e.target.value)}
-              title="Translation target language"
-            >
-              {TOP_TRANSLATION_LANGUAGES.map((language) => (
-                <option key={language.code} value={language.code}>
-                  {language.label}
-                </option>
-              ))}
-            </select>
-
-            <button
-              className={`editor-btn editor-btn--translate ${isTranslatingSite ? "is-loading" : ""}`}
-              onClick={handleTranslateSite}
-              disabled={isTranslatingSite || !currentHtml}
-              title="Instantly translate the loaded site"
-            >
-              {isTranslatingSite ? "Translating..." : "Translate site"}
-            </button>
-          </div>
         </div>
       </div>
 
@@ -1503,9 +1465,30 @@ useEffect(() => {
                   <div className="editor-panel__delivery-mode">{selectedExportMode.label}</div>
                 </div>
                 {exportWarnings.length > 0 ? (
-                  <div className="editor-panel__warning">
-                    {exportWarnings.length} warning{exportWarnings.length === 1 ? "" : "s"} will be written into the manifest.
-                  </div>
+                  <>
+                    <button
+                      type="button"
+                      className={`editor-panel__warning-toggle ${showExportWarnings ? "is-open" : ""}`}
+                      onClick={() => setShowExportWarnings(previous => !previous)}
+                    >
+                      <span className="editor-panel__warning">
+                        {exportWarnings.length} warning{exportWarnings.length === 1 ? "" : "s"} will be written into the manifest.
+                      </span>
+                      <span className="editor-panel__warning-arrow">{showExportWarnings ? "−" : "+"}</span>
+                    </button>
+                    {showExportWarnings ? (
+                      <div className="editor-panel__warning-list">
+                        {exportWarnings.map((warning, index) => (
+                          <div key={`${warning.code}-${index}`} className="editor-panel__warning-item" title={warning.detail || warning.message}>
+                            <span className="editor-panel__warning-item-code">{warning.level === "warning" ? "!" : "i"}</span>
+                            <span className="editor-panel__warning-item-copy">
+                              {shortenText(warning.detail || warning.message, 88)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </>
                 ) : (
                   <div className="editor-panel__note">No delivery warnings right now.</div>
                 )}
@@ -1519,6 +1502,27 @@ useEffect(() => {
                   <div className="editor-panel__translation-head">
                     <div className="editor-panel__translation-title">Instant website translation</div>
                     <div className="editor-panel__translation-language">{selectedTranslationLanguage.label}</div>
+                  </div>
+                  <div className="editor-panel__translation-controls">
+                    <select
+                      className="editor-select editor-select--full"
+                      value={translationTargetLanguage}
+                      onChange={e => setTranslationTargetLanguage(e.target.value)}
+                      title="Translation target language"
+                    >
+                      {TOP_TRANSLATION_LANGUAGES.map((language) => (
+                        <option key={language.code} value={language.code}>
+                          {language.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className={`editor-btn editor-btn--panel editor-btn--translate ${isTranslatingSite ? "is-loading" : ""}`}
+                      onClick={handleTranslateSite}
+                      disabled={isTranslatingSite || !currentHtml}
+                    >
+                      {isTranslatingSite ? "Translating..." : "Translate site"}
+                    </button>
                   </div>
                   <div className="editor-panel__note">
                     Translates the loaded page copy while preserving structure, exports, and block overlay markup.
@@ -1593,10 +1597,10 @@ useEffect(() => {
                       </div>
 
                       <div className="editor-structure__actions">
-                        <button onClick={() => moveStructureItem(item.rootId, -2)} style={structureMoveButtonStyle}>^^</button>
-                        <button onClick={() => moveStructureItem(item.rootId, -1)} style={structureMoveButtonStyle}>^</button>
-                        <button onClick={() => moveStructureItem(item.rootId, 1)} style={structureMoveButtonStyle}>v</button>
-                        <button onClick={() => moveStructureItem(item.rootId, 2)} style={structureMoveButtonStyle}>vv</button>
+                        <button className="editor-structure__move" onClick={() => moveStructureItem(item.rootId, -2)}>↑↑</button>
+                        <button className="editor-structure__move" onClick={() => moveStructureItem(item.rootId, -1)}>↑</button>
+                        <button className="editor-structure__move" onClick={() => moveStructureItem(item.rootId, 1)}>↓</button>
+                        <button className="editor-structure__move" onClick={() => moveStructureItem(item.rootId, 2)}>↓↓</button>
                       </div>
                     </div>
                   ))}

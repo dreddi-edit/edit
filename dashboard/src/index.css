@@ -1222,6 +1222,140 @@ body[data-theme="light"] {
   color: #e8e8e8;
 }
 
+body[data-theme="light"] .draft-settings-backdrop {
+  background: rgba(15,23,42,0.22);
+}
+
+body[data-theme="light"] .draft-settings-modal {
+  border-color: rgba(15,23,42,0.08);
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98));
+  box-shadow: 0 32px 80px rgba(15,23,42,0.12);
+  color: #111827;
+}
+
+body[data-theme="light"] .draft-settings-close,
+body[data-theme="light"] .draft-settings-toggle-button,
+body[data-theme="light"] .draft-settings-row,
+body[data-theme="light"] .draft-settings-row-input,
+body[data-theme="light"] .draft-settings-text-input,
+body[data-theme="light"] .draft-settings-select,
+body[data-theme="light"] .draft-settings-list-card,
+body[data-theme="light"] .draft-settings-pill,
+body[data-theme="light"] .draft-settings-api-button,
+body[data-theme="light"] .draft-settings-result-card {
+  border-color: rgba(15,23,42,0.08);
+  background: rgba(255,255,255,0.9);
+  color: #475569;
+}
+
+body[data-theme="light"] .draft-settings-close:hover,
+body[data-theme="light"] .draft-settings-toggle-button:hover,
+body[data-theme="light"] .draft-settings-row:hover,
+body[data-theme="light"] .draft-settings-api-button:hover {
+  border-color: rgba(15,23,42,0.14);
+  background: #ffffff;
+  color: #111827;
+}
+
+body[data-theme="light"] .draft-settings-divider {
+  background: rgba(15,23,42,0.08);
+}
+
+body[data-theme="light"] .draft-settings-tab {
+  color: #94a3b8;
+}
+
+body[data-theme="light"] .draft-settings-tab:hover {
+  color: #334155;
+  background: rgba(15,23,42,0.04);
+}
+
+body[data-theme="light"] .draft-settings-tab.active,
+body[data-theme="light"] .draft-settings-toggle-button.active,
+body[data-theme="light"] .draft-settings-model-chip.active {
+  border-color: rgba(37,99,235,0.18);
+  background: rgba(37,99,235,0.1);
+  color: #2563eb;
+}
+
+body[data-theme="light"] .draft-settings-title,
+body[data-theme="light"] .draft-settings-row-title,
+body[data-theme="light"] .draft-settings-list-main strong,
+body[data-theme="light"] .draft-settings-result-card strong,
+body[data-theme="light"] .draft-settings-detected-head {
+  color: #111827;
+}
+
+body[data-theme="light"] .draft-settings-label,
+body[data-theme="light"] .draft-settings-description,
+body[data-theme="light"] .draft-settings-row-sub,
+body[data-theme="light"] .draft-settings-detected-sub,
+body[data-theme="light"] .draft-settings-list-meta,
+body[data-theme="light"] .draft-settings-empty,
+body[data-theme="light"] .draft-settings-api-title,
+body[data-theme="light"] .draft-settings-api-arrow,
+body[data-theme="light"] .draft-settings-toggle-sub,
+body[data-theme="light"] .draft-settings-text-input::placeholder {
+  color: #94a3b8;
+}
+
+body[data-theme="light"] .draft-settings-toggle-button.active .draft-settings-toggle-sub {
+  color: #2563eb;
+}
+
+body[data-theme="light"] .draft-settings-row-input:hover,
+body[data-theme="light"] .draft-settings-row-input:focus,
+body[data-theme="light"] .draft-settings-text-input:hover,
+body[data-theme="light"] .draft-settings-text-input:focus,
+body[data-theme="light"] .draft-settings-select:hover,
+body[data-theme="light"] .draft-settings-select:focus {
+  border-color: #2563eb;
+}
+
+body[data-theme="light"] .draft-settings-toggle-track {
+  border-color: rgba(15,23,42,0.1);
+  background: rgba(226,232,240,0.7);
+}
+
+body[data-theme="light"] .draft-settings-toggle-thumb {
+  background: #cbd5e1;
+}
+
+body[data-theme="light"] .draft-settings-toggle input:checked + .draft-settings-toggle-track {
+  background: #2563eb;
+}
+
+body[data-theme="light"] .draft-settings-action-button,
+body[data-theme="light"] .draft-settings-seo-button {
+  border-color: rgba(37,99,235,0.18);
+  background: rgba(37,99,235,0.1);
+  color: #2563eb;
+}
+
+body[data-theme="light"] .draft-settings-action-button:hover,
+body[data-theme="light"] .draft-settings-seo-button:hover {
+  border-color: rgba(37,99,235,0.28);
+  background: rgba(37,99,235,0.16);
+}
+
+body[data-theme="light"] .draft-settings-detected-card {
+  border-color: rgba(22,163,74,0.16);
+  background: rgba(22,163,74,0.06);
+}
+
+body[data-theme="light"] .draft-settings-list-card--highlight {
+  border-color: rgba(37,99,235,0.16);
+  background: rgba(37,99,235,0.08);
+}
+
+body[data-theme="light"] .draft-settings-pill {
+  background: rgba(226,232,240,0.68);
+}
+
+body[data-theme="light"] .draft-settings-api-button:hover {
+  background: rgba(255,255,255,0.98);
+}
+
 @media (max-width: 1100px) {
   .draft-dashboard-layout {
     grid-template-columns: 1fr;
