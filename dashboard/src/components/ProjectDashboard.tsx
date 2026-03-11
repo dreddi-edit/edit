@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type CSSProperties } from "react"
 import { apiGetProjects, apiCreateProject, apiDeleteProject, type Project, type ProjectAssignee } from "../api/projects"
 import { apiGetPlan, apiGetBalance, apiGetCreditsTransactions } from "../api/credits"
 import { apiFetch } from "../api/client"
@@ -21,9 +21,10 @@ const NOTES_KEY = "pd_dashboard_notes_v1"
 
 type DashboardStage = "all" | "draft" | "review" | "approved" | "shipped"
 type Plan = "basis" | "starter" | "pro" | "scale"
-type WorkspaceView = "projects" | "templates" | "exports"
+type WorkspaceView = "ai-studio" | "projects" | "templates" | "exports"
 type TemplateFilter = "all" | "wordpress" | "shopify" | "webflow" | "other"
 type ExportFilter = "all" | "wp-placeholder" | "html-clean" | "ready" | "guarded"
+type AIStudioFilter = "all" | "creation" | "optimization" | "growth" | "autonomy"
 type SpendRange = "1h" | "24h" | "7d" | "30d"
 type UsageMode = "model" | "task"
 type Template = { id: number; name: string; url?: string; platform?: SitePlatform; thumbnail?: string; created_at: string }
@@ -31,6 +32,18 @@ type ChecklistItem = { id: string; label: string; done: boolean }
 type NoteItem = { id: string; text: string; done: boolean }
 type SpendBreakdownItem = { label: string; amount: number; percent: number }
 type AssignableMember = ProjectAssignee
+type AIStudioService = {
+  id: string
+  badge: string
+  name: string
+  tagline: string
+  description: string
+  category: Exclude<AIStudioFilter, "all">
+  accent: string
+  surface: string
+  actionLabel: string
+  status: string
+}
 
 const DEFAULT_CHECKLIST: ChecklistItem[] = [
   { id: "create", label: "Create first project", done: false },
@@ -51,6 +64,129 @@ const MOCK_ACTIVITY = [
 const DEFAULT_NOTES: NoteItem[] = [
   { id: "follow-up", text: "Follow up on guarded exports", done: false },
   { id: "review-copy", text: "Review AI spend before next export", done: false },
+]
+
+const AI_STUDIO_SERVICES: AIStudioService[] = [
+  {
+    id: "company-box",
+    badge: "OS",
+    name: "Company-in-a-Box",
+    tagline: "From idea to operating business stack",
+    description: "Generate site, offer, onboarding, CRM flows, docs, campaigns, and support assets from one brief.",
+    category: "creation",
+    accent: "#7dd3fc",
+    surface: "linear-gradient(135deg, rgba(125, 211, 252, 0.18), rgba(14, 116, 144, 0.05))",
+    actionLabel: "Assemble",
+    status: "Flagship",
+  },
+  {
+    id: "visual-product",
+    badge: "VX",
+    name: "Figma / Screenshot -> Product",
+    tagline: "Turn references into editable software",
+    description: "Convert screenshots, Figma frames, or demo videos into structured pages and production-ready frontends.",
+    category: "creation",
+    accent: "#93c5fd",
+    surface: "linear-gradient(135deg, rgba(147, 197, 253, 0.18), rgba(30, 64, 175, 0.05))",
+    actionLabel: "Convert",
+    status: "Studio",
+  },
+  {
+    id: "funnel-generator",
+    badge: "FG",
+    name: "Full Funnel Generator",
+    tagline: "Pages, ads, emails, upsells, follow-up",
+    description: "Spin up the entire acquisition and conversion machine around a product, not just a single landing page.",
+    category: "creation",
+    accent: "#f9a8d4",
+    surface: "linear-gradient(135deg, rgba(249, 168, 212, 0.18), rgba(157, 23, 77, 0.05))",
+    actionLabel: "Generate",
+    status: "Growth",
+  },
+  {
+    id: "cro-agent",
+    badge: "CR",
+    name: "Autonomous CRO Agent",
+    tagline: "Continuous experimentation loop",
+    description: "Monitor behavior, rewrite offers, test variants, and push the highest-converting version without waiting on a team.",
+    category: "optimization",
+    accent: "#f0abfc",
+    surface: "linear-gradient(135deg, rgba(240, 171, 252, 0.18), rgba(126, 34, 206, 0.05))",
+    actionLabel: "Optimize",
+    status: "Always-on",
+  },
+  {
+    id: "self-healing",
+    badge: "SH",
+    name: "Self-Healing Website",
+    tagline: "Detect and repair breakage automatically",
+    description: "Catch SEO regressions, accessibility issues, dead states, layout drift, and broken user flows before they cost revenue.",
+    category: "optimization",
+    accent: "#86efac",
+    surface: "linear-gradient(135deg, rgba(134, 239, 172, 0.18), rgba(22, 101, 52, 0.05))",
+    actionLabel: "Guard",
+    status: "Reliability",
+  },
+  {
+    id: "global-expansion",
+    badge: "GL",
+    name: "One-Click Global Expansion",
+    tagline: "Launch for markets, not just languages",
+    description: "Clone the business into new countries with localized copy, pricing, offers, SEO, and market-specific funnels.",
+    category: "growth",
+    accent: "#fcd34d",
+    surface: "linear-gradient(135deg, rgba(252, 211, 77, 0.18), rgba(146, 64, 14, 0.05))",
+    actionLabel: "Expand",
+    status: "Scale",
+  },
+  {
+    id: "sales-closer",
+    badge: "SC",
+    name: "AI Sales Closer",
+    tagline: "Realtime voice and chat conversion agent",
+    description: "Qualify, answer objections, route leads, and close lower-ticket deals directly on the site with human-like context.",
+    category: "growth",
+    accent: "#fb7185",
+    surface: "linear-gradient(135deg, rgba(251, 113, 133, 0.18), rgba(159, 18, 57, 0.05))",
+    actionLabel: "Deploy",
+    status: "Revenue",
+  },
+  {
+    id: "brand-brain",
+    badge: "BB",
+    name: "Brand Brain",
+    tagline: "Persistent company memory and taste",
+    description: "Centralize tone, messaging, product truth, objections, visual language, and decision history in one live model layer.",
+    category: "autonomy",
+    accent: "#a5b4fc",
+    surface: "linear-gradient(135deg, rgba(165, 180, 252, 0.18), rgba(67, 56, 202, 0.05))",
+    actionLabel: "Train",
+    status: "Memory",
+  },
+  {
+    id: "war-room",
+    badge: "WR",
+    name: "Competitor War Room",
+    tagline: "Track the market in real time",
+    description: "Watch launches, pricing, ad angles, SEO shifts, and messaging changes so the product can counter-move immediately.",
+    category: "autonomy",
+    accent: "#fdba74",
+    surface: "linear-gradient(135deg, rgba(253, 186, 116, 0.18), rgba(154, 52, 18, 0.05))",
+    actionLabel: "Track",
+    status: "Intel",
+  },
+  {
+    id: "personalization",
+    badge: "1:1",
+    name: "Personalized Site per Visitor",
+    tagline: "Adaptive journeys at runtime",
+    description: "Reshape copy, offers, proof, and flows per visitor intent, acquisition source, industry, and buying stage.",
+    category: "autonomy",
+    accent: "#67e8f9",
+    surface: "linear-gradient(135deg, rgba(103, 232, 249, 0.18), rgba(8, 145, 178, 0.05))",
+    actionLabel: "Personalize",
+    status: "Realtime",
+  },
 ]
 
 function loadChecklist(): ChecklistItem[] {
@@ -222,6 +358,21 @@ function exportDistribution(projects: Project[]) {
     .slice(0, 4)
 }
 
+function aiStudioDistribution(services: AIStudioService[]) {
+  const labels: Record<Exclude<AIStudioFilter, "all">, string> = {
+    creation: "Creation",
+    optimization: "Optimization",
+    growth: "Growth",
+    autonomy: "Autonomy",
+  }
+  const counts = new Map<string, number>()
+  for (const service of services) {
+    const label = labels[service.category]
+    counts.set(label, (counts.get(label) || 0) + 1)
+  }
+  return Array.from(counts.entries())
+}
+
 function exportModeLabel(mode?: string) {
   if (mode === "wp-placeholder") return "WP"
   if (mode === "html-clean") return "HTML"
@@ -268,6 +419,11 @@ function matchesExportFilter(filter: ExportFilter, project: Project) {
   if (filter === "all") return true
   if (filter === "ready" || filter === "guarded") return exportReadiness(project) === filter
   return String(project.lastExportMode || "") === filter
+}
+
+function matchesAIStudioFilter(filter: AIStudioFilter, service: AIStudioService) {
+  if (filter === "all") return true
+  return service.category === filter
 }
 
 function rangeDuration(range: SpendRange) {
@@ -552,6 +708,40 @@ function ExportCard({
   )
 }
 
+function AIStudioCard({
+  service,
+  onOpen,
+}: {
+  service: AIStudioService
+  onOpen: () => void
+}) {
+  return (
+    <button
+      type="button"
+      className="pd-ai-card"
+      onClick={onOpen}
+      style={
+        {
+          "--pd-ai-accent": service.accent,
+          "--pd-ai-surface": service.surface,
+        } as CSSProperties
+      }
+    >
+      <div className="pd-ai-card-top">
+        <div className="pd-ai-card-mark">{service.badge}</div>
+        <div className="pd-ai-card-status">{service.status}</div>
+      </div>
+      <div className="pd-ai-card-title">{service.name}</div>
+      <div className="pd-ai-card-tagline">{service.tagline}</div>
+      <div className="pd-ai-card-copy">{service.description}</div>
+      <div className="pd-ai-card-bottom">
+        <span className="pd-ai-card-category">{service.category}</span>
+        <span className="pd-ai-card-action">{service.actionLabel}</span>
+      </div>
+    </button>
+  )
+}
+
 export default function ProjectDashboard({ user, onOpen, onLogout }: { user: User; onOpen: (p: Project) => void; onLogout: () => void }) {
   const { t } = useTranslation()
   const exportSectionRef = useRef<HTMLDivElement | null>(null)
@@ -568,6 +758,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
   const [stageFilter, setStageFilter] = useState<DashboardStage>("all")
   const [templateFilter, setTemplateFilter] = useState<TemplateFilter>("all")
   const [exportFilter, setExportFilter] = useState<ExportFilter>("all")
+  const [aiStudioFilter, setAIStudioFilter] = useState<AIStudioFilter>("all")
   const [spendRange, setSpendRange] = useState<SpendRange>("24h")
   const [usageMode, setUsageMode] = useState<UsageMode>("model")
   const [projectSearch, setProjectSearch] = useState("")
@@ -723,6 +914,15 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
       (project.url || "").toLowerCase().includes(query)
     return matchesQuery && matchesExportFilter(exportFilter, project)
   })
+  const filteredAIStudioServices = AI_STUDIO_SERVICES.filter(service => {
+    const query = projectSearch.trim().toLowerCase()
+    const matchesQuery =
+      !query ||
+      service.name.toLowerCase().includes(query) ||
+      service.tagline.toLowerCase().includes(query) ||
+      service.description.toLowerCase().includes(query)
+    return matchesQuery && matchesAIStudioFilter(aiStudioFilter, service)
+  })
 
   const counts = {
     all: normalizedProjects.length,
@@ -747,22 +947,41 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
     ready: exportedProjects.filter(project => matchesExportFilter("ready", project)).length,
     guarded: exportedProjects.filter(project => matchesExportFilter("guarded", project)).length,
   }
+  const aiStudioCounts = {
+    all: AI_STUDIO_SERVICES.length,
+    creation: AI_STUDIO_SERVICES.filter(service => service.category === "creation").length,
+    optimization: AI_STUDIO_SERVICES.filter(service => service.category === "optimization").length,
+    growth: AI_STUDIO_SERVICES.filter(service => service.category === "growth").length,
+    autonomy: AI_STUDIO_SERVICES.filter(service => service.category === "autonomy").length,
+  }
   const activeItemsCount =
-    activeWorkspace === "projects"
+    activeWorkspace === "ai-studio"
+      ? filteredAIStudioServices.length
+      : activeWorkspace === "projects"
       ? filteredProjects.length
       : activeWorkspace === "templates"
       ? filteredTemplates.length
       : filteredExports.length
   const workspaceTitle =
-    activeWorkspace === "projects" ? "Projects" : activeWorkspace === "templates" ? "Templates" : "Exports"
+    activeWorkspace === "ai-studio"
+      ? "AI Studio"
+      : activeWorkspace === "projects"
+      ? "Projects"
+      : activeWorkspace === "templates"
+      ? "Templates"
+      : "Exports"
   const workspaceSummaryValue =
-    activeWorkspace === "projects"
+    activeWorkspace === "ai-studio"
+      ? AI_STUDIO_SERVICES.length
+      : activeWorkspace === "projects"
       ? normalizedProjects.length
       : activeWorkspace === "templates"
       ? templates.length
       : exportedProjects.length
   const workspaceSummaryChips =
-    activeWorkspace === "projects"
+    activeWorkspace === "ai-studio"
+      ? aiStudioDistribution(AI_STUDIO_SERVICES)
+      : activeWorkspace === "projects"
       ? platformDistribution(normalizedProjects)
       : activeWorkspace === "templates"
       ? templateDistribution(templates)
@@ -774,7 +993,15 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
   const spendBuckets = buildSpendBuckets(spendTransactions, spendRange)
   const usageBreakdown = buildSpendBreakdown(spendTransactions, usageMode).slice(0, 4)
   const workspacePipeline =
-    activeWorkspace === "projects"
+    activeWorkspace === "ai-studio"
+      ? ([
+          ["all", "All", aiStudioCounts.all, "var(--pd-text-3)", () => setAIStudioFilter("all")],
+          ["creation", "Creation", aiStudioCounts.creation, "var(--pd-blue)", () => setAIStudioFilter("creation")],
+          ["optimization", "Optimization", aiStudioCounts.optimization, "var(--pd-amber)", () => setAIStudioFilter("optimization")],
+          ["growth", "Growth", aiStudioCounts.growth, "var(--pd-green)", () => setAIStudioFilter("growth")],
+          ["autonomy", "Autonomy", aiStudioCounts.autonomy, "#c084fc", () => setAIStudioFilter("autonomy")],
+        ] as const)
+      : activeWorkspace === "projects"
       ? ([
           ["all", "All", counts.all, "var(--pd-text-3)", () => setStageFilter("all")],
           ["draft", "Draft", counts.draft, "var(--pd-text-3)", () => setStageFilter("draft")],
@@ -797,6 +1024,13 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
           ["ready", "Ready", exportCounts.ready, "var(--pd-green)", () => setExportFilter("ready")],
           ["guarded", "Guarded", exportCounts.guarded, "var(--pd-amber)", () => setExportFilter("guarded")],
         ] as const)
+
+  const isPipelineFilterActive = (value: string) => {
+    if (activeWorkspace === "ai-studio") return aiStudioFilter === value
+    if (activeWorkspace === "projects") return stageFilter === value
+    if (activeWorkspace === "templates") return templateFilter === value
+    return exportFilter === value
+  }
 
   const updateChecklist = (id: string, done = true) => {
     setChecklist(prev => prev.map(item => (item.id === id ? { ...item, done } : item)))
@@ -1142,6 +1376,20 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
     setExportSectionOpen(true)
   }
 
+  const openAIStudioService = (service: AIStudioService) => {
+    if (service.id === "company-box" || service.id === "funnel-generator") {
+      setShowLandingGenerator(true)
+      toast.info(`Opening ${service.name}`)
+      return
+    }
+    if (service.id === "visual-product") {
+      setShowNewProject(true)
+      toast.info("Screenshot and Figma import will be wired into this flow next.")
+      return
+    }
+    toast.info(`${service.name} is visible and ready for wiring.`)
+  }
+
   const logout = async () => {
     await apiLogout()
     onLogout()
@@ -1229,6 +1477,15 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
         <aside className="pd-sidebar">
           <div className="pd-sidebar-section">Workspace</div>
           <div className="pd-scroll-box">
+            <button
+              className={`pd-sidebar-item ${activeWorkspace === "ai-studio" ? "is-active" : ""}`}
+              type="button"
+              onClick={() => setActiveWorkspace("ai-studio")}
+            >
+              <span className="pd-sidebar-icon">AI</span>
+              AI Studio
+              <span className="pd-sidebar-pill">{AI_STUDIO_SERVICES.length}</span>
+            </button>
             <button
               className={`pd-sidebar-item ${activeWorkspace === "projects" ? "is-active" : ""}`}
               type="button"
@@ -1344,19 +1601,7 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
             {workspacePipeline.map(([value, label, count, color, onSelect]) => (
               <button
                 key={value}
-                className={`pd-pipe-stage ${
-                  activeWorkspace === "projects"
-                    ? stageFilter === value
-                      ? "is-active"
-                      : ""
-                    : activeWorkspace === "templates"
-                    ? templateFilter === value
-                      ? "is-active"
-                      : ""
-                    : exportFilter === value
-                    ? "is-active"
-                    : ""
-                }`}
+                className={`pd-pipe-stage ${isPipelineFilterActive(value) ? "is-active" : ""}`}
                 type="button"
                 onClick={onSelect}
               >
@@ -1377,7 +1622,15 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
               value={projectSearch}
               onChange={event => setProjectSearch(event.target.value)}
             />
-            {activeWorkspace === "projects" ? (
+            {activeWorkspace === "ai-studio" ? (
+              <button
+                className="pd-btn pd-btn-primary"
+                type="button"
+                onClick={() => openAIStudioService(AI_STUDIO_SERVICES[0])}
+              >
+                Launch flagship
+              </button>
+            ) : activeWorkspace === "projects" ? (
               <button className="pd-btn pd-btn-primary" type="button" onClick={() => setShowNewProject(true)}>
                 + New project
               </button>
@@ -1519,6 +1772,12 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
                   <div key={index} className="pd-card pd-card-skeleton" />
                 ))}
               </div>
+            ) : activeWorkspace === "ai-studio" && filteredAIStudioServices.length > 0 ? (
+              <div className="pd-projects-grid">
+                {filteredAIStudioServices.map(service => (
+                  <AIStudioCard key={service.id} service={service} onOpen={() => openAIStudioService(service)} />
+                ))}
+              </div>
             ) : activeWorkspace === "projects" && filteredProjects.length > 0 ? (
               <div className="pd-projects-grid">
                 {filteredProjects.map(project => (
@@ -1554,16 +1813,36 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
               </div>
             ) : (
               <div className="pd-empty-state">
-                <div className="pd-empty-title">No {workspaceTitle.toLowerCase()} yet</div>
+                <div className="pd-empty-title">
+                  {activeWorkspace === "ai-studio" ? "No AI services match this view" : `No ${workspaceTitle.toLowerCase()} yet`}
+                </div>
                 <div className="pd-empty-copy">
-                  {activeWorkspace === "projects"
+                  {activeWorkspace === "ai-studio"
+                    ? "Try another filter or clear the search to reveal the full AI Studio catalog."
+                    : activeWorkspace === "projects"
                     ? "Create a new project or use the AI generator to get started."
                     : activeWorkspace === "templates"
                     ? "Extract a site into a reusable template to fill this workspace."
                     : "Export a project from the editor and it will show up here."}
                 </div>
                 <div className="pd-empty-actions">
-                  {activeWorkspace === "projects" ? (
+                  {activeWorkspace === "ai-studio" ? (
+                    <>
+                      <button
+                        className="pd-btn pd-btn-primary"
+                        type="button"
+                        onClick={() => {
+                          setAIStudioFilter("all")
+                          setProjectSearch("")
+                        }}
+                      >
+                        Show all
+                      </button>
+                      <button className="pd-btn" type="button" onClick={() => openAIStudioService(AI_STUDIO_SERVICES[0])}>
+                        Launch flagship
+                      </button>
+                    </>
+                  ) : activeWorkspace === "projects" ? (
                     <>
                       <button className="pd-btn pd-btn-primary" type="button" onClick={() => setShowNewProject(true)}>
                         + New project
