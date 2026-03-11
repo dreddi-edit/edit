@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { apiResetPassword } from "../api/auth"
 import { toast } from "./Toast"
+import { errMsg } from "../utils/errMsg"
 
 export default function ResetPasswordScreen({ token, onDone }: { token: string, onDone: () => void }) {
   const [password, setPassword] = useState("")
@@ -19,8 +20,8 @@ export default function ResetPasswordScreen({ token, onDone }: { token: string, 
         window.history.replaceState({}, "", "/")
         onDone()
       }, 2000)
-    } catch (e: any) {
-      toast.error(e.message)
+    } catch (e) {
+      toast.error(errMsg(e))
     } finally {
       setLoading(false)
     }

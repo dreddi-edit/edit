@@ -4,6 +4,7 @@ export function rewriteHtmlAssets(html, pageUrl, assetPath) {
   const toAbs = (u) => {
     const v = (u || "").trim();
     if (!v) return v;
+    if (v.startsWith(`${assetPath}?url=`)) return v;
     if (v.startsWith("data:") || v.startsWith("mailto:") || v.startsWith("tel:") || v.startsWith("javascript:") || v.startsWith("#")) return u;
     try {
       if (v.startsWith("//")) return new URL(base.protocol + v).toString();
@@ -13,7 +14,9 @@ export function rewriteHtmlAssets(html, pageUrl, assetPath) {
     }
   };
 
-  const proxify = (abs) => `${assetPath}?url=${encodeURIComponent(abs)}&ref=${encodeURIComponent(pageUrl)}`;
+  const proxify = (abs) => String(abs).startsWith(`${assetPath}?url=`)
+    ? abs
+    : `${assetPath}?url=${encodeURIComponent(abs)}&ref=${encodeURIComponent(pageUrl)}`;
 
   let out = html;
 
@@ -50,6 +53,14 @@ export function rewriteHtmlAssets(html, pageUrl, assetPath) {
     return `srcset="${rewritten}"`;
   });
 
+  out = out.replace(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi, (m, attrs = "", css = "") => {
+    return `<style${attrs}>${rewriteCssUrls(css, pageUrl, assetPath)}</style>`;
+  });
+
+  out = out.replace(/\sstyle=(["'])([\s\S]*?)\1/gi, (m, q, css) => {
+    return ` style="${rewriteCssUrls(css, pageUrl, assetPath)}"`;
+  });
+
   return out;
 }
 
@@ -68,7 +79,9 @@ export function rewriteCssUrls(cssText, cssUrl, assetPath) {
     }
   };
 
-  const proxify = (abs) => `${assetPath}?url=${encodeURIComponent(abs)}&ref=${encodeURIComponent(cssUrl)}`;
+  const proxify = (abs) => String(abs).startsWith(`${assetPath}?url=`)
+    ? abs
+    : `${assetPath}?url=${encodeURIComponent(abs)}&ref=${encodeURIComponent(cssUrl)}`;
 
   return cssText.replace(/url\(([^)]+)\)/gi, (m, inner) => {
     const abs = toAbs(inner);

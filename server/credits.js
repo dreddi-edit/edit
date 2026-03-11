@@ -32,7 +32,7 @@ export function hasEnoughCredits(userId, model, inputTokens, outputTokens) {
   }
 }
 
-export function deductCredits(userId, model, inputTokens, outputTokens) {
+export function deductCredits(userId, model, inputTokens, outputTokens, taskLabel = "AI usage") {
   const costs = COSTS_EUR[model] || COSTS_EUR["claude-sonnet-4-6"]
   const amount = ((inputTokens / 1_000_000) * costs.input) + ((outputTokens / 1_000_000) * costs.output)
   if (amount === 0) return 0
@@ -45,7 +45,7 @@ export function deductCredits(userId, model, inputTokens, outputTokens) {
   db.prepare(`
     INSERT INTO credit_transactions (user_id, amount_eur, type, description)
     VALUES (?, ?, 'deduct', ?)
-  `).run(userId, -amount, `AI: ${model} (${inputTokens}in/${outputTokens}out tokens)`)
+  `).run(userId, -amount, `AI: ${taskLabel} | ${model} (${inputTokens}in/${outputTokens}out tokens)`)
 
   return amount
 }

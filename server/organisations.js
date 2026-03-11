@@ -1,6 +1,7 @@
 import { sendTeamInvite } from "./email.js"
 import db from "./db.js"
 import { authMiddleware } from "./auth.js"
+import { canInviteWithRole, normalizeAgencyRole } from "./accessControl.js"
 
 // Auto-detect provider from key format
 function detectProvider(key) {
@@ -149,6 +150,7 @@ export function registerOrgRoutes(app) {
   app.post("/api/orgs/:id/invite", authMiddleware, (req, res) => {
     const { email, role } = req.body
     if (!email) return res.status(400).json({ ok: false, error: "Email erforderlich" })
+    if (!canInviteWithRole(role || "editor")) return res.status(400).json({ ok: false, error: "Rolle ungültig" })
     const org = db.prepare("SELECT * FROM organisations WHERE id = ? AND owner_id = ?").get(req.params.id, req.user.id)
     if (!org) return res.status(403).json({ ok: false, error: "Kein Zugriff" })
 
@@ -158,7 +160,7 @@ export function registerOrgRoutes(app) {
     // Check ob User existiert
     const user = db.prepare("SELECT id FROM users WHERE email = ?").get(email)
     db.prepare("INSERT INTO org_members (org_id, user_id, invite_email, role) VALUES (?, ?, ?, ?)").run(
-      req.params.id, user?.id || null, email, role || "editor"
+      req.params.id, user?.id || null, email, normalizeAgencyRole(role, "editor")
     )
     // Einladungs-Mail senden
     sendTeamInvite(email, org.name, req.user.name || req.user.email).catch(e => console.error("Invite mail:", e.message))

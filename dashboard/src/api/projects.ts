@@ -1,54 +1,145 @@
+import { apiFetch } from "./client"
+import type { SitePlatform } from "../utils/sitePlatform"
+
 const BASE = ""
+
+export type WorkflowStage = "draft" | "internal_review" | "client_review" | "approved" | "shipped"
+export type DeliveryStatus = "not_exported" | "export_ready" | "exported" | "handed_off" | "shipped"
+
+export type PlatformGuide = {
+  platform: SitePlatform
+  label: string
+  safeEditScope: string
+  exportNotes: string
+  riskyAreas: string[]
+}
+
+export type ExportWarning = {
+  code: string
+  level: "info" | "warning"
+  message: string
+  detail?: string
+}
+
+export type LatestExport = {
+  id: number
+  version_id?: number | null
+  export_mode: string
+  platform: SitePlatform
+  readiness: "ready" | "guarded"
+  warning_count: number
+  manifest?: {
+    warnings?: ExportWarning[]
+    guide?: PlatformGuide
+  }
+  created_at: string
+}
+
+export type WorkflowEvent = {
+  id: number
+  from_stage?: WorkflowStage | null
+  to_stage: WorkflowStage
+  comment?: string
+  created_at: string
+  user_id?: number
+  name?: string
+  email?: string
+}
 
 export type Project = {
   id: number
   name: string
   url: string
   html?: string
+  platform?: SitePlatform
   thumbnail?: string
+  pinned?: number
+  clientName?: string
+  ownerUserId?: number
+  workflowStage?: WorkflowStage
+  deliveryStatus?: DeliveryStatus
+  dueAt?: string
+  lastActivityAt?: string
+  lastExportAt?: string
+  lastExportMode?: string
+  lastExportWarningCount?: number
+  platformGuide?: PlatformGuide
+  latestExport?: LatestExport | null
   updated_at: string
   created_at: string
 }
 
+type ProjectsRes = { ok: boolean; error?: string; projects: Project[] }
+type ProjectRes = { ok: boolean; error?: string; project: Project; latestExport?: LatestExport | null }
+type CreateProjectRes = { ok: boolean; error?: string; id: number; project?: Project }
+
 export async function apiGetProjects(): Promise<Project[]> {
-  const r = await fetch(`${BASE}/api/projects`, { credentials: "include" })
-  const d = await r.json()
-  if (!d.ok) throw new Error(d.error)
-  return d.projects
+  const d = await apiFetch<ProjectsRes>(`${BASE}/api/projects`)
+  if (!d?.ok) throw new Error((d as ProjectsRes)?.error || "Failed to load projects.")
+  return (d as ProjectsRes).projects
 }
 
 export async function apiGetProject(id: number): Promise<Project> {
-  const r = await fetch(`${BASE}/api/projects/${id}`, { credentials: "include" })
-  const d = await r.json()
-  if (!d.ok) throw new Error(d.error)
-  return d.project
+  const d = await apiFetch<ProjectRes>(`${BASE}/api/projects/${id}`)
+  if (!d?.ok) throw new Error((d as ProjectRes)?.error || "Project not found.")
+  return { ...(d as ProjectRes).project, latestExport: (d as ProjectRes).latestExport ?? null }
 }
 
-export async function apiCreateProject(name: string, url: string, html: string): Promise<number> {
-  const r = await fetch(`${BASE}/api/projects`, {
-    method: "POST", credentials: "include",
+export async function apiCreateProject(
+  name: string,
+  url: string,
+  html: string,
+  platform?: SitePlatform,
+  extras: Partial<Pick<Project, "clientName" | "workflowStage" | "deliveryStatus" | "dueAt">> = {}
+): Promise<Project> {
+  const d = await apiFetch<CreateProjectRes>(`${BASE}/api/projects`, {
+    method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name, url, html })
+    body: JSON.stringify({ name, url, html, platform, ...extras })
   })
-  const d = await r.json()
-  if (!d.ok) throw new Error(d.error)
-  return d.id
+  if (!d?.ok) throw new Error((d as CreateProjectRes)?.error || "Failed to create project.")
+  if ((d as CreateProjectRes).project) return (d as CreateProjectRes).project as Project
+  const id = (d as CreateProjectRes).id
+  return {
+    id,
+    name,
+    url,
+    html,
+    platform,
+    updated_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+  }
 }
 
 export async function apiSaveProject(id: number, data: Partial<Project>) {
-  const r = await fetch(`${BASE}/api/projects/${id}`, {
-    method: "PUT", credentials: "include",
+  const d = await apiFetch<{ ok: boolean; error?: string; project?: Project }>(`${BASE}/api/projects/${id}`, {
+    method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(data)
   })
-  const d = await r.json()
-  if (!d.ok) throw new Error(d.error)
+  if (!d?.ok) throw new Error((d as { error?: string })?.error || "Failed to save.")
+  return d.project
 }
 
 export async function apiDeleteProject(id: number) {
-  const r = await fetch(`${BASE}/api/projects/${id}`, {
-    method: "DELETE", credentials: "include"
+  const d = await apiFetch<{ ok: boolean; error?: string }>(`${BASE}/api/projects/${id}`, {
+    method: "DELETE"
   })
-  const d = await r.json()
-  if (!d.ok) throw new Error(d.error)
+  if (!d?.ok) throw new Error((d as { error?: string })?.error || "Failed to delete.")
+}
+
+export async function apiSetProjectWorkflowStage(id: number, stage: WorkflowStage, comment = ""): Promise<Project> {
+  const d = await apiFetch<{ ok: boolean; error?: string; project: Project }>(`${BASE}/api/projects/${id}/workflow-stage`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ stage, comment })
+  })
+  if (!d?.ok) throw new Error((d as { error?: string })?.error || "Failed to change workflow stage.")
+  return d.project
+}
+
+export async function apiGetProjectWorkflowHistory(id: number): Promise<WorkflowEvent[]> {
+  const d = await apiFetch<{ ok: boolean; error?: string; events: WorkflowEvent[] }>(`${BASE}/api/projects/${id}/workflow-history`)
+  if (!d?.ok) throw new Error((d as { error?: string })?.error || "Failed to load workflow history.")
+  return d.events || []
 }

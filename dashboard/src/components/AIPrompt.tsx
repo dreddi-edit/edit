@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { toast } from "./Toast"
 import { aiRewrite } from "../api/ai"
+import { errMsg } from "../utils/errMsg"
 
 export default function AIPrompt({html,onResult}:{html:string,onResult:(h:string)=>void}){
 
@@ -17,8 +18,8 @@ export default function AIPrompt({html,onResult}:{html:string,onResult:(h:string
       const out = await aiRewrite(html,prompt.trim())
       onResult(out)
       setPrompt("")
-    }catch(e:any){
-      toast.error(e?.message || "AI Fehler")
+    }catch(e){
+      toast.error(errMsg(e) || "AI Fehler")
     }
 
     setLoading(false)

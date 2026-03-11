@@ -88,8 +88,10 @@ export function registerStripeRoutes(app) {
         ).run(userId, creditsEur, `Stripe: ${packageId} (${session.id})`)
         console.log(`✅ Credits hinzugefügt: ${creditsEur}€ für User ${userId}`)
         // Bestätigungs-Mail
+        const pkg = PACKAGES.find(p => p.id === packageId)
+        const amountEur = pkg ? pkg.amount_eur : (session.amount_total != null ? session.amount_total / 100 : creditsEur)
         const user = db.prepare("SELECT * FROM users WHERE id = ?").get(userId)
-        if (user) sendPaymentConfirmation(user.email, user.name, pkg.amount_eur, creditsEur).catch(e => console.error("Payment mail:", e.message))
+        if (user) sendPaymentConfirmation(user.email, user.name, amountEur, creditsEur).catch(e => console.error("Payment mail:", e.message))
       }
     }
 

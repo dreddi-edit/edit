@@ -27,7 +27,7 @@ function safeJsonParse(input) {
 }
 
 
-export async function claudeGenerateLandingCopy({ name, description = "", audience = "", language = "english", model = "claude-sonnet-4-6" }) {
+export async function claudeGenerateLandingCopy({ name, description = "", audience = "", language = "english", model = "claude-sonnet-4-6", complexity = 5 }) {
   const key = process.env.ANTHROPIC_API_KEY
   if (!key) throw new Error("ANTHROPIC_API_KEY is not set")
 

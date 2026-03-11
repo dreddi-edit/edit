@@ -1,9 +1,14 @@
 import { GoogleAuth } from "google-auth-library"
+import { Storage } from "@google-cloud/storage"
 
-function getAuth() {
+function getCredentials() {
   const json = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
   if (!json) throw new Error("GOOGLE_SERVICE_ACCOUNT_JSON not set")
-  const credentials = JSON.parse(json)
+  return JSON.parse(json)
+}
+
+function getAuth() {
+  const credentials = getCredentials()
   return new GoogleAuth({
     credentials,
     scopes: [
@@ -11,6 +16,18 @@ function getAuth() {
       "https://www.googleapis.com/auth/firebase"
     ]
   })
+}
+
+function getGoogleProjectId(explicitProjectId) {
+  return explicitProjectId || process.env.GOOGLE_PROJECT_ID || getCredentials().project_id
+}
+
+function getStorageBucket(bucketName) {
+  const credentials = getCredentials()
+  const storage = new Storage({ credentials, projectId: credentials.project_id })
+  const resolvedBucket = bucketName || process.env.GCS_BUCKET
+  if (!resolvedBucket) throw new Error("GCS_BUCKET not set")
+  return storage.bucket(resolvedBucket)
 }
 
 async function authFetch(url, options = {}) {
@@ -28,6 +45,42 @@ async function authFetch(url, options = {}) {
 }
 
 export function registerGoogleServiceRoutes(app) {
+
+  app.post("/api/google/gemini/generate", async (req, res) => {
+    try {
+      const prompt = String(req.body?.prompt || "").trim()
+      const model = String(req.body?.model || "gemini-2.5-flash").trim()
+      const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY
+      if (!prompt) return res.status(400).json({ ok: false, error: "Missing prompt" })
+      if (!key) return res.status(400).json({ ok: false, error: "GEMINI_API_KEY not set" })
+
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+          }),
+        }
+      )
+      const data = await response.json()
+      if (!response.ok) {
+        const message = data?.error?.message || `Gemini error ${response.status}`
+        return res.status(response.status).json({ ok: false, error: message })
+      }
+
+      res.json({
+        ok: true,
+        data: {
+          text: data?.candidates?.[0]?.content?.parts?.[0]?.text || "",
+          usage: data?.usageMetadata || null,
+        },
+      })
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message })
+    }
+  })
 
   app.post("/api/google/video", async (req, res) => {
     try {
@@ -83,6 +136,61 @@ export function registerGoogleServiceRoutes(app) {
         body: JSON.stringify({ config: { target: "default" } })
       })
       const data = await r.json()
+      res.json({ ok: true, data })
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message })
+    }
+  })
+
+  app.post("/api/google/storage/upload", async (req, res) => {
+    try {
+      const name = String(req.body?.name || "").trim()
+      const contentBase64 = String(req.body?.contentBase64 || "").trim()
+      const bucketName = String(req.body?.bucket || "").trim()
+      const prefix = String(req.body?.prefix || "suite").trim().replace(/^\/+|\/+$/g, "")
+      const contentType = String(req.body?.contentType || "application/octet-stream")
+      if (!name || !contentBase64) return res.status(400).json({ ok: false, error: "Missing file payload" })
+
+      const buffer = Buffer.from(contentBase64, "base64")
+      const bucket = getStorageBucket(bucketName || undefined)
+      const safeName = name.replace(/[^\w.\-]+/g, "_")
+      const objectPath = `${prefix}/${Date.now()}-${safeName}`
+      const file = bucket.file(objectPath)
+      await file.save(buffer, {
+        metadata: { contentType },
+        resumable: false,
+      })
+      await file.makePublic()
+
+      res.json({
+        ok: true,
+        data: {
+          fileUrl: `https://storage.googleapis.com/${bucket.name}/${objectPath}`,
+          bucket: bucket.name,
+          size: buffer.length,
+        },
+      })
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message })
+    }
+  })
+
+  app.post("/api/google/bigquery/query", async (req, res) => {
+    try {
+      const query = String(req.body?.query || "").trim()
+      const projectId = getGoogleProjectId(String(req.body?.projectId || "").trim() || undefined)
+      if (!query) return res.status(400).json({ ok: false, error: "Missing query" })
+      if (!projectId) return res.status(400).json({ ok: false, error: "GOOGLE_PROJECT_ID not set" })
+
+      const r = await authFetch(`https://bigquery.googleapis.com/bigquery/v2/projects/${projectId}/queries`, {
+        method: "POST",
+        body: JSON.stringify({ query, useLegacySql: false }),
+      })
+      const data = await r.json()
+      if (!r.ok) {
+        const message = data?.error?.message || `BigQuery error ${r.status}`
+        return res.status(r.status).json({ ok: false, error: message })
+      }
       res.json({ ok: true, data })
     } catch (e) {
       res.status(500).json({ ok: false, error: e.message })

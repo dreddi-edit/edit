@@ -9,8 +9,8 @@ export function useTranslation() {
   )
 
   const t = (key: string): string =>
-    (translations[lang] as any)[key] ??
-    (translations.en as any)[key] ??
+    (translations[lang] as Record<string, string>)[key] ??
+    (translations.en as Record<string, string>)[key] ??
     key
 
   const setLang = (l: Language) => {

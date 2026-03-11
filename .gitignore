@@ -8,3 +8,16 @@ server/editor.db
 .DS_Store
 node_modules/
 dist/
+Bin/
+.playwright-cli/
+.vscode/
+dashboard/_backups/
+dashboard/.env.local
+dashboard/src/ui-draft/
+dashboard/src/ui-draft-agency-v2/
+server/.env
+server/data/*.db
+server/thumbnails/
+*.backup
+*.tmp
+*.bak

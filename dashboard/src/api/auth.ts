@@ -1,27 +1,27 @@
+import { apiFetch } from "./client"
+
 const BASE = ""
 
 export type User = { id: number; email: string; name: string }
 
 export async function apiLogin(email: string, password: string): Promise<User> {
-  const r = await fetch(`${BASE}/api/auth/login`, {
-    method: "POST", credentials: "include",
+  const d = await apiFetch<{ ok: boolean; error?: string; user: User }>(`${BASE}/api/auth/login`, {
+    method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email, password })
   })
-  const d = await r.json()
-  if (!d.ok) throw new Error(d.error)
-  return d.user
+  if (!d?.ok) throw new Error((d as { error?: string }).error || "Login failed.")
+  return (d as { user: User }).user
 }
 
 export async function apiRegister(email: string, password: string, name: string): Promise<User> {
-  const r = await fetch(`${BASE}/api/auth/register`, {
-    method: "POST", credentials: "include",
+  const d = await apiFetch<{ ok: boolean; error?: string; user: User }>(`${BASE}/api/auth/register`, {
+    method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email, password, name })
   })
-  const d = await r.json()
-  if (!d.ok) throw new Error(d.error)
-  return d.user
+  if (!d?.ok) throw new Error((d as { error?: string }).error || "Registration failed.")
+  return (d as { user: User }).user
 }
 
 export async function apiLogout() {
@@ -30,28 +30,27 @@ export async function apiLogout() {
 
 export async function apiMe(): Promise<User | null> {
   try {
-    const r = await fetch(`${BASE}/api/auth/me`, { credentials: "include" })
-    const d = await r.json()
-    return d.ok ? d.user : null
-  } catch { return null }
+    const d = await apiFetch<{ ok: boolean; user?: User }>(`${BASE}/api/auth/me`)
+    return (d?.ok && (d as { user?: User }).user) ? (d as { user: User }).user : null
+  } catch {
+    return null
+  }
 }
 
 export async function apiForgotPassword(email: string): Promise<void> {
-  const r = await fetch(`${BASE}/api/auth/forgot-password`, {
+  const d = await apiFetch<{ ok?: boolean; error?: string }>(`${BASE}/api/auth/forgot-password`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ email })
   })
-  const d = await r.json()
-  if (!d.ok) throw new Error(d.error)
+  if (d && !(d as { ok?: boolean }).ok) throw new Error((d as { error?: string }).error || "Request failed.")
 }
 
 export async function apiResetPassword(token: string, password: string): Promise<void> {
-  const r = await fetch(`${BASE}/api/auth/reset-password`, {
+  const d = await apiFetch<{ ok?: boolean; error?: string }>(`${BASE}/api/auth/reset-password`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ token, password })
   })
-  const d = await r.json()
-  if (!d.ok) throw new Error(d.error)
+  if (d && !(d as { ok?: boolean }).ok) throw new Error((d as { error?: string }).error || "Reset failed.")
 }

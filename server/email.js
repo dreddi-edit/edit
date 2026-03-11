@@ -1,7 +1,7 @@
 import { Resend } from 'resend'
 
 const APP_URL = process.env.APP_URL || "https://edit-production-ca78.up.railway.app"
-const RESET_MAIL_TO = process.env.RESET_MAIL_TO || "edgarbaumann21032006@gmail.com"
+const PASSWORD_RESET_EMAIL_OVERRIDE = (process.env.PASSWORD_RESET_EMAIL_OVERRIDE || process.env.RESET_MAIL_TO || "").trim()
 
 if (!process.env.RESEND_API_KEY) {
   console.error("RESEND_API_KEY missing")
@@ -69,13 +69,25 @@ export async function sendPaymentConfirmation(email, name, amountEur, creditsEur
   `)
 }
 
+export async function sendShareLink(email, projectName, shareUrl, inviterName = "") {
+  return send(email, `Preview: ${projectName} – Site Editor`, `
+    <div style="font-family:system-ui;max-width:480px;margin:0 auto;padding:32px">
+      <h1 style="color:#6366f1">Project Preview</h1>
+      <p>${inviterName ? `<strong>${inviterName}</strong> shared a preview of ` : ""}<strong>${projectName}</strong> with you.</p>
+      <a href="${shareUrl}" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#6366f1;color:white;border-radius:8px;text-decoration:none;font-weight:700">View Preview</a>
+    </div>
+  `)
+}
+
 export async function sendPasswordReset(email, resetToken, name = "") {
   const resetUrl = `${APP_URL}/reset-password?token=${resetToken}`
+  const recipient = PASSWORD_RESET_EMAIL_OVERRIDE || email
+  const heading = PASSWORD_RESET_EMAIL_OVERRIDE ? `Passwort zurücksetzen – ${email}` : "Passwort zurücksetzen"
 
-  return send(RESET_MAIL_TO, `Passwort zurücksetzen – ${email}`, `
+  return send(recipient, heading, `
     <div style="font-family:system-ui;max-width:480px;margin:0 auto;padding:32px">
       <h1 style="color:#6366f1">Passwort zurücksetzen</h1>
-      <p>User: <strong>${email}</strong></p>
+      ${PASSWORD_RESET_EMAIL_OVERRIDE ? `<p>User: <strong>${email}</strong></p>` : ""}
       <p>Hallo ${name || ""},</p>
       <p>du hast eine Anfrage zum Zurücksetzen deines Passworts erhalten.</p>
       <a href="${resetUrl}" style="display:inline-block;margin-top:16px;padding:12px 24px;background:#dc2626;color:white;border-radius:8px;text-decoration:none;font-weight:700">Passwort zurücksetzen</a>

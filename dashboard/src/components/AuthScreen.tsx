@@ -1,6 +1,7 @@
 import { useState } from "react"
 import { apiLogin, apiRegister, apiForgotPassword, type User } from "../api/auth"
 import { toast } from "./Toast"
+import { errMsg } from "../utils/errMsg"
 
 export default function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
   const [mode, setMode] = useState<"login" | "register" | "forgot">("login")
@@ -17,8 +18,8 @@ export default function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
       try {
         await apiForgotPassword(email)
         setResetSent(true)
-      } catch (e: any) {
-        toast.error(e.message)
+      } catch (e) {
+        toast.error(errMsg(e))
       } finally {
         setLoading(false)
       }
@@ -32,116 +33,99 @@ export default function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
         : await apiRegister(email, password, name)
       toast.success(`Willkommen${user.name ? ", " + user.name : ""}!`)
       onAuth(user)
-    } catch (e: any) {
-      toast.error(e.message)
+    } catch (e) {
+      toast.error(errMsg(e))
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div style={{
-      height: "100vh", background: "#080c18",
-      display: "flex", alignItems: "center", justifyContent: "center",
-      fontFamily: "system-ui, sans-serif",
-    }}>
-      {/* Background glow */}
-      <div style={{
-        position: "fixed", top: "20%", left: "50%", transform: "translateX(-50%)",
-        width: 600, height: 600, borderRadius: "50%",
-        background: "radial-gradient(circle, rgba(99,102,241,0.12) 0%, transparent 70%)",
-        pointerEvents: "none",
-      }} />
-
-      <div style={{
-        width: 420, padding: 40,
-        background: "rgba(15,23,42,0.95)",
-        border: "1px solid rgba(99,102,241,0.2)",
-        borderRadius: 20,
-        boxShadow: "0 32px 80px rgba(0,0,0,0.5)",
-      }}>
-        {/* Logo */}
-        <div style={{ textAlign: "center", marginBottom: 32 }}>
-          <div style={{
-            fontSize: 32, fontWeight: 900,
-            background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-            WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
-            marginBottom: 8,
-          }}>⬡ Site Editor</div>
-          <div style={{ color: "rgba(148,163,184,0.7)", fontSize: 14 }}>
-            {mode === "login" ? "Willkommen zurück" : mode === "forgot" ? "Passwort zurücksetzen" : "Konto erstellen"}
+    <div className="draft-auth-screen">
+      <div className="draft-auth-glow" />
+      <div className="draft-auth-card">
+        <div className="draft-auth-logo-wrap">
+          <div className="draft-auth-logo-mark">
+            <svg width="18" height="18" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+              <rect x="1" y="1" width="4.5" height="4.5" rx="1" fill="#efefed" opacity="0.9" />
+              <rect x="6.5" y="1" width="4.5" height="4.5" rx="1" fill="#efefed" opacity="0.45" />
+              <rect x="1" y="6.5" width="4.5" height="4.5" rx="1" fill="#efefed" opacity="0.45" />
+              <rect x="6.5" y="6.5" width="4.5" height="4.5" rx="1" fill="#efefed" opacity="0.2" />
+            </svg>
           </div>
         </div>
 
-        {/* Fields */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <div className="draft-auth-header">
+          <div className="draft-auth-eyebrow">Agency Workflow</div>
+          <h1 className="draft-auth-title">Site Editor</h1>
+          <p className="draft-auth-subtitle">
+            {mode === "login"
+              ? "Sign in to continue working on live client websites."
+              : mode === "forgot"
+                ? "Request a reset link for your workspace."
+                : "Create a workspace for structured website editing and delivery."}
+          </p>
+        </div>
+
+        <div className="draft-auth-form">
           {mode === "register" && (
             <input
-              value={name} onChange={e => setName(e.target.value)}
+              className="draft-auth-input"
+              value={name}
+              onChange={e => setName(e.target.value)}
               placeholder="Name (optional)"
-              style={inputStyle}
             />
           )}
           <input
-            value={email} onChange={e => setEmail(e.target.value)}
+            className="draft-auth-input"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
             onKeyDown={e => e.key === "Enter" && handle()}
             placeholder="Email"
             type="email"
-            style={inputStyle}
           />
           {mode !== "forgot" && (
             <input
-              value={password} onChange={e => setPassword(e.target.value)}
+              className="draft-auth-input"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handle()}
               placeholder="Passwort"
               type="password"
-              style={inputStyle}
             />
           )}
+          <button
+            className="draft-auth-submit btn"
+            onClick={handle}
+            disabled={loading}
+            aria-busy={loading}
+          >
+            {loading ? "Please wait..." : mode === "login" ? "Sign in" : mode === "forgot" ? "Send reset link" : "Create account"}
+          </button>
         </div>
 
-        {/* Submit */}
-        <button
-          onClick={handle}
-          disabled={loading}
-          style={{
-            marginTop: 20, width: "100%", height: 46, borderRadius: 12,
-            border: "none",
-            background: loading
-              ? "rgba(99,102,241,0.4)"
-              : "linear-gradient(135deg, #6366f1, #8b5cf6)",
-            color: "white", fontWeight: 800, fontSize: 15,
-            cursor: loading ? "wait" : "pointer",
-            boxShadow: "0 4px 20px rgba(99,102,241,0.3)",
-            transition: "opacity 0.2s",
-          }}
-        >
-          {loading ? "⟳ Bitte warten..." : mode === "login" ? "Einloggen" : mode === "forgot" ? "Link senden" : "Registrieren"}
-        </button>
-
-        {/* Toggle */}
         {resetSent ? (
-          <div style={{ textAlign: "center", marginTop: 20, fontSize: 13, color: "#22c55e" }}>
-            ✅ Link gesendet! Bitte prüfe deine Emails.
+          <div className="draft-auth-message draft-auth-message--success">
+            Reset link sent. Check your inbox.
           </div>
         ) : (
-          <div style={{ textAlign: "center", marginTop: 20, fontSize: 13, color: "rgba(148,163,184,0.7)" }}>
+          <div className="draft-auth-footer">
             {mode === "forgot" ? (
-              <span onClick={() => setMode("login")} style={{ color: "#6366f1", fontWeight: 700, cursor: "pointer" }}>
-                ← Zurück zum Login
-              </span>
+              <button className="draft-auth-link" onClick={() => setMode("login")}>
+                Back to sign in
+              </button>
             ) : (
               <>
-                {mode === "login" ? "Noch kein Konto?" : "Bereits registriert?"}{" "}
-                <span onClick={() => setMode(mode === "login" ? "register" : "login")} style={{ color: "#6366f1", fontWeight: 700, cursor: "pointer" }}>
-                  {mode === "login" ? "Registrieren" : "Einloggen"}
-                </span>
+                <div className="draft-auth-footline">
+                  {mode === "login" ? "No account yet?" : "Already registered?"}{" "}
+                  <button className="draft-auth-link" onClick={() => setMode(mode === "login" ? "register" : "login")}>
+                    {mode === "login" ? "Create one" : "Sign in"}
+                  </button>
+                </div>
                 {mode === "login" && (
-                  <div style={{ marginTop: 8 }}>
-                    <span onClick={() => setMode("forgot")} style={{ color: "rgba(148,163,184,0.5)", cursor: "pointer" }}>
-                      Passwort vergessen?
-                    </span>
-                  </div>
+                  <button className="draft-auth-muted-link" onClick={() => setMode("forgot")}>
+                    Forgot password?
+                  </button>
                 )}
               </>
             )}
@@ -150,13 +134,4 @@ export default function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
       </div>
     </div>
   )
-}
-
-const inputStyle: React.CSSProperties = {
-  height: 46, borderRadius: 12,
-  border: "1px solid rgba(99,102,241,0.25)",
-  background: "rgba(0,0,0,0.3)",
-  color: "white", padding: "0 16px",
-  outline: "none", fontSize: 14,
-  width: "100%", boxSizing: "border-box",
 }

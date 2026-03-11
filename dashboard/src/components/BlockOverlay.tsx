@@ -1,8 +1,9 @@
 import { useTranslation } from "../i18n/useTranslation";
-import React, { useCallback, useEffect, useRef, 
+import React, { useCallback, useEffect, useRef,
 useState } from "react";
 import { toast } from "./Toast";
 import { getRequireApproval } from "../approval-settings";
+import { ENDPOINTS } from "../config";
 
 let __autoScrollDoneForKey: string | null = null;
 
@@ -24,16 +25,344 @@ async function __autoScrollOnce(win: Window, opts?: { stepPx?: number; delayMs?:
   await sleep(80);
 }
 
-type BlockEntry = { id: string; label: string; selector: string; isButton: boolean; docTop: number; };
+type BlockEntry = {
+  id: string;
+  label: string;
+  selector: string;
+  isButton: boolean;
+  docTop: number;
+  parentId?: string | null;
+  kind?: string;
+  pathSignature?: string;
+  isExpandable?: boolean;
+  isExpanded?: boolean;
+  depth?: number;
+};
+
+type PanelType = "text" | "button" | "heading-list" | "nav-links" | "form-fields" | "generic" | "image" | "group";
+
+type StructureSnapshotItem = {
+  id: string;
+  rootId: string;
+  displayLabel: string;
+  label: string;
+  kind: string;
+  childCount: number;
+  isExpanded: boolean;
+  isSelected: boolean;
+};
 
 type Props = {
   canvasMode?: boolean;
 
   iframeRef: React.RefObject<HTMLIFrameElement | null>;
   enabled: boolean;
+  blockFilter?: "all" | "button" | "heading" | "image" | "form" | "navigation" | "container" | "list" | "content";
   onStatus?: (s: "idle" | "blocked" | "ok") => void;
   onHtmlChange?: (html: string) => void;
 };
+
+function matchesBlockFilter(
+  block: BlockEntry,
+  filter: Props["blockFilter"]
+): boolean {
+  if (!filter || filter === "all") return true;
+  if (filter === "button") return !!block.isButton || block.kind === "button";
+  return (block.kind || "content") === filter;
+}
+
+const SUB_BLOCK_TOKEN = "-sub-";
+
+function isSubBlockId(id: string | null | undefined): boolean {
+  return String(id || "").includes(SUB_BLOCK_TOKEN);
+}
+
+function getBlockRootId(id: string | null | undefined): string | null {
+  const value = String(id || "").trim();
+  if (!value) return null;
+  const markerIndex = value.indexOf(SUB_BLOCK_TOKEN);
+  return markerIndex >= 0 ? value.slice(0, markerIndex) : value;
+}
+
+function parseTopLevelBlockNumber(id: string | null | undefined): number | null {
+  const match = String(id || "").match(/^block-(\d+)$/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function getElementDepth(el: Element): number {
+  let depth = 0;
+  let current: Element | null = el.parentElement;
+  while (current && current.tagName.toLowerCase() !== "body") {
+    depth += 1;
+    current = current.parentElement;
+  }
+  return depth;
+}
+
+function getStableClassPart(el: Element): string {
+  return String(el.getAttribute("class") || "")
+    .split(/\s+/)
+    .filter((cls) => cls && !cls.startsWith("__bo-") && /^[a-z][\w-]*$/i.test(cls))
+    .slice(0, 2)
+    .join(".");
+}
+
+function getElementTextWithoutMedia(el: Element): string {
+  const clone = el.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll("img, picture, svg, video, source, figure").forEach((node) => node.remove());
+  return (clone.textContent || "").replace(/\s+/g, " ").trim();
+}
+
+function isPureImageLink(el: Element): el is HTMLAnchorElement {
+  if (el.tagName.toLowerCase() !== "a") return false;
+  return !!el.querySelector("img, picture img") && getElementTextWithoutMedia(el).length === 0;
+}
+
+function isMeaningfulVisibleNode(el: HTMLElement, win: Window): boolean {
+  try {
+    const style = win.getComputedStyle(el);
+    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return false;
+  } catch {
+    return false;
+  }
+  const rect = el.getBoundingClientRect();
+  return rect.width >= 8 && rect.height >= 8;
+}
+
+function getCanonicalChildElement(el: HTMLElement, scopeRoot: HTMLElement): HTMLElement | null {
+  if (el === scopeRoot || !scopeRoot.contains(el)) return null;
+  const tag = el.tagName.toLowerCase();
+  const cls = String(el.getAttribute("class") || "").toLowerCase();
+
+  if (tag === "a") return el;
+  if (tag === "button") return el;
+
+  if (tag === "img") {
+    const linkedImage = el.closest("a[href]") as HTMLElement | null;
+    if (linkedImage && scopeRoot.contains(linkedImage) && isPureImageLink(linkedImage)) return linkedImage;
+    const figure = el.closest("figure, .wp-block-image, .wp-block-cover") as HTMLElement | null;
+    if (figure && scopeRoot.contains(figure)) return figure;
+    return el;
+  }
+
+  if (tag === "figure" || cls.includes("wp-block-image") || cls.includes("wp-block-cover")) {
+    const linkedImage = el.querySelector("a[href]") as HTMLElement | null;
+    if (linkedImage && isPureImageLink(linkedImage)) return linkedImage;
+    return el;
+  }
+
+  if (cls.includes("wp-block-button")) {
+    return (el.querySelector("a.wp-block-button__link, button") as HTMLElement | null) || el;
+  }
+
+  if (/^h[1-6]$/.test(tag) || tag === "p" || tag === "ul" || tag === "ol" || tag === "form") {
+    return el;
+  }
+
+  if (tag === "input" || tag === "textarea" || tag === "select") {
+    const form = el.closest("form") as HTMLElement | null;
+    return form && scopeRoot.contains(form) ? form : el;
+  }
+
+  if ((cls.includes("btn") || cls.includes("button")) && (tag === "div" || tag === "span")) {
+    return (el.querySelector("a[href], button") as HTMLElement | null) || el;
+  }
+
+  return null;
+}
+
+function collectExpandedChildElements(containerEl: HTMLElement, win: Window): HTMLElement[] {
+  const rawSelector = [
+    "a[href]",
+    "button",
+    "img",
+    "figure",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+    "p",
+    "ul",
+    "ol",
+    "form",
+    "input",
+    "textarea",
+    "select",
+    ".wp-block-button",
+    ".wp-block-heading",
+    ".wp-block-paragraph",
+    ".wp-block-image",
+    ".wp-block-list",
+    ".wp-block-cover",
+    "[class*='btn']",
+    "[class*='button']",
+  ].join(",");
+
+  const rawNodes = Array.from(containerEl.querySelectorAll(rawSelector)) as HTMLElement[];
+  const seen = new Set<HTMLElement>();
+  const unique: HTMLElement[] = [];
+
+  for (const rawNode of rawNodes) {
+    const canonical = getCanonicalChildElement(rawNode, containerEl);
+    if (!canonical || seen.has(canonical)) continue;
+    if (!isMeaningfulVisibleNode(canonical, win)) continue;
+    seen.add(canonical);
+    unique.push(canonical);
+  }
+
+  unique.sort((a, b) => {
+    const pos = a.compareDocumentPosition(b);
+    if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+    if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+    const aRect = a.getBoundingClientRect();
+    const bRect = b.getBoundingClientRect();
+    return aRect.top - bRect.top || aRect.left - bRect.left;
+  });
+
+  const deduped: HTMLElement[] = [];
+  for (const candidate of unique) {
+    const coveredBy = deduped.find((existing) => existing !== candidate && existing.contains(candidate));
+    if (coveredBy) continue;
+    deduped.push(candidate);
+  }
+
+  return deduped;
+}
+
+function getElementPathSignature(el: Element, scopeRoot?: Element | null): string {
+  const parts: string[] = [];
+  let current: Element | null = el;
+  while (current && current.tagName.toLowerCase() !== "html") {
+    const parent: Element | null = current.parentElement;
+    const siblings: Element[] = parent
+      ? Array.from(parent.children).filter((sibling): sibling is Element => sibling.tagName === current!.tagName)
+      : [current];
+    const index = Math.max(1, siblings.indexOf(current) + 1);
+    const classPart = getStableClassPart(current);
+    const tag = current.tagName.toLowerCase();
+    parts.unshift(`${tag}${classPart ? `.${classPart}` : ""}:${index}`);
+    if (scopeRoot && current === scopeRoot) break;
+    current = parent;
+    if (!scopeRoot && current?.tagName.toLowerCase() === "body") {
+      parts.unshift("body:1");
+      break;
+    }
+  }
+  return parts.join(">");
+}
+
+function isExpandableContainer(el: Element): boolean {
+  const tag = el.tagName.toLowerCase();
+  const cls = String(el.getAttribute("class") || "").toLowerCase();
+  return ["header", "nav", "footer", "section", "main", "article", "aside", "div"].includes(tag) ||
+    cls.includes("wp-block-group") ||
+    cls.includes("wp-block-columns") ||
+    cls.includes("wp-block-cover") ||
+    cls.includes("shopify-section") ||
+    cls.includes("site-header") ||
+    cls.includes("site-nav") ||
+    cls.includes("site-footer");
+}
+
+function titleCaseBlockLabel(label: string): string {
+  const normalized = String(label || "block")
+    .replace(/[_-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!normalized) return "Block";
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1);
+}
+
+function getOrderedTopLevelBlocks(blocks: BlockEntry[]): BlockEntry[] {
+  return blocks
+    .filter((entry) => !entry.parentId)
+    .sort((a, b) => a.docTop - b.docTop);
+}
+
+function getBlockDisplayLabel(block: BlockEntry, blocks: BlockEntry[]): string {
+  const rootId = getBlockRootId(block.id) || block.id;
+  const topLevel = getOrderedTopLevelBlocks(blocks);
+  const rootIndex = Math.max(0, topLevel.findIndex((entry) => entry.id === rootId));
+  const baseLabel = titleCaseBlockLabel(block.label);
+
+  if (!block.parentId) {
+    return `${rootIndex + 1}: ${baseLabel}`;
+  }
+
+  const childBlocks = blocks
+    .filter((entry) => !!entry.parentId && getBlockRootId(entry.id) === rootId)
+    .sort((a, b) => a.docTop - b.docTop);
+  const childIndex = Math.max(0, childBlocks.findIndex((entry) => entry.id === block.id));
+  return `${rootIndex + 1}.${childIndex + 1}: ${baseLabel}`;
+}
+
+function buildStructureSnapshot(blocks: BlockEntry[], selectedId: string | null): { items: StructureSnapshotItem[]; selectedRootId: string | null } {
+  const selectedRootId = getBlockRootId(selectedId);
+  const topLevel = getOrderedTopLevelBlocks(blocks);
+  const items = topLevel.map((entry) => {
+    const rootId = entry.id;
+    const childCount = blocks.filter((block) => !!block.parentId && getBlockRootId(block.id) === rootId).length;
+    return {
+      id: entry.id,
+      rootId,
+      displayLabel: getBlockDisplayLabel(entry, blocks),
+      label: entry.label,
+      kind: entry.kind || "content",
+      childCount,
+      isExpanded: !!entry.isExpanded || childCount > 0,
+      isSelected: selectedRootId === rootId,
+    };
+  });
+  return { items, selectedRootId };
+}
+
+function buildGroupPreviewHtml(doc: Document, el: HTMLElement): string {
+  const headClone = doc.head.cloneNode(true) as HTMLElement;
+  headClone.querySelectorAll("script").forEach((node) => node.remove());
+  const bodyClone = doc.createElement("body");
+  bodyClone.style.margin = "0";
+  bodyClone.style.background = "#ffffff";
+  bodyClone.style.padding = "0";
+  bodyClone.appendChild(el.cloneNode(true));
+  return `<!doctype html><html>${headClone.outerHTML}${bodyClone.outerHTML}</html>`;
+}
+
+function collectSplitRootSegments(rootEl: HTMLElement, win: Window): HTMLElement[] {
+  const isSegment = (node: Element): node is HTMLElement => {
+    if (!(node instanceof HTMLElement)) return false;
+    const tag = node.tagName.toLowerCase();
+    if (["script", "style", "noscript"].includes(tag)) return false;
+    if (!isMeaningfulVisibleNode(node, win)) return false;
+    return node.getBoundingClientRect().height >= 36;
+  };
+
+  let segments = Array.from(rootEl.children).filter(isSegment);
+  if (segments.length <= 1 && segments[0]) {
+    const nested = Array.from(segments[0].children).filter(isSegment);
+    if (nested.length >= 2) segments = nested;
+  }
+
+  return segments;
+}
+
+function getBlockKind(el: Element, label: string): string {
+  const tag = el.tagName.toLowerCase();
+  const lower = String(label || tag).toLowerCase();
+  if (isPureImageLink(el)) return "image";
+  if (isExpandableContainer(el) || lower.includes("section") || lower.includes("group") || lower.includes("columns")) return "container";
+  if (lower.includes("button") || lower.includes("cta") || tag === "button") return "button";
+  if (lower.includes("heading") || /^h[1-6]$/.test(tag)) return "heading";
+  if (tag === "a" && !!(el.closest("nav,header,footer") || el.querySelector("span, strong, em"))) return "navigation";
+  if (lower.includes("image") || lower.includes("gallery") || tag === "img" || tag === "figure") return "image";
+  if (lower.includes("form") || tag === "form") return "form";
+  if (lower.includes("nav") || tag === "nav") return "navigation";
+  if (lower.includes("list") || tag === "ul" || tag === "ol") return "list";
+  return "content";
+}
 
 // Universal Block Discovery - Works on ANY website regardless of broken JS
 function discoverUniversalBlocks(doc: Document): Map<string, string> {
@@ -215,6 +544,7 @@ function generateSelector(el: Element): string {
 function pickLabel(el: Element, discoveries?: Map<string, string>): string {
   const tag = el.tagName.toLowerCase();
   const cls = (el.getAttribute("class") || "").trim();
+  if (isPureImageLink(el)) return "image";
   
   // Check if element was discovered as interactive
   if (discoveries) {
@@ -271,9 +601,31 @@ function isButtonElement(el: Element): boolean {
 }
 
 function findButtonNode(el: HTMLElement): HTMLAnchorElement | HTMLButtonElement | null {
-  if (el.tagName.toLowerCase() === "a") return el as HTMLAnchorElement;
+  if (el.tagName.toLowerCase() === "a") {
+    return isPureImageLink(el) ? null : (el as HTMLAnchorElement);
+  }
   if (el.tagName.toLowerCase() === "button") return el as HTMLButtonElement;
-  return el.querySelector("a.wp-block-button__link, a[href], button") as HTMLAnchorElement | HTMLButtonElement | null;
+  if ((el.getAttribute("class") || "").includes("wp-block-button")) {
+    return el.querySelector("a.wp-block-button__link, button") as HTMLAnchorElement | HTMLButtonElement | null;
+  }
+  const candidates = Array.from(
+    el.querySelectorAll("button, [role='button'], a.wp-block-button__link, a[class*='btn'], a[class*='button']")
+  ) as Array<HTMLAnchorElement | HTMLButtonElement>;
+  return candidates.find((candidate) => {
+    if (candidate.tagName.toLowerCase() !== "a") return true;
+    return !isPureImageLink(candidate);
+  }) || null;
+}
+
+function findImageNode(el: HTMLElement): HTMLImageElement | null {
+  if (el.tagName.toLowerCase() === "img") return el as HTMLImageElement;
+  return el.querySelector("img");
+}
+
+function findImageLinkNode(el: HTMLElement, imageNode: HTMLImageElement | null): HTMLAnchorElement | null {
+  if (el.tagName.toLowerCase() === "a" && imageNode) return el as HTMLAnchorElement;
+  const link = imageNode?.closest("a[href]") as HTMLAnchorElement | null;
+  return link && el.contains(link) ? link : null;
 }
 
 function rgbToHex(rgb: string): string {
@@ -386,6 +738,7 @@ function renderBoxesInIframe(
   selectedId: string | null,
   onClickLabel: (id: string) => void
 ) {
+  if (!doc.body) return;
   ensureOverlayCss(doc);
   doc.querySelectorAll(".__bo-box, .__bo-label-outside").forEach(el => el.remove());
   const win = doc.defaultView;
@@ -432,10 +785,15 @@ function renderBoxesInIframe(
     const el = doc.querySelector(b.selector) as HTMLElement | null;
     if (el) blockEls.set(b.id, el);
   }
+  const selectedRootId = getBlockRootId(selectedId);
+  const expandedRootId = selectedRootId && blocks.some((entry) => entry.id.startsWith(`${selectedRootId}${SUB_BLOCK_TOKEN}`))
+    ? selectedRootId
+    : null;
 
   for (const b of blocks) {
     const target = blockEls.get(b.id) || null;
     if (!target) continue;
+    if (expandedRootId && b.id === expandedRootId && b.isExpanded) continue;
     const rect = target.getBoundingClientRect();
     const docLeft = rect.left + win.scrollX;
     const docTop = rect.top + win.scrollY;
@@ -447,6 +805,10 @@ function renderBoxesInIframe(
     for (const [otherId, otherEl] of blockEls) {
       if (otherId === b.id) continue;
       if (otherEl !== target && otherEl.contains(target)) {
+        const sameExpandedFamily =
+          !!expandedRootId &&
+          (getBlockRootId(otherId) === expandedRootId || getBlockRootId(b.id) === expandedRootId);
+        if (sameExpandedFamily) continue;
         if (otherId !== selectedId) { isChildOfNonSelected = true; break; }
       }
     }
@@ -469,7 +831,7 @@ function renderBoxesInIframe(
     doc.body.appendChild(box);
 
     // Label
-    const labelText = b.label;
+    const labelText = getBlockDisplayLabel(b, blocks);
     const estimatedWidth = labelText.length * 8 + 16;
     const labelH = 22;
     const labelPos = findFreeLabelPos(docLeft, estimatedWidth, labelH, docTop);
@@ -483,7 +845,7 @@ function renderBoxesInIframe(
     doc.body.appendChild(label);
   }
 }
-export default function BlockOverlay({ iframeRef, enabled, canvasMode, onStatus, onHtmlChange }: Props) {
+export default function BlockOverlay({ iframeRef, enabled, canvasMode, blockFilter = "all", onStatus, onHtmlChange }: Props) {
 
   const { t } = useTranslation();
   const boApplyCanvasMode = (on: boolean) => {
@@ -557,6 +919,9 @@ export default function BlockOverlay({ iframeRef, enabled, canvasMode, onStatus,
   const [boPickType, setBoPickType] = useState<string>("");
   const [boGridRect, setBoGridRect] = useState<{left:number;top:number;width:number;height:number} | null>(null);
   const historyRef = useRef<string[]>([]);
+  const [blocks, setBlocks] = useState<BlockEntry[]>([]);
+  const [hoverId, setHoverId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const pushHistorySnapshot = useCallback((doc?: Document | null) => {
     const d = doc || iframeRef.current?.contentDocument || null;
@@ -582,6 +947,15 @@ export default function BlockOverlay({ iframeRef, enabled, canvasMode, onStatus,
     }, 120);
   }, [onHtmlChange]);
 
+  const commitDocumentMutation = useCallback((doc: Document, opts?: { forceRescan?: boolean; preserveSelectionId?: string | null }) => {
+    try { onHtmlChange?.(serializeIframeHtml(doc)); } catch (e) { console.warn("serialize error:", e); }
+    const keepId = opts?.preserveSelectionId ?? null;
+    window.setTimeout(() => {
+      if (keepId) setSelectedId(keepId);
+      try { window.dispatchEvent(new CustomEvent("blockoverlay:rescan", { detail: { force: opts?.forceRescan !== false } })); } catch {}
+    }, 20);
+  }, [onHtmlChange]);
+
   // Draw-to-Place
   const [drawRect, setDrawRect] = useState<{left:number;top:number;width:number;height:number} | null>(null);
 
@@ -594,10 +968,22 @@ export default function BlockOverlay({ iframeRef, enabled, canvasMode, onStatus,
 
   
   useEffect(() => {
-    if (!enabled) return
+    const doc = iframeRef.current?.contentDocument || null
+    if (!doc) return
+
+    if (!enabled) {
+      boApplyCanvasMode(false)
+      return
+    }
+
+    // Entering edit mode must not rewrite srcdoc from a freshly serialized iframe.
+    // That re-render can blank dynamic pages before the overlay even finishes scanning.
     boApplyCanvasMode(!!canvasMode)
-    try { onHtmlChange?.(serializeIframeHtml(iframeRef.current?.contentDocument || document)) } catch {}
-  }, [enabled, canvasMode])
+
+    return () => {
+      if (canvasMode) boApplyCanvasMode(false)
+    }
+  }, [enabled, canvasMode, iframeRef])
 
 
   useEffect(() => {
@@ -794,7 +1180,10 @@ useEffect(() => {
         contentCol.style.cssText = "flex:1;min-width:0;display:flex;flex-direction:column;gap:1em;";
 
         const firstBlock = doc.querySelector(overlappingBlocks[0].selector) as HTMLElement | null;
-        if (!firstBlock || !firstBlock.parentElement) { doc.body.appendChild(node); }
+        if (!firstBlock || !firstBlock.parentElement) {
+          if (!doc.body) return;
+          doc.body.appendChild(node);
+        }
         else {
           // Bild-Column: gezeichnete Breite als flex-basis verwenden
           const iframeW2 = iframe.getBoundingClientRect().width;
@@ -855,8 +1244,9 @@ useEffect(() => {
           }
         }
 
-        if (bestBlock) {
-          const el = doc.querySelector(bestBlock.selector) as HTMLElement | null;
+      pushHistorySnapshot(doc);
+      if (bestBlock) {
+        const el = doc.querySelector(bestBlock.selector) as HTMLElement | null;
           if (el && el.parentElement) {
             const r = el.getBoundingClientRect();
             const elDocTop = r.top + win.scrollY;
@@ -865,14 +1255,11 @@ useEffect(() => {
             } else {
               el.parentElement.insertBefore(node, el.nextSibling);
             }
-          } else { doc.body.appendChild(node); }
-        } else { doc.body.appendChild(node); }
+          } else if (doc.body) { doc.body.appendChild(node); }
+        } else if (doc.body) { doc.body.appendChild(node); }
       }
 
-      try { onHtmlChange?.(serializeIframeHtml(doc)); } catch {}
-      setTimeout(() => {
-        try { window.dispatchEvent(new CustomEvent("blockoverlay:rescan", { detail: { mode: "page" } })); } catch {}
-      }, 100);
+      commitDocumentMutation(doc);
       setBoPickArmed(false);
       setBoPickType("");
       setBoGridRect(null);
@@ -902,8 +1289,7 @@ useEffect(() => {
       (target as any).removeEventListener("mouseup", onMouseUp);
       window.removeEventListener("keydown", onEscLocal);
     };
-  }, [boPickArmed, boPickType]);
-
+  }, [boPickArmed, boPickType, commitDocumentMutation, pushHistorySnapshot]);
 
   // --- SMART DRAG DROP ---
   useEffect(() => {
@@ -952,6 +1338,7 @@ useEffect(() => {
       }
 
       if (!target) {
+        if (!doc.body) return
         doc.body.appendChild(node)
       } else {
         const r = target.getBoundingClientRect()
@@ -960,8 +1347,7 @@ useEffect(() => {
         else target.parentNode?.insertBefore(node, target.nextSibling)
       }
 
-      try { onHtmlChange?.(doc.documentElement.outerHTML) } catch {}
-      try { (window as any).dispatchEvent(new CustomEvent("blockoverlay:rescan", { detail: { mode: "page" } })) } catch {}
+      commitDocumentMutation(doc)
     }
 
     doc.addEventListener("dragover", onDragOver)
@@ -971,12 +1357,8 @@ useEffect(() => {
       doc.removeEventListener("dragover", onDragOver)
       doc.removeEventListener("drop", onDrop)
     }
-  }, [iframeRef, onHtmlChange])
+  }, [commitDocumentMutation, iframeRef, onHtmlChange])
 
-
-  const [blocks, setBlocks] = useState<BlockEntry[]>([]);
-  const [hoverId, setHoverId] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
 
 /* BO_DRAGGRID_GLOBAL_V1 */
 const [isDraggingBlock, setIsDraggingBlock] = useState(false)
@@ -1011,7 +1393,7 @@ useEffect(() => {
   const [editImgSrc, setEditImgSrc] = useState("");
   const [isButtonSelected, setIsButtonSelected] = useState(false);
   // Heading + List Panel
-  const [panelType, setPanelType] = useState<"text"|"button"|"heading-list"|"nav-links"|"form-fields"|"generic"|"image">("generic");
+  const [panelType, setPanelType] = useState<PanelType>("generic");
   const [editHeading, setEditHeading] = useState("");
   const [editBullets, setEditBullets] = useState<string[]>([]);
   
@@ -1023,10 +1405,14 @@ useEffect(() => {
 const [aiLoading, setAiLoading] = useState(false);
 const [showCostModal, setShowCostModal] = useState(false);
 const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null);
+  const [groupPreviewHtml, setGroupPreviewHtml] = useState("");
+  const splitRootIdsRef = useRef<Set<string>>(new Set());
+  const [, setSplitVersion] = useState(0);
 
   const blocksRef = useRef<BlockEntry[]>([]);
   const hoverIdRef = useRef<string | null>(null);
   const selectedIdRef = useRef<string | null>(null);
+  const pendingExpandRootRef = useRef<string | null>(null);
   const onClickLabelRef = useRef<(id: string) => void>(() => {});
   blocksRef.current = blocks;
   hoverIdRef.current = hoverId;
@@ -1036,76 +1422,93 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
   const getDoc = useCallback(() => getIframe()?.contentDocument ?? null, [getIframe]);
   const getWin = useCallback(() => getIframe()?.contentWindow ?? null, [getIframe]);
 
+  const resetEditorPanelState = useCallback(() => {
+    setPanelType("generic");
+    setIsButtonSelected(false);
+    setEditValue("");
+    setEditLink("");
+    setEditHeading("");
+    setEditBullets([]);
+    setEditNavLinks([]);
+    setEditFormFields([]);
+    setEditImgSrc("");
+    setEditBg("#3b82f6");
+    setEditColor("#ffffff");
+    setEditFontSize("16px");
+    setGroupPreviewHtml("");
+  }, []);
+
+  const openGroupPanel = useCallback((blockId: string, containerEl: HTMLElement) => {
+    const doc = containerEl.ownerDocument;
+    setSelectedId(blockId);
+    setPanelType("group");
+    setIsButtonSelected(false);
+    setGroupPreviewHtml(buildGroupPreviewHtml(doc, containerEl));
+    setEditValue("");
+    setEditLink("");
+    setEditHeading("");
+    setEditBullets([]);
+    setEditNavLinks([]);
+    setEditFormFields([]);
+    setEditImgSrc("");
+  }, []);
+
   const selectBlock = useCallback((id: string) => {
     const doc = getDoc();
     if (!doc) return;
     const b = blocksRef.current.find(x => x.id === id);
     if (!b) return;
+    const currentSelectedId = selectedIdRef.current;
+    const currentRootId = getBlockRootId(currentSelectedId);
+    const nextRootId = getBlockRootId(id);
 
     // 2-LEVEL EDITING:
     // If user clicks same block again AND it's a container → drill into sub-elements
-    const isSameBlock = selectedId === id;
+    const isSameBlock = currentSelectedId === id;
     const el = doc.querySelector(b.selector) as HTMLElement | null;
     if (!el) return;
 
-    const isContainer = ["HEADER","NAV","FOOTER","SECTION","MAIN","ARTICLE","DIV"].includes(el.tagName) ||
-      el.classList.contains("wp-block-group") || el.classList.contains("wp-block-columns") ||
-      el.classList.contains("site-header") || el.classList.contains("site-nav");
+    const isContainer = isExpandableContainer(el);
+    const currentExpandedFamily = !!currentRootId && blocksRef.current.some((entry) => entry.id.startsWith(`${currentRootId}${SUB_BLOCK_TOKEN}`));
+    const isTopLevelContainer = isContainer && !b.parentId && !isSubBlockId(id);
 
-        // On click of a container: expand into sub-blocks
-    if (isContainer) {
-      const SUB_QUERY = "h1,h2,h3,h4,p,button,a[href],img,figure,ul,ol,form,[class*='btn'],[class*='button'],.wp-block-button,.wp-block-heading,.wp-block-paragraph";
-      const subEls = Array.from(el.querySelectorAll(SUB_QUERY)) as HTMLElement[];
-
-      const directSubs = subEls.filter(subEl => {
-        if (subEl === el) return false;
-        const r = subEl.getBoundingClientRect();
-        if (r.width < 10 || r.height < 10) return false;
-        const p1 = subEl.parentElement;
-        const p2 = p1?.parentElement;
-        const p3 = p2?.parentElement;
-        return p1 === el || p2 === el || p3 === el;
-      });
-
-      if (directSubs.length > 0) {
-        const scrollY = doc.defaultView?.scrollY || 0;
-        const subBlocks: BlockEntry[] = [];
-        directSubs.forEach((subEl, i) => {
-          const r = subEl.getBoundingClientRect();
-          const subId = `${id}-sub-${i}`;
-          subEl.setAttribute("data-block-id", subId);
-          subBlocks.push({
-            id: subId,
-            label: pickLabel(subEl),
-            selector: `[data-block-id="${subId}"]`,
-            isButton: isButtonElement(subEl),
-            docTop: r.top + scrollY,
-          });
-        });
-
-        setBlocks(prev => {
-          const others = prev.filter(pb => {
-            const pEl = doc.querySelector(pb.selector) as HTMLElement | null;
-            return pEl && !el.contains(pEl);
-          });
-          return [...others, ...subBlocks].sort((a, b) => a.docTop - b.docTop);
-        });
-        setSelectedId(id);
+    if (isTopLevelContainer) {
+      if (currentExpandedFamily && currentRootId && currentRootId !== id) {
+        resetEditorPanelState();
+        setSelectedId(null);
+        setHoverId(null);
+        pendingExpandRootRef.current = id;
+        setTimeout(() => {
+          try { window.dispatchEvent(new CustomEvent("blockoverlay:rescan", { detail: { force: true } })); } catch {}
+        }, 10);
         return;
       }
+
+      if ((isSameBlock || !currentExpandedFamily) && expandIntoSubBlocks(id)) return;
     }
-        // If clicking a DIFFERENT block than currently selected → reset to clean scan first
-    if (selectedId && selectedId !== id) {
+
+    // Only collapse sub-block mode when switching away from a previously expanded container.
+    const switchingExpandedFamily =
+      !!currentSelectedId &&
+      currentSelectedId !== id &&
+      (isSubBlockId(currentSelectedId) || currentExpandedFamily) &&
+      !!currentRootId &&
+      !!nextRootId &&
+      currentRootId !== nextRootId;
+
+    if (switchingExpandedFamily) {
       // Trigger a fresh scan to collapse previous sub-blocks
       setTimeout(() => {
-        try { window.dispatchEvent(new CustomEvent("blockoverlay:rescan", { detail: { mode: "page" } })); } catch {}
+        try { window.dispatchEvent(new CustomEvent("blockoverlay:rescan", { detail: { force: true } })); } catch {}
       }, 10);
     }
 
     setSelectedId(id);
+    resetEditorPanelState();
 
     const btnNode = findButtonNode(el);
-    const imgNode = (el.tagName === "IMG" ? el : (el.querySelector("img") as HTMLElement | null)) as HTMLImageElement | null;
+    const imgNode = findImageNode(el);
+    const imageLinkNode = findImageLinkNode(el, imgNode);
     const isBtn = b.isButton || !!btnNode;
 
     const heading = el.querySelector("h1,h2,h3,h4") as HTMLElement | null;
@@ -1114,7 +1517,10 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
     const isHeadingEl = ["H1","H2","H3","H4"].includes(el.tagName);
     const isListEl = ["UL","OL"].includes(el.tagName);
 
-    const linkNodes = Array.from(el.querySelectorAll("a[href]")) as HTMLAnchorElement[];
+    const linkNodes = [
+      ...(el.matches("a[href]") ? [el as HTMLAnchorElement] : []),
+      ...Array.from(el.querySelectorAll("a[href]")) as HTMLAnchorElement[],
+    ];
     const uniqLinks: HTMLAnchorElement[] = [];
     for (const a of linkNodes) {
       const href = (a.getAttribute("href") || "").trim();
@@ -1135,7 +1541,6 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
         href: (a.getAttribute("href") || "").toString(),
       }));
       setEditNavLinks(items.length ? items : [{ text: "", href: "" }]);
-      setEditValue(""); setEditLink(""); setEditHeading(""); setEditBullets([]); setEditFormFields([]);
       return;
     }
 
@@ -1162,7 +1567,14 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
         items.push({ label: labelText, name, placeholder, type });
       }
       setEditFormFields(items.length ? items : [{ label: "", name: "", placeholder: "", type: "text" }]);
-      setEditValue(""); setEditLink(""); setEditHeading(""); setEditBullets([]); setEditNavLinks([]);
+      return;
+    }
+
+    if (imgNode) {
+      setPanelType("image");
+      setIsButtonSelected(false);
+      setEditImgSrc((imgNode.getAttribute("src") || "").trim());
+      setEditLink((imageLinkNode?.getAttribute("href") || "").trim());
       return;
     }
 
@@ -1196,24 +1608,12 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
       const listEl = isListEl ? el : list;
       const items = Array.from(listEl?.querySelectorAll("li") || []).map(li => (li.textContent || "").trim());
       setEditBullets(items.length ? items : [""]);
-      setEditValue("");
-    } else if (imgNode) {
-      setPanelType("image");
-      setIsButtonSelected(false);
-      setEditImgSrc((imgNode.getAttribute("src") || "").trim());
-      setEditValue("");
-      setEditLink("");
-      setEditHeading("");
-      setEditBullets([]);
     } else {
       setPanelType(isHeadingEl ? "text" : "generic");
       setIsButtonSelected(false);
       setEditValue((el.innerText || "").trim().slice(0, 2000));
-      setEditLink("");
-      setEditHeading("");
-      setEditBullets([]);
     }
-  }, [getDoc, selectedId]);
+  }, [getDoc, resetEditorPanelState]);
 
   onClickLabelRef.current = selectBlock;
 
@@ -1279,22 +1679,13 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
       try {
         (container as HTMLElement).appendChild(newEl);
       } catch {
+        if (!doc.body) return;
         doc.body.appendChild(newEl);
       }
 
       // notify editor
       try {
-        if (onHtmlChange) {
-          // prefer existing serializer if present
-          try {
-            // @ts-ignore
-            const htmlOut = typeof serializeIframeHtml === "function" ? serializeIframeHtml(doc) : doc.documentElement.outerHTML;
-            onHtmlChange(htmlOut);
-          } catch (serializeError) {
-            console.warn("Serialize error in onDrop:", serializeError);
-            onHtmlChange(doc.documentElement.outerHTML);
-          }
-        }
+        commitDocumentMutation(doc)
       } catch (dropError) {
         console.error("Error in onDrop handler:", dropError);
         toast.error(t("Failed to add element"));
@@ -1315,15 +1706,21 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
       try { doc.removeEventListener("dragover", onDragOver as any); } catch {}
       try { doc.removeEventListener("drop", onDrop as any); } catch {}
     };
-  }, [enabled, getDoc, onHtmlChange]);
+  }, [commitDocumentMutation, enabled, getDoc, onHtmlChange]);
 
 
   // Boxes neu zeichnen
   useEffect(() => {
     const doc = getDoc();
     if (!doc || !enabled) return;
-    renderBoxesInIframe(doc, blocks, hoverId, selectedId, (id) => onClickLabelRef.current(id));
-  }, [blocks, hoverId, selectedId, enabled, getDoc]);
+    renderBoxesInIframe(
+      doc,
+      blocks.filter((entry) => matchesBlockFilter(entry, blockFilter)),
+      hoverId,
+      selectedId,
+      (id) => onClickLabelRef.current(id)
+    );
+  }, [blocks, hoverId, selectedId, enabled, getDoc, blockFilter]);
 
   useEffect(() => {
     if (!enabled) {
@@ -1332,30 +1729,90 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
     }
   }, [enabled, getDoc]);
 
-  const assignIds = useCallback((els: Element[], win: Window) => {
-    // Run universal discovery before assigning IDs
+  useEffect(() => {
+    try {
+      window.dispatchEvent(new CustomEvent("bo:structure", {
+        detail: buildStructureSnapshot(blocks, selectedId),
+      }));
+    } catch {}
+  }, [blocks, selectedId]);
+
+  const assignIds = useCallback((els: Element[], win: Window, opts?: { scopeRoot?: Element | null; parentId?: string | null }) => {
     const doc = win.document;
     const discoveries = discoverUniversalBlocks(doc);
-    
-    const withRects = els.map(el => ({ el, top: el.getBoundingClientRect().top + win.scrollY }));
-    withRects.sort((a, b) => a.top - b.top);
-    let idx = 0;
-    return withRects.map(({ el, top }) => {
-      idx += 1;
-      const id = `block-${idx}`;
-      (el as HTMLElement).setAttribute("data-block-id", id);
-      const label = pickLabel(el, discoveries);
-      return { id, el, docTop: top, label, selector: generateSelector(el), isButton: isButtonElement(el) };
+    const prevByPath = new Map(
+      blocksRef.current
+        .filter((entry) => entry.pathSignature)
+        .map((entry) => [String(entry.pathSignature), entry.id])
+    );
+    const usedTopLevelIds = new Set<number>();
+    doc.querySelectorAll("[data-block-id]").forEach((node) => {
+      const num = parseTopLevelBlockNumber((node as HTMLElement).getAttribute("data-block-id"));
+      if (num != null) usedTopLevelIds.add(num);
+    });
+
+    let nextTopLevelId = 1;
+    const claimNextTopLevelId = () => {
+      while (usedTopLevelIds.has(nextTopLevelId)) nextTopLevelId += 1;
+      usedTopLevelIds.add(nextTopLevelId);
+      return `block-${nextTopLevelId}`;
+    };
+
+    const subIdCursor = new Map<string, number>();
+    const withRects = els.map((el) => ({
+      el,
+      top: el.getBoundingClientRect().top + win.scrollY,
+      depth: getElementDepth(el),
+    }));
+    withRects.sort((a, b) => a.depth - b.depth || a.top - b.top);
+
+    return withRects.map(({ el, top, depth }) => {
+      const node = el as HTMLElement;
+      const pathSignature = getElementPathSignature(node, opts?.scopeRoot || null);
+      const label = pickLabel(node, discoveries);
+      const explicitParentId = opts?.parentId ?? null;
+      const inferredParentId = explicitParentId || (node.parentElement?.closest("[data-block-id]") as HTMLElement | null)?.getAttribute("data-block-id") || null;
+      let id = node.getAttribute("data-block-id") || prevByPath.get(pathSignature) || "";
+
+      if (!id) {
+        if (explicitParentId) {
+          const nextSubId = (subIdCursor.get(explicitParentId) || 0) + 1;
+          subIdCursor.set(explicitParentId, nextSubId);
+          id = `${explicitParentId}${SUB_BLOCK_TOKEN}${nextSubId}`;
+        } else {
+          id = claimNextTopLevelId();
+        }
+      }
+
+      node.setAttribute("data-block-id", id);
+      node.setAttribute("data-bo-path", pathSignature);
+      if (inferredParentId) node.setAttribute("data-bo-parent", inferredParentId);
+      else node.removeAttribute("data-bo-parent");
+
+      return {
+        id,
+        el: node,
+        docTop: top,
+        label,
+        selector: `[data-block-id="${id}"]`,
+        isButton: isButtonElement(node),
+        parentId: inferredParentId,
+        kind: getBlockKind(node, label),
+        pathSignature,
+        isExpandable: isExpandableContainer(node),
+        isExpanded: false,
+        depth,
+      };
     });
   }, []);
 
-  const scanFreePrecise = useCallback(() => {
+  const scanFreePrecise = useCallback((force = false) => {
     const doc = getDoc();
     const win = getWin();
     if (!doc || !win) return;
-    // Don't rescan if sub-blocks are active - would collapse them
     const currentSel = selectedIdRef.current;
-    if (currentSel && currentSel.includes("-sub-")) return;
+    const expandedSubMode = blocksRef.current.some((entry) => entry.id.includes(SUB_BLOCK_TOKEN));
+    if (!force && (String(currentSel || "").includes(SUB_BLOCK_TOKEN) || expandedSubMode)) return;
     onStatus?.("blocked");
 
     type C = { el: Element; r: DOMRect; priority: number };
@@ -1418,8 +1875,6 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
     const deduped: C[] = [];
     for (const c of candidates) {
       const tag = c.el.tagName.toLowerCase();
-      const label = pickLabel(c.el);
-
       // Find if a parent container already exists in deduped
       const parentEntry = deduped.find(k => k.el !== c.el && k.el.contains(c.el));
 
@@ -1455,21 +1910,223 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
       return a.r.left - b.r.left;
     });
 
-    const withIds = assignIds(deduped.map(x => x.el), win);
-    const next: BlockEntry[] = withIds.map(({ id, el, docTop }) => ({
+    const topLevelCandidates = deduped.filter((candidate) => {
+      return !deduped.some((parent) => parent !== candidate && parent.el.contains(candidate.el));
+    });
+
+    const resolvedTopLevelEls = topLevelCandidates.flatMap((candidate) => {
+      const existingId = (candidate.el as HTMLElement).getAttribute("data-block-id") || "";
+      if (!existingId || !splitRootIdsRef.current.has(existingId)) return [candidate.el];
+      const segments = collectSplitRootSegments(candidate.el as HTMLElement, win);
+      return segments.length >= 2 ? segments : [candidate.el];
+    });
+
+    const withIds = assignIds(resolvedTopLevelEls, win);
+    const next: BlockEntry[] = withIds.map(({ id, el, docTop, parentId, kind, pathSignature, isExpandable, isExpanded, depth }) => ({
       id,
       label: pickLabel(el),
       selector: `[data-block-id="${id}"]`,
       isButton: isButtonElement(el),
       docTop,
+      parentId,
+      kind,
+      pathSignature,
+      isExpandable,
+      isExpanded,
+      depth,
     }));
+
+    next.sort((a, b) => a.docTop - b.docTop);
+    const keepIds = new Set(next.map((entry) => entry.id));
+    doc.querySelectorAll("[data-block-id]").forEach((node) => {
+      const id = (node as HTMLElement).getAttribute("data-block-id") || "";
+      if (keepIds.has(id)) return;
+      (node as HTMLElement).removeAttribute("data-block-id");
+      (node as HTMLElement).removeAttribute("data-bo-parent");
+      (node as HTMLElement).removeAttribute("data-bo-path");
+    });
+
+    const previousSelection = selectedIdRef.current
+      ? blocksRef.current.find((entry) => entry.id === selectedIdRef.current)
+      : null;
+    const nextSelection = previousSelection
+      ? next.find((entry) => entry.id === previousSelection.id) ||
+        next.find((entry) => entry.pathSignature && entry.pathSignature === previousSelection.pathSignature)
+      : null;
+
+    setBlocks(next);
+    setHoverId((prev) => (prev && keepIds.has(prev) ? prev : null));
+    setSelectedId(nextSelection?.id || null);
+    if (!nextSelection) resetEditorPanelState();
+    try {
+      window.dispatchEvent(new CustomEvent("bo:structure", {
+        detail: buildStructureSnapshot(next, nextSelection?.id || null),
+      }));
+    } catch {}
+    onStatus?.("ok");
+  }, [assignIds, getDoc, getWin, onStatus, resetEditorPanelState]);
+
+  const expandIntoSubBlocks = useCallback((blockId: string) => {
+    const doc = getDoc();
+    const win = getWin();
+    if (!doc || !win) return false;
+
+    const chosen = blocksRef.current.find((entry) => entry.id === blockId);
+    if (!chosen) return false;
+    const containerEl = doc.querySelector(chosen.selector) as HTMLElement | null;
+    if (!containerEl) return false;
+
+    const directSubs = collectExpandedChildElements(containerEl, win);
+
+    if (!directSubs.length) return false;
+
+    containerEl.querySelectorAll("[data-block-id]").forEach((node) => {
+      if (node === containerEl) return;
+      (node as HTMLElement).removeAttribute("data-block-id");
+      (node as HTMLElement).removeAttribute("data-bo-parent");
+      (node as HTMLElement).removeAttribute("data-bo-path");
+    });
+
+    const scopedIds = assignIds(directSubs, win, { scopeRoot: containerEl, parentId: blockId });
+    const scopedBlocks: BlockEntry[] = scopedIds.map(({ id, el, docTop, parentId, kind, pathSignature, isExpandable, depth }) => ({
+      id,
+      label: pickLabel(el),
+      selector: `[data-block-id="${id}"]`,
+      isButton: isButtonElement(el),
+      docTop,
+      parentId,
+      kind,
+      pathSignature,
+      isExpandable,
+      isExpanded: false,
+      depth,
+    }));
+
+    const next = blocksRef.current
+      .filter((entry) => {
+        if (entry.id === blockId) return false;
+        const existing = doc.querySelector(entry.selector) as HTMLElement | null;
+        return existing && !containerEl.contains(existing);
+      })
+      .concat([{ ...chosen, isExpanded: true }], scopedBlocks)
+      .sort((a, b) => a.docTop - b.docTop);
 
     setBlocks(next);
     setHoverId(null);
+    openGroupPanel(blockId, containerEl);
+    return true;
+  }, [assignIds, getDoc, getWin, openGroupPanel]);
+
+  useEffect(() => {
+    const pendingRootId = pendingExpandRootRef.current;
+    if (!pendingRootId) return;
+    if (blocks.some((entry) => entry.id.startsWith(`${pendingRootId}${SUB_BLOCK_TOKEN}`))) {
+      pendingExpandRootRef.current = null;
+      return;
+    }
+    if (!blocks.some((entry) => entry.id === pendingRootId)) return;
+
+    pendingExpandRootRef.current = null;
+    const timer = window.setTimeout(() => {
+      try { expandIntoSubBlocks(pendingRootId); } catch {}
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [blocks, expandIntoSubBlocks]);
+
+  const moveTopLevelRoot = useCallback((rootId: string, delta: number) => {
+    const doc = getDoc();
+    if (!doc || !delta) return;
+    const topLevel = getOrderedTopLevelBlocks(blocksRef.current);
+    const index = topLevel.findIndex((entry) => entry.id === rootId);
+    if (index < 0) return;
+    const nextIndex = Math.max(0, Math.min(topLevel.length - 1, index + delta));
+    if (nextIndex === index) return;
+
+    const rootEl = doc.querySelector(topLevel[index].selector) as HTMLElement | null;
+    const targetEl = doc.querySelector(topLevel[nextIndex].selector) as HTMLElement | null;
+    if (!rootEl || !targetEl || !rootEl.parentElement || rootEl === targetEl) return;
+
+    pushHistorySnapshot(doc);
+    if (nextIndex < index) {
+      targetEl.parentElement?.insertBefore(rootEl, targetEl);
+    } else {
+      targetEl.parentElement?.insertBefore(rootEl, targetEl.nextSibling);
+    }
+    commitDocumentMutation(doc, { preserveSelectionId: rootId });
+  }, [commitDocumentMutation, getDoc, pushHistorySnapshot]);
+
+  const deleteBlockTree = useCallback((blockId: string) => {
+    const doc = getDoc();
+    if (!doc) return;
+    const rootId = getBlockRootId(blockId) || blockId;
+    const targetEntry = blocksRef.current.find((entry) => entry.id === rootId) || blocksRef.current.find((entry) => entry.id === blockId);
+    if (!targetEntry) return;
+    const targetEl = doc.querySelector(targetEntry.selector) as HTMLElement | null;
+    if (!targetEl) return;
+    pushHistorySnapshot(doc);
+    splitRootIdsRef.current.delete(rootId);
+    targetEl.remove();
+    resetEditorPanelState();
     setSelectedId(null);
-    setEditValue("");
-    onStatus?.("ok");
-  }, [assignIds, getDoc, getWin, onStatus]);
+    commitDocumentMutation(doc);
+  }, [commitDocumentMutation, getDoc, pushHistorySnapshot, resetEditorPanelState]);
+
+  const splitSelectedRoot = useCallback((blockId: string) => {
+    const rootId = getBlockRootId(blockId) || blockId;
+    splitRootIdsRef.current.add(rootId);
+    setSplitVersion((value) => value + 1);
+    resetEditorPanelState();
+    setSelectedId(null);
+    window.setTimeout(() => {
+      try { window.dispatchEvent(new CustomEvent("blockoverlay:rescan", { detail: { force: true } })); } catch {}
+    }, 10);
+  }, [resetEditorPanelState]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const onMoveRoot = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {};
+      const rootId = String(detail.rootId || "");
+      const delta = Number(detail.delta || 0);
+      if (!rootId || !Number.isFinite(delta) || !delta) return;
+      moveTopLevelRoot(rootId, delta);
+    };
+
+    const onInsertComponent = (event: Event) => {
+      const detail = (event as CustomEvent).detail || {};
+      const html = String(detail.html || "").trim();
+      if (!html) return;
+      const doc = getDoc();
+      if (!doc) return;
+      const tempDiv = doc.createElement("div");
+      tempDiv.innerHTML = html;
+      const node = tempDiv.firstElementChild as HTMLElement | null;
+      if (!node) return;
+
+      const targetRootId = String(detail.targetRootId || "");
+      const targetEntry = targetRootId
+        ? blocksRef.current.find((entry) => entry.id === targetRootId)
+        : null;
+      const targetEl = targetEntry ? (doc.querySelector(targetEntry.selector) as HTMLElement | null) : null;
+
+      pushHistorySnapshot(doc);
+      if (targetEl?.parentElement) {
+        targetEl.parentElement.insertBefore(node, targetEl.nextSibling);
+      } else {
+        if (!doc.body) return;
+        doc.body.appendChild(node);
+      }
+
+      commitDocumentMutation(doc);
+    };
+
+    window.addEventListener("bo:move-root", onMoveRoot as EventListener);
+    window.addEventListener("bo:insert-component", onInsertComponent as EventListener);
+    return () => {
+      window.removeEventListener("bo:move-root", onMoveRoot as EventListener);
+      window.removeEventListener("bo:insert-component", onInsertComponent as EventListener);
+    };
+  }, [commitDocumentMutation, enabled, getDoc, moveTopLevelRoot, pushHistorySnapshot]);
 
     
   // --- Drag & Drop: smart insert at cursor position ---
@@ -1552,6 +2209,7 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
     };
 
     const node = makeNode();
+    pushHistorySnapshot(doc);
 
     // Decide insertion point (before/after) based on midpoint
     if (hitBlock && hitBlock.parentElement) {
@@ -1568,13 +2226,12 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
       }
     } else {
       // No block hit -> append to body
+      if (!doc.body) return;
       doc.body.appendChild(node);
     }
 
-    // Persist + re-scan blocks
-    try { onHtmlChange?.(serializeIframeHtml(doc)); } catch {}
-    try { scanFreePrecise(); } catch {}
-  }, [getDoc, getWin, onHtmlChange, scanFreePrecise]);
+    commitDocumentMutation(doc);
+  }, [commitDocumentMutation, getDoc, getWin, pushHistorySnapshot]);
 
   useEffect(() => {
     const doc = getDoc();
@@ -1704,10 +2361,9 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
           return wrap.firstElementChild as HTMLElement | null;
         };
 
-        const finishLocalAction = () => {
-          try { onHtmlChange?.(serializeIframeHtml(doc)); } catch {}
+        const finishLocalAction = (preserveSelectionId?: string | null) => {
+          commitDocumentMutation(doc, { preserveSelectionId: preserveSelectionId ?? null });
           setTimeout(() => {
-            try { window.dispatchEvent(new CustomEvent("blockoverlay:rescan", { detail: { mode: "page" } })); } catch {}
             try { window.dispatchEvent(new CustomEvent("bo:left-ai-done")); } catch {}
           }, 120);
         };
@@ -1951,11 +2607,7 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
             existingCol.style.textAlign = targetStyle.textAlign;
           }
 
-          try { onHtmlChange?.(serializeIframeHtml(doc)); } catch {}
-          setTimeout(() => {
-            try { window.dispatchEvent(new CustomEvent("blockoverlay:rescan", { detail: { mode: "page" } })); } catch {}
-            try { window.dispatchEvent(new CustomEvent("bo:left-ai-done")); } catch {}
-          }, 120);
+          finishLocalAction();
           return;
         }
 
@@ -2016,11 +2668,7 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
             target.parentElement.insertBefore(newNode, target.nextSibling);
           }
 
-          try { onHtmlChange?.(serializeIframeHtml(doc)); } catch {}
-          setTimeout(() => {
-            try { window.dispatchEvent(new CustomEvent("blockoverlay:rescan", { detail: { mode: "page" } })); } catch {}
-            try { window.dispatchEvent(new CustomEvent("bo:left-ai-done")); } catch {}
-          }, 120);
+          finishLocalAction();
           return;
         }
 
@@ -2068,7 +2716,7 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
 
 
         // Streaming fetch
-        const streamResp = await fetch("/api/ai/rewrite-block-stream", {
+        const streamResp = await fetch(ENDPOINTS.rewriteStream, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -2088,12 +2736,13 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
           }
           if (!data?.ok || !data?.html) { toast.error(t("AI Error: ") + (data?.error || "kein HTML")); return }
           if (targetEl && targetEl.parentElement) {
+            pushHistorySnapshot(doc)
             const wrap = doc.createElement("div")
             wrap.innerHTML = data.html
             const newNode = wrap.firstElementChild as HTMLElement | null
             if (newNode) { targetEl.parentElement.insertBefore(newNode, targetEl); targetEl.remove() }
+            commitDocumentMutation(doc)
           } else { try { onHtmlChange?.(data.html) } catch {} }
-          try { onHtmlChange?.(serializeIframeHtml(doc)) } catch {}
           return
         }
 
@@ -2123,13 +2772,13 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
                 window.dispatchEvent(new CustomEvent("bo:diff-ready", { detail: { oldHtml: htmlToSend, newHtml: streamedHtml, blockId: targetEl?.getAttribute("data-block-id") } }))
                 liveEl?.remove()
                 if (targetEl && targetEl.parentElement) {
+                  pushHistorySnapshot(doc)
                   const wrap = doc.createElement("div")
                   wrap.innerHTML = streamedHtml
                   const newNode = wrap.firstElementChild as HTMLElement | null
                   if (newNode) { targetEl.parentElement.insertBefore(newNode, targetEl); targetEl.remove() }
+                  commitDocumentMutation(doc)
                 } else { try { onHtmlChange?.(streamedHtml) } catch {} }
-                try { onHtmlChange?.(serializeIframeHtml(doc)) } catch {}
-                setTimeout(() => { try { window.dispatchEvent(new CustomEvent("blockoverlay:rescan", { detail: { mode: "page" } })) } catch {} }, 250)
               }
             } catch {}
           }
@@ -2140,262 +2789,48 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
       } finally {
         try { window.dispatchEvent(new CustomEvent("bo:left-ai-done")); } catch {}
       }
-    }, [getDoc, onHtmlChange]);
+    }, [commitDocumentMutation, getDoc, onHtmlChange]);
     
 const aiRescan = useCallback(async (mode: "block" | "page") => {
-      // Warte kurz falls iframe gerade neu lädt
       let doc = getDoc();
-      let win = getWin();
-      if (!doc || !win || !doc.body) {
-        await new Promise(r => setTimeout(r, 800));
+      if (!doc || !doc.body) {
+        await new Promise((resolve) => setTimeout(resolve, 200));
         doc = getDoc();
-        win = getWin();
       }
-      if (!doc || !win || !doc.body) {
-        console.warn("AI Rescan: doc not ready");
+      if (!doc || !doc.body) {
+        console.warn("Local rescan: doc not ready");
         return;
       }
       if (mode === "block" && !selectedIdRef.current) {
-        toast.error("Bitte zuerst einen Block anklicken, dann AI Block-Scan starten.");
+        toast.error("Bitte zuerst einen Block anklicken, dann den Struktur-Scan starten.");
         return;
       }
+
       setAiLoading(true);
       onStatus?.("blocked");
       try {
-        const sid = selectedIdRef.current;
-        let rootEl: HTMLElement | null = null;
-        if (mode === "block" && sid) rootEl = doc.querySelector(`[data-block-id="${sid}"]`) as HTMLElement | null;
-        const htmlToSend = rootEl ? rootEl.outerHTML : doc.body.innerHTML;
-
-        const resp = await fetch("/api/ai/analyze-and-rebuild?ai=1", {
-          method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ html: htmlToSend }),
-        });
-        const data = await resp.json();
-        console.log("AI response:", data);
-
-        if (data?.needsApproval) {
-        onStatus?.("ok");
-
-          const approvalId = `approve_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-          const approved = await new Promise<boolean>((resolve) => {
-            const handler = (ev: any) => {
-              if (String(ev?.detail?.id || "") !== approvalId) return
-              window.removeEventListener("bo:ai-approval-response", handler as any)
-              resolve(!!ev?.detail?.approved)
-            }
-            window.addEventListener("bo:ai-approval-response", handler as any)
-            window.dispatchEvent(new CustomEvent("bo:ai-approval-request", {
-              detail: {
-                id: approvalId,
-                model: String(data.model || "claude-sonnet-4-6"),
-                scope: mode === "block" ? "block-refine" : "page-refine",
-                estInputTokens: Number(data.estInputTokens || 0),
-                estOutputTokens: Number(data.estOutputTokens || 0),
-                prompt: "Refine Block / Analyze and rebuild"
-              }
-            }))
-          })
-
-          if (!approved) {
-            onStatus?.("ok");
-            return;
-      onStatus?.("ok");
-
-          }
-
-          const rerunResp = await fetch(`/api/ai/analyze-and-rebuild?ai=1&approved=1`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ html: htmlToSend, approved: 1 }),
-          });
-          const rerunData = await rerunResp.json();
-      setAiLoading(false);
-      onStatus?.("ok");
-
-          console.log("AI response (approved rerun):", rerunData);
-
-          if (rerunData.usage || rerunData.cost_eur != null) window.dispatchEvent(new CustomEvent("bo:ai-usage", { detail: { usage: rerunData.usage || null, cost_eur: Number(rerunData.cost_eur || 0), model: String(rerunData.model || "claude-sonnet-4-6") } }));
-          if (rerunData.ok && rerunData.blocks?.length) {
-            const scope = rootEl || doc.body;
-
-            const matched: Array<{el: HTMLElement, label: string, type: string}> = [];
-            for (const b of rerunData.blocks) {
-              let el: HTMLElement | null = null;
-              if (b.selector) {
-                try { el = scope.querySelector(b.selector) as HTMLElement | null; } catch {}
-                if (!el) { try { el = doc.querySelector(b.selector) as HTMLElement | null; } catch {} }
-              }
-              if (!el) continue;
-              const r = el.getBoundingClientRect();
-              if (r.width < 20 || r.height < 10) continue;
-              matched.push({ el, label: b.label || pickLabel(el), type: b.type || "" });
-            }
-
-            if (matched.length > 0) {
-              scope.querySelectorAll("[data-block-id]").forEach(el => el.removeAttribute("data-block-id"));
-              if (rootEl) rootEl.removeAttribute("data-block-id");
-
-              matched.sort((a, b) => a.el.getBoundingClientRect().top - b.el.getBoundingClientRect().top);
-
-              const newBlocks: BlockEntry[] = matched.map(({ el, label }, i) => {
-                const id = `block-${i + 1}`;
-                el.setAttribute("data-block-id", id);
-                const r = el.getBoundingClientRect();
-                return {
-                  id, label,
-                  selector: `[data-block-id="${id}"]`,
-                  isButton: isButtonElement(el),
-                  docTop: r.top + win.scrollY,
-                };
-              });
-
-              if (mode === "block" && sid) {
-                const prevBlocks = blocksRef.current;
-
-                const othersEl: Array<{ el: HTMLElement; label: string }> = [];
-                for (const pb of prevBlocks) {
-                  const pel = doc.querySelector(pb.selector) as HTMLElement | null;
-                  if (!pel) continue;
-                  if (rootEl && (pel === rootEl || rootEl.contains(pel))) continue;
-                  othersEl.push({ el: pel, label: pb.label });
-                }
-
-                const combinedEl: Array<{ el: HTMLElement; label: string }> = [
-                  ...othersEl,
-                  ...matched.map(m => ({ el: m.el, label: m.label })),
-                ];
-
-                combinedEl.sort((a, b) => a.el.getBoundingClientRect().top - b.el.getBoundingClientRect().top);
-
-                const renumbered: BlockEntry[] = combinedEl.map((x, i) => {
-                  const newId = `block-${i + 1}`;
-                  x.el.setAttribute("data-block-id", newId);
-                  const r = x.el.getBoundingClientRect();
-                  return {
-                    id: newId,
-                    label: x.label || pickLabel(x.el),
-                    selector: `[data-block-id="${newId}"]`,
-                    isButton: isButtonElement(x.el),
-                    docTop: r.top + win.scrollY,
-                  };
-                });
-
-                setBlocks(renumbered);
-              } else {
-                setBlocks(newBlocks);
-              }
-
-              setSelectedId(null);
-              setEditValue("");
-              console.log(`AI scan: ${newBlocks.length} new blocks, mode: ${mode}`);
-            } else {
-              console.warn("AI scan: no blocks matched DOM, falling back");
-              scanFreePrecise();
-            }
-          } else {
-            scanFreePrecise();
-          }
-
-          onStatus?.("ok");
-          return;
-        }
-
-        if (data.usage || data.cost_eur != null) window.dispatchEvent(new CustomEvent("bo:ai-usage", { detail: { usage: data.usage || null, cost_eur: Number(data.cost_eur || 0), model: String(data.model || "unknown") } }));
-        if (data.ok && data.blocks?.length) {
-          const scope = rootEl || doc.body;
-
-          const matched: Array<{el: HTMLElement, label: string, type: string}> = [];
-          for (const b of data.blocks) {
-            let el: HTMLElement | null = null;
-            if (b.selector) {
-              try { el = scope.querySelector(b.selector) as HTMLElement | null; } catch {}
-              if (!el) { try { el = doc.querySelector(b.selector) as HTMLElement | null; } catch {} }
-            }
-            if (!el) continue;
-            const r = el.getBoundingClientRect();
-            if (r.width < 20 || r.height < 10) continue;
-            matched.push({ el, label: b.label || pickLabel(el), type: b.type || "" });
-          }
-
-          if (matched.length > 0) {
-            scope.querySelectorAll("[data-block-id]").forEach(el => el.removeAttribute("data-block-id"));
-            if (rootEl) rootEl.removeAttribute("data-block-id");
-
-            matched.sort((a, b) => a.el.getBoundingClientRect().top - b.el.getBoundingClientRect().top);
-
-            const newBlocks: BlockEntry[] = matched.map(({ el, label }, i) => {
-              const id = `block-${i + 1}`;
-              el.setAttribute("data-block-id", id);
-              const r = el.getBoundingClientRect();
-              return {
-                id, label,
-                selector: `[data-block-id="${id}"]`,
-                isButton: isButtonElement(el),
-                docTop: r.top + win.scrollY,
-              };
-            });
-
-            if (mode === "block" && sid) {
-              const prevBlocks = blocksRef.current;
-
-              const othersEl: Array<{ el: HTMLElement; label: string }> = [];
-              for (const pb of prevBlocks) {
-                const pel = doc.querySelector(pb.selector) as HTMLElement | null;
-                if (!pel) continue;
-                if (rootEl && (pel === rootEl || rootEl.contains(pel))) continue;
-                othersEl.push({ el: pel, label: pb.label });
-              }
-
-              const combinedEl: Array<{ el: HTMLElement; label: string }> = [
-                ...othersEl,
-                ...matched.map(m => ({ el: m.el, label: m.label })),
-              ];
-
-              combinedEl.sort((a, b) => a.el.getBoundingClientRect().top - b.el.getBoundingClientRect().top);
-
-              const renumbered: BlockEntry[] = combinedEl.map((x, i) => {
-                const newId = `block-${i + 1}`;
-                x.el.setAttribute("data-block-id", newId);
-                const r = x.el.getBoundingClientRect();
-                return {
-                  id: newId,
-                  label: x.label || pickLabel(x.el),
-                  selector: `[data-block-id="${newId}"]`,
-                  isButton: isButtonElement(x.el),
-                  docTop: r.top + win.scrollY,
-                };
-              });
-
-              setBlocks(renumbered);
-            } else {
-              setBlocks(newBlocks);
-            }
-
-            setSelectedId(null);
-            setEditValue("");
-            console.log(`AI scan: ${newBlocks.length} new blocks, mode: ${mode}`);
-          } else {
-            console.warn("AI scan: no blocks matched DOM, falling back");
-            scanFreePrecise();
-          }
+        if (mode === "block" && selectedIdRef.current) {
+          const expanded = expandIntoSubBlocks(selectedIdRef.current);
+          if (!expanded) scanFreePrecise(true);
         } else {
-          scanFreePrecise();
+          scanFreePrecise(true);
         }
       } catch (e) {
-        console.error("AI Rescan failed:", e);
-        scanFreePrecise();
+        console.error("Local rescan failed:", e);
+        scanFreePrecise(true);
       } finally {
+        setAiLoading(false);
         onStatus?.("ok");
       }
-    }, [getDoc, getWin, onHtmlChange, scanFreePrecise, onStatus]);
+    }, [expandIntoSubBlocks, getDoc, scanFreePrecise, onStatus]);
 
   useEffect(() => {
     const handler = (e: Event) => {
       const mode = (e as CustomEvent).detail?.mode as "block" | "page";
-      if (selectedIdRef.current?.includes("-sub-")) return;
+      const force = !!(e as CustomEvent).detail?.force;
+      if (!force && selectedIdRef.current?.includes(SUB_BLOCK_TOKEN)) return;
       if (mode) aiRescan(mode);
-      else scanFreePrecise();
+      else scanFreePrecise(force);
     };
     window.addEventListener("blockoverlay:rescan", handler);
     return () => window.removeEventListener("blockoverlay:rescan", handler);
@@ -2421,7 +2856,7 @@ const aiRescan = useCallback(async (mode: "block" | "page") => {
 
 
   useEffect(() => {
-    if (!enabled) { setBlocks([]); setHoverId(null); setSelectedId(null); setEditValue(""); return; }
+    if (!enabled) { setBlocks([]); setHoverId(null); setSelectedId(null); resetEditorPanelState(); return; }
     const iframe = getIframe();
     if (!iframe) return;
     const win = iframe.contentWindow;
@@ -2429,7 +2864,15 @@ const aiRescan = useCallback(async (mode: "block" | "page") => {
 
     const onScroll = () => {
       const d = getDoc();
-      if (d) renderBoxesInIframe(d, blocksRef.current, hoverIdRef.current, selectedIdRef.current, (id) => onClickLabelRef.current(id));
+      if (d) {
+        renderBoxesInIframe(
+          d,
+          blocksRef.current.filter((entry) => matchesBlockFilter(entry, blockFilter)),
+          hoverIdRef.current,
+          selectedIdRef.current,
+          (id) => onClickLabelRef.current(id)
+        );
+      }
     };
 
     if (doc && doc.readyState === "complete") {
@@ -2454,7 +2897,7 @@ const aiRescan = useCallback(async (mode: "block" | "page") => {
   
 
 return () => { iframe.removeEventListener("load", onLoad); win?.removeEventListener("scroll", onScroll); };
-  }, [enabled, getIframe, iframeRef, scanFreePrecise, getDoc]);
+  }, [enabled, getIframe, iframeRef, scanFreePrecise, getDoc, blockFilter, resetEditorPanelState]);
 
   // Overlay nur noch für Scroll-Weiterleitung – kein Click/Hover mehr nötig
   const onOverlayWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
@@ -2469,21 +2912,9 @@ return () => { iframe.removeEventListener("load", onLoad); win?.removeEventListe
 
   
 
-  const deleteSelectedBlock = ()=>{
-    const iframe = iframeRef.current
-    if(!iframe) return
-
-    const doc = iframe.contentDocument
-    if(!doc) return
-
-    const el = doc.querySelector('[data-block-id="'+selectedId+'"]')
-    if(!el) return
-
-    el.remove()
-
-    try{
-      onHtmlChange?.(doc.documentElement.outerHTML)
-    }catch{}
+  const deleteSelectedBlock = () => {
+    if (!selectedId) return
+    deleteBlockTree(selectedId)
   }
 
 
@@ -2532,12 +2963,18 @@ const applyEdit = useCallback(() => {
         existingItems.slice(bullets.length).forEach(li => li.remove());
       }
     } else if (panelType === "image") {
-      const img = (el.tagName === "IMG" ? el : (el.querySelector("img") as HTMLImageElement | null)) as HTMLImageElement | null;
+      const img = findImageNode(el);
       if (img) {
         const v = (editImgSrc || "").trim();
         if (v) {
           img.src = v;
           img.setAttribute("data-bo-local-src", "1");
+        }
+        const linkedImage = findImageLinkNode(el, img);
+        if (linkedImage) {
+          const nextHref = (editLink || "").trim();
+          if (nextHref) linkedImage.setAttribute("href", nextHref);
+          else linkedImage.removeAttribute("href");
         }
       }
     } else if (panelType === "nav-links") {
@@ -2589,9 +3026,9 @@ const applyEdit = useCallback(() => {
       }
     }
 
-    try { onHtmlChange?.(serializeIframeHtml(doc)); } catch (e) { console.warn("serialize error:", e); }
+    commitDocumentMutation(doc, { preserveSelectionId: selectedId });
   }, [getDoc, selectedId, blocks, editValue, editLink, editBg, editColor, editFontSize,
-      panelType, editHeading, editBullets, editImgSrc, editNavLinks, isButtonSelected, onHtmlChange, pushHistorySnapshot]);
+      panelType, editHeading, editBullets, editImgSrc, editNavLinks, isButtonSelected, commitDocumentMutation, pushHistorySnapshot]);
 
   const aiLayoutAnalyze = async () => {
     const doc = getDoc();
@@ -2606,10 +3043,16 @@ const applyEdit = useCallback(() => {
     const elRect = el.getBoundingClientRect();
     const elTop = elRect.top + win.scrollY;
     const elBottom = elTop + elRect.height;
+    const chosenParent = el.parentElement;
 
     const sameLevel = blocksRef.current.filter(b => {
       const other = doc.querySelector(b.selector) as HTMLElement | null;
       if (!other) return false;
+      if (other === el) return true;
+      if ((b.parentId || null) !== (chosen.parentId || null)) return false;
+      if ((b.depth || 0) !== (chosen.depth || 0)) return false;
+      if (!chosenParent || other.parentElement !== chosenParent) return false;
+      if (other.contains(el) || el.contains(other)) return false;
       const r = other.getBoundingClientRect();
       const rTop = r.top + win.scrollY;
       const rBottom = rTop + r.height;
@@ -2628,7 +3071,7 @@ const applyEdit = useCallback(() => {
 
     try {
       console.log("AI Layout: sending", sameLevel.length, "blocks");
-      const res = await fetch("/api/ai/rewrite-block", {
+      const res = await fetch(ENDPOINTS.rewrite, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2651,18 +3094,14 @@ const applyEdit = useCallback(() => {
       const newNode = wrap.firstElementChild as HTMLElement | null;
       if (!newNode) return;
 
+      pushHistorySnapshot(doc);
       firstEl.parentElement.insertBefore(newNode, firstEl);
       sameLevel.forEach(b => {
         const e = doc.querySelector(b.selector) as HTMLElement | null;
         if (e && e !== newNode) e.remove();
       });
 
-      try { onHtmlChange?.(serializeIframeHtml(doc)); } catch {}
-      setTimeout(() => {
-        try {
-          window.dispatchEvent(new CustomEvent("blockoverlay:rescan", { detail: { mode: "page" } }));
-        } catch {}
-      }, 500);
+      commitDocumentMutation(doc);
     } catch(err) {
       console.error("AI Layout:", err);
       toast.error("AI Layout Fehler: " + err);
@@ -2685,6 +3124,8 @@ const applyEdit = useCallback(() => {
       image: `<figure data-bo-new="1" class="wp-block-image"><img data-bo-placeholder="1" alt="PLACEHOLDER: replace image in WordPress" src="" style="max-width:100%;height:auto;border:1px dashed rgba(148,163,184,0.7);padding:14px;border-radius:12px;" /></figure>`,
       divider: `<hr data-bo-new="1" style="border:none;border-top:1px solid rgba(148,163,184,0.35);margin:18px 0;" />`,
     };
+
+    if (!doc.body) return;
 
     let grid = doc.getElementById("__bo_drag_grid") as HTMLElement | null;
     if (!grid) {
@@ -2794,13 +3235,12 @@ const applyEdit = useCallback(() => {
       if (target) {
         if (dt.before) target.insertAdjacentElement("beforebegin", node);
         else target.insertAdjacentElement("afterend", node);
-      } else {
+      } else if (doc.body) {
         doc.body.appendChild(node);
       }
 
       hide();
-      try { onHtmlChange?.(doc.documentElement.outerHTML); } catch {}
-      try { scanFreePrecise(); } catch {}
+      commitDocumentMutation(doc);
     };
 
     const onWinDragEnd = () => hide();
@@ -2815,11 +3255,16 @@ const applyEdit = useCallback(() => {
       window.removeEventListener("dragend", onWinDragEnd as any);
       try { hide(); } catch {}
     };
-  }, [enabled, iframeRef, onHtmlChange, scanFreePrecise]);
+  }, [commitDocumentMutation, enabled, iframeRef, onHtmlChange, scanFreePrecise]);
   // BO_DRAGGRID_END
 
 
   if (!enabled) return null;
+
+  const selectedEntry = selectedId ? blocks.find((entry) => entry.id === selectedId) || null : null;
+  const selectedDisplayLabel = selectedEntry ? getBlockDisplayLabel(selectedEntry, blocks) : selectedId || "";
+  const selectedRootId = getBlockRootId(selectedId);
+  const selectedRootEntry = selectedRootId ? blocks.find((entry) => entry.id === selectedRootId) || null : null;
 
   
 
@@ -2951,13 +3396,69 @@ return (
         }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
             <div style={{ fontWeight: 900, fontSize: 13 }}>
-              {panelType === "button" ? "◉ Button" : panelType === "heading-list" ? "≡ Heading + Liste" : "✐ Text"} · {selectedId}
+              {panelType === "group"
+                ? "▥ Gruppe"
+                : ""}
+              {panelType === "button"
+                ? "◉ Button"
+                : panelType === "heading-list"
+                  ? "≡ Heading + Liste"
+                  : panelType === "nav-links"
+                    ? "☰ Navigation"
+                    : panelType === "form-fields"
+                      ? "⌘ Formular"
+                      : panelType === "image"
+                        ? "▣ Bild"
+                        : panelType === "group"
+                          ? ""
+                          : "✐ Text"} · {selectedDisplayLabel}
             </div>
-            <button onClick={() => { setSelectedId(null); setEditValue(""); }} style={{
+            <button onClick={() => { setSelectedId(null); resetEditorPanelState(); }} style={{
               height: 28, padding: "0 10px", borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)",
               background: "rgba(0,0,0,0.2)", color: "white", cursor: "pointer", fontWeight: 800,
             }}>✕</button>
           </div>
+
+          {panelType === "group" && selectedRootEntry && (<>
+            <div style={{ fontSize: 11, color: "rgba(148,163,184,0.8)", fontWeight: 700 }}>MOTHERBLOCK PREVIEW</div>
+            <div style={{
+              marginTop: 6,
+              width: "100%",
+              height: 156,
+              borderRadius: 12,
+              border: "1px solid rgba(148,163,184,0.22)",
+              overflow: "hidden",
+              background: "rgba(0,0,0,0.22)",
+            }}>
+              <iframe
+                title={`preview-${selectedRootEntry.id}`}
+                srcDoc={groupPreviewHtml}
+                style={{ width: "100%", height: "100%", border: "none", background: "white" }}
+                sandbox="allow-same-origin"
+              />
+            </div>
+            <div style={{ marginTop: 10, fontSize: 11, color: "rgba(148,163,184,0.78)", lineHeight: 1.4 }}>
+              Expand to edit child blocks, or manage the whole motherblock here.
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 12 }}>
+              <button onClick={() => moveTopLevelRoot(selectedRootEntry.id, -1)} style={{
+                height: 34, borderRadius: 10, border: "1px solid rgba(148,163,184,0.22)",
+                background: "rgba(255,255,255,0.04)", color: "white", cursor: "pointer", fontWeight: 800, fontSize: 12,
+              }}>↑ Move up</button>
+              <button onClick={() => moveTopLevelRoot(selectedRootEntry.id, 1)} style={{
+                height: 34, borderRadius: 10, border: "1px solid rgba(148,163,184,0.22)",
+                background: "rgba(255,255,255,0.04)", color: "white", cursor: "pointer", fontWeight: 800, fontSize: 12,
+              }}>↓ Move down</button>
+              <button onClick={() => splitSelectedRoot(selectedRootEntry.id)} style={{
+                height: 34, borderRadius: 10, border: "1px solid rgba(245,158,11,0.28)",
+                background: "rgba(245,158,11,0.12)", color: "white", cursor: "pointer", fontWeight: 800, fontSize: 12,
+              }}>Split group</button>
+              <button onClick={() => deleteBlockTree(selectedRootEntry.id)} style={{
+                height: 34, borderRadius: 10, border: "1px solid rgba(239,68,68,0.32)",
+                background: "rgba(239,68,68,0.14)", color: "white", cursor: "pointer", fontWeight: 800, fontSize: 12,
+              }}>Delete group</button>
+            </div>
+          </>)}
 
           {/* Heading + List Panel */}
           {panelType === "heading-list" && (<>
@@ -3088,6 +3589,16 @@ return (
                 marginTop: 4, width: "100%", height: 34, borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)",
                 background: "rgba(0,0,0,0.25)", color: "white", padding: "0 10px", outline: "none", fontSize: 13, boxSizing: "border-box",
               }} />
+              <label style={{ fontSize: 11, color: "rgba(148,163,184,0.8)", fontWeight: 700, display: "block", marginTop: 10 }}>LINK URL</label>
+              <input
+                value={editLink}
+                onChange={e => setEditLink(e.target.value)}
+                placeholder="https://... oder /seite"
+                style={{
+                  marginTop: 4, width: "100%", height: 34, borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)",
+                  background: "rgba(0,0,0,0.25)", color: "white", padding: "0 10px", outline: "none", fontSize: 13, boxSizing: "border-box",
+                }}
+              />
               <input type="file" accept="image/*" onChange={e => {
                 const f = e.target.files?.[0];
                 if (!f) return;
@@ -3148,6 +3659,7 @@ return (
             }} />
           </>)}
 
+          {panelType !== "group" && (
           <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
             <button onClick={aiLayoutAnalyze} title="AI analysiert Blocks auf gleicher Ebene und erstellt Columns" style={{
               height: 32, padding: "0 12px", borderRadius: 10, border: "1px solid rgba(168,85,247,0.4)",
@@ -3178,11 +3690,12 @@ Delete
               height: 36, padding: "0 12px", borderRadius: 12, border: "1px solid rgba(168,85,247,0.55)",
               background: "rgba(168,85,247,0.2)", color: "white", cursor: aiLoading ? "wait" : "pointer", fontWeight: 900, fontSize: 12,
             }}>⬡ Block</button>
-            <button onClick={scanFreePrecise} style={{
+	            <button onClick={() => scanFreePrecise(true)} style={{
               height: 36, padding: "0 12px", borderRadius: 12, border: "1px solid rgba(245,158,11,0.45)",
               background: "rgba(245,158,11,0.15)", color: "white", cursor: "pointer", fontWeight: 900, fontSize: 13,
             }}>↺</button>
           </div>
+          )}
         </div>
       )}
     </>

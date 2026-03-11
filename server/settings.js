@@ -1,5 +1,6 @@
 import db from "./db.js"
 import { authMiddleware } from "./auth.js"
+import { canInviteWithRole, normalizeAgencyRole } from "./accessControl.js"
 
 export function registerSettingsRoutes(app) {
 
@@ -76,9 +77,10 @@ export function registerSettingsRoutes(app) {
   app.post("/api/team/invite", authMiddleware, (req, res) => {
     const { email, role } = req.body
     if (!email) return res.status(400).json({ ok: false, error: "Email erforderlich" })
+    if (!canInviteWithRole(role || "editor")) return res.status(400).json({ ok: false, error: "Rolle ungültig" })
     const existing = db.prepare("SELECT id FROM team_members WHERE owner_id = ? AND member_email = ?").get(req.user.id, email)
     if (existing) return res.status(400).json({ ok: false, error: "Bereits eingeladen" })
-    db.prepare("INSERT INTO team_members (owner_id, member_email, role) VALUES (?, ?, ?)").run(req.user.id, email, role || "editor")
+    db.prepare("INSERT INTO team_members (owner_id, member_email, role) VALUES (?, ?, ?)").run(req.user.id, email, normalizeAgencyRole(role, "editor"))
     res.json({ ok: true })
   })
 

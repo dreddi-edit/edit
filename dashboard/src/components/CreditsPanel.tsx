@@ -1,16 +1,25 @@
 import { useEffect, useState } from "react"
 import { toast } from "./Toast"
-
-const BASE = ""
-
-type Package = { id: string; label: string; amount_eur: number; credits_eur: number; description: string }
-type Transaction = { id: number; amount_eur: number; type: string; description: string; created_at: string }
+import { errMsg } from "../utils/errMsg"
+import {
+  apiGetBalance,
+  apiGetCreditsTransactions,
+  apiGetStripePackages,
+  apiStripeCheckout,
+} from "../api/credits"
+import type { StripePackage, CreditTransaction } from "../api/types"
 
 export default function CreditsPanel({ onClose }: { onClose: () => void }) {
   const [balance, setBalance] = useState<number | null>(null)
-  const [packages, setPackages] = useState<Package[]>([])
-  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [packages, setPackages] = useState<StripePackage[]>([])
+  const [transactions, setTransactions] = useState<CreditTransaction[]>([])
   const [loading, setLoading] = useState<string | null>(null)
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => e.key === "Escape" && onClose()
+    window.addEventListener("keydown", handler)
+    return () => window.removeEventListener("keydown", handler)
+  }, [onClose])
 
   useEffect(() => {
     load()
@@ -26,29 +35,23 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
   const load = async () => {
     try {
       const [b, p, t] = await Promise.all([
-        fetch(`${BASE}/api/credits/balance`, { credentials: "include" }).then(r => r.json()),
-        fetch(`${BASE}/api/stripe/packages`).then(r => r.json()),
-        fetch(`${BASE}/api/credits/transactions`, { credentials: "include" }).then(r => r.json()),
+        apiGetBalance(),
+        apiGetStripePackages(),
+        apiGetCreditsTransactions(),
       ])
-      if (b.ok) setBalance(b.balance_eur)
+      if (b != null) setBalance(b)
       if (p.ok) setPackages(p.packages)
       if (t.ok) setTransactions(t.transactions)
-    } catch (e: any) { toast.error(e.message) }
+    } catch (e) { toast.error(errMsg(e)) }
   }
 
-  const checkout = async (pkg: Package) => {
+  const checkout = async (pkg: StripePackage) => {
     setLoading(pkg.id)
     try {
-      const r = await fetch(`${BASE}/api/stripe/checkout`, {
-        method: "POST", credentials: "include",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ package_id: pkg.id })
-      })
-      const d = await r.json()
-      if (!d.ok) throw new Error(d.error)
-      window.location.href = d.url // Stripe Checkout öffnen
-    } catch (e: any) {
-      toast.error(e.message)
+      const url = await apiStripeCheckout(pkg.id)
+      window.location.href = url
+    } catch (e: unknown) {
+      toast.error(errMsg(e))
       setLoading(null)
     }
   }
@@ -60,63 +63,89 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
     business: "+20% Bonus",
   }
 
+  const PLAN_STYLE: Record<string, React.CSSProperties> = {
+    basis: {
+      padding: "16px",
+      borderRadius: 16,
+      border: "1px solid rgba(138,164,255,0.24)",
+      background: "rgba(138,164,255,0.08)",
+    },
+    starter: {
+      padding: "16px",
+      borderRadius: 16,
+      border: "1px solid rgba(127,209,167,0.24)",
+      background: "rgba(127,209,167,0.08)",
+    },
+    pro: {
+      padding: "16px",
+      borderRadius: 16,
+      border: "1px solid rgba(255,255,255,0.1)",
+      background: "rgba(255,255,255,0.04)",
+      position: "relative",
+    },
+    scale: {
+      padding: "16px",
+      borderRadius: 16,
+      border: "1px solid rgba(214,179,122,0.24)",
+      background: "rgba(214,179,122,0.08)",
+    },
+  }
+
   return (
-    <div style={{
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="credits-title"
+      style={{
       position: "fixed", inset: 0, zIndex: 9999,
-      background: "rgba(0,0,0,0.75)", backdropFilter: "blur(6px)",
+      background: "rgba(5,8,12,0.78)", backdropFilter: "blur(6px)",
       display: "flex", alignItems: "center", justifyContent: "center",
     }} onClick={onClose}>
       <div onClick={e => e.stopPropagation()} style={{
-        width: 540, maxHeight: "85vh", display: "flex", flexDirection: "column",
-        background: "var(--bg-panel, rgba(8,12,24,0.99))",
-        border: "1px solid rgba(255,255,255,0.08)",
-        borderRadius: 20, overflow: "hidden",
-        boxShadow: "0 32px 80px rgba(0,0,0,0.7)",
-        color: "var(--text-primary, white)", fontFamily: "system-ui, sans-serif",
+        width: 560, maxHeight: "85vh", display: "flex", flexDirection: "column",
+        background: "var(--bg-panel)",
+        border: "1px solid var(--border)",
+        borderRadius: 24, overflow: "hidden",
+        boxShadow: "var(--shadow-xl)",
+        color: "var(--text-primary)", fontFamily: "var(--font-sans)",
       }}>
-        {/* Header */}
         <div style={{
-          padding: "20px 28px", borderBottom: "1px solid rgba(255,255,255,0.06)",
+          padding: "22px 28px", borderBottom: "1px solid var(--divider)",
           display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0,
         }}>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 800 }}>Guthaben</div>
-            <div style={{ fontSize: 24, fontWeight: 900, marginTop: 4,
-              color: balance !== null && balance <= 0.01 ? "rgba(239,68,68,0.9)" : "rgba(34,197,94,0.9)"
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 1.3, textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 8 }}>
+              Credits
+            </div>
+            <div id="credits-title" style={{ fontSize: 18, fontWeight: 750, letterSpacing: -0.3 }}>Workspace balance</div>
+            <div style={{ fontSize: 28, fontWeight: 800, marginTop: 6, letterSpacing: -0.8,
+              color: balance !== null && balance <= 0.01 ? "#e08686" : "var(--text-primary)"
             }}>
               € {balance === null ? "..." : balance.toFixed(2)}
             </div>
           </div>
           <button onClick={onClose} style={{
-            width: 30, height: 30, borderRadius: 8,
-            border: "1px solid rgba(255,255,255,0.1)",
-            background: "transparent", color: "rgba(148,163,184,0.7)", cursor: "pointer",
+            width: 34, height: 34, borderRadius: 10,
+            border: "1px solid var(--border)",
+            background: "rgba(255,255,255,0.03)", color: "var(--text-muted)", cursor: "pointer",
           }}>✕</button>
         </div>
 
         <div style={{ padding: "24px 28px", overflowY: "auto", flex: 1 }}>
-
-          
-          {/* PLAN SELECTOR */}
           <div style={{ marginBottom: 28 }}>
-            <div style={sectionTitle}>PLANS</div>
+            <div style={sectionTitle}>Plans</div>
 
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
 
-              <div style={{
-                padding:"16px",
-                borderRadius:12,
-                border:"1px solid rgba(99,102,241,0.5)",
-                background:"rgba(99,102,241,0.1)",
-              }}>
+              <div style={PLAN_STYLE.basis}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
                   <div style={{ fontWeight:800, fontSize:16 }}>Basis</div>
-                  <div style={{ fontSize:12, fontWeight:800, color:"rgba(255,255,255,0.9)" }}>€9/mo</div>
+                  <div style={{ fontSize:12, fontWeight:800, color:"var(--text-secondary)" }}>€9/mo</div>
                 </div>
-                <div style={{ fontSize:12, opacity:0.78, lineHeight:1.45 }}>
+                <div style={{ fontSize:12, color:"var(--text-secondary)", lineHeight:1.45 }}>
                   Platform access with manual credit loading.
                 </div>
-                <div style={{ marginTop:10, fontSize:11, opacity:0.82, lineHeight:1.5 }}>
+                <div style={{ marginTop:10, fontSize:11, color:"var(--text-muted)", lineHeight:1.5 }}>
                   • 1 user<br/>
                   • 3 active projects<br/>
                   • Team not included<br/>
@@ -125,20 +154,15 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
                 </div>
               </div>
 
-              <div style={{
-                padding:"16px",
-                borderRadius:12,
-                border:"1px solid rgba(34,197,94,0.45)",
-                background:"rgba(34,197,94,0.08)",
-              }}>
+              <div style={PLAN_STYLE.starter}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
                   <div style={{ fontWeight:800, fontSize:16 }}>Starter</div>
-                  <div style={{ fontSize:12, fontWeight:800, color:"rgba(255,255,255,0.9)" }}>€29/mo</div>
+                  <div style={{ fontSize:12, fontWeight:800, color:"var(--text-secondary)" }}>€29/mo</div>
                 </div>
-                <div style={{ fontSize:12, opacity:0.78, lineHeight:1.45 }}>
+                <div style={{ fontSize:12, color:"var(--text-secondary)", lineHeight:1.45 }}>
                   Subscription with AI included for regular use.
                 </div>
-                <div style={{ marginTop:10, fontSize:11, opacity:0.82, lineHeight:1.5 }}>
+                <div style={{ marginTop:10, fontSize:11, color:"var(--text-muted)", lineHeight:1.5 }}>
                   • 1 user<br/>
                   • 10 active projects<br/>
                   • Up to 2 team members<br/>
@@ -147,26 +171,21 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
                 </div>
               </div>
 
-              <div style={{
-                padding:"16px",
-                borderRadius:12,
-                border:"1px solid rgba(168,85,247,0.5)",
-                background:"rgba(168,85,247,0.1)",
-                position:"relative",
-              }}>
+              <div style={PLAN_STYLE.pro}>
                 <div style={{
                   position:"absolute", top:-10, right:12,
-                  fontSize:10, fontWeight:800, padding:"2px 8px", borderRadius:6,
-                  background:"linear-gradient(135deg, #6366f1, #8b5cf6)", color:"white", letterSpacing:0.5,
-                }}>POPULAR</div>
+                  fontSize:10, fontWeight:800, padding:"3px 8px", borderRadius:999,
+                  border: "1px solid rgba(138,164,255,0.24)",
+                  background:"rgba(138,164,255,0.12)", color:"#a7baff", letterSpacing:0.7,
+                }}>Recommended</div>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
                   <div style={{ fontWeight:800, fontSize:16 }}>Pro</div>
-                  <div style={{ fontSize:12, fontWeight:800, color:"rgba(255,255,255,0.9)" }}>€79/mo</div>
+                  <div style={{ fontSize:12, fontWeight:800, color:"var(--text-secondary)" }}>€79/mo</div>
                 </div>
-                <div style={{ fontSize:12, opacity:0.78, lineHeight:1.45 }}>
+                <div style={{ fontSize:12, color:"var(--text-secondary)", lineHeight:1.45 }}>
                   Best for freelancers and small agencies.
                 </div>
-                <div style={{ marginTop:10, fontSize:11, opacity:0.82, lineHeight:1.5 }}>
+                <div style={{ marginTop:10, fontSize:11, color:"var(--text-muted)", lineHeight:1.5 }}>
                   • 3 users<br/>
                   • 30 active projects<br/>
                   • Up to 10 team members<br/>
@@ -175,20 +194,15 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
                 </div>
               </div>
 
-              <div style={{
-                padding:"16px",
-                borderRadius:12,
-                border:"1px solid rgba(245,158,11,0.5)",
-                background:"rgba(245,158,11,0.08)",
-              }}>
+              <div style={PLAN_STYLE.scale}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
                   <div style={{ fontWeight:800, fontSize:16 }}>Scale</div>
-                  <div style={{ fontSize:12, fontWeight:800, color:"rgba(255,255,255,0.9)" }}>€149/mo</div>
+                  <div style={{ fontSize:12, fontWeight:800, color:"var(--text-secondary)" }}>€149/mo</div>
                 </div>
-                <div style={{ fontSize:12, opacity:0.78, lineHeight:1.45 }}>
+                <div style={{ fontSize:12, color:"var(--text-secondary)", lineHeight:1.45 }}>
                   For teams handling many websites in parallel.
                 </div>
-                <div style={{ marginTop:10, fontSize:11, opacity:0.82, lineHeight:1.5 }}>
+                <div style={{ marginTop:10, fontSize:11, color:"var(--text-muted)", lineHeight:1.5 }}>
                   • 10 users<br/>
                   • 100 active projects<br/>
                   • Up to 50 team members<br/>
@@ -199,64 +213,63 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
 
             </div>
           </div>
-{/* Pakete */}
           <div style={{ marginBottom: 28 }}>
-            <div style={sectionTitle}>GUTHABEN AUFLADEN</div>
+            <div style={sectionTitle}>Top up credits</div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               {packages.map(pkg => (
                 <div key={pkg.id} onClick={() => checkout(pkg)} style={{
-                  padding: "16px", borderRadius: 12, cursor: "pointer",
-                  border: pkg.id === "pro" ? "1px solid rgba(99,102,241,0.5)" : "1px solid rgba(255,255,255,0.08)",
-                  background: pkg.id === "pro" ? "rgba(99,102,241,0.1)" : "rgba(255,255,255,0.02)",
+                  padding: "18px", borderRadius: 16, cursor: "pointer",
+                  border: pkg.id === "pro" ? "1px solid rgba(138,164,255,0.26)" : "1px solid var(--border)",
+                  background: pkg.id === "pro" ? "rgba(138,164,255,0.08)" : "rgba(255,255,255,0.03)",
                   position: "relative", transition: "transform 0.15s",
                   opacity: loading === pkg.id ? 0.6 : 1,
                 }}>
                   {pkg.id === "pro" && (
                     <div style={{
                       position: "absolute", top: -10, right: 12,
-                      fontSize: 10, fontWeight: 800, padding: "2px 8px", borderRadius: 6,
-                      background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-                      color: "white", letterSpacing: 0.5,
-                    }}>BELIEBT</div>
+                      fontSize: 10, fontWeight: 800, padding: "3px 8px", borderRadius: 999,
+                      border: "1px solid rgba(138,164,255,0.24)",
+                      background: "rgba(138,164,255,0.12)",
+                      color: "#a7baff", letterSpacing: 0.7,
+                    }}>Recommended</div>
                   )}
                   <div style={{ fontWeight: 800, fontSize: 20, marginBottom: 2 }}>
                     € {pkg.amount_eur}
                   </div>
-                  <div style={{ fontSize: 12, color: "rgba(148,163,184,0.6)", marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
                     {pkg.label}
                   </div>
                   {BONUS[pkg.id] && (
                     <div style={{
-                      fontSize: 11, fontWeight: 700, color: "rgba(34,197,94,0.8)",
-                      background: "rgba(34,197,94,0.1)", borderRadius: 6,
+                      fontSize: 11, fontWeight: 700, color: "#7fd1a7",
+                      background: "rgba(127,209,167,0.1)", borderRadius: 999,
                       padding: "2px 8px", display: "inline-block",
                     }}>{BONUS[pkg.id]} · € {pkg.credits_eur} Guthaben</div>
                   )}
                   <div style={{
-                    marginTop: 12, width: "100%", height: 34, borderRadius: 8, border: "none",
-                    background: loading === pkg.id ? "rgba(99,102,241,0.3)" : "linear-gradient(135deg, #6366f1, #8b5cf6)",
-                    color: "white", fontWeight: 700, fontSize: 13,
+                    marginTop: 14, width: "100%", height: 38, borderRadius: 12, border: "1px solid rgba(138,164,255,0.26)",
+                    background: loading === pkg.id ? "rgba(138,164,255,0.16)" : "linear-gradient(180deg, #9bb1ff 0%, #7f99f6 100%)",
+                    color: loading === pkg.id ? "var(--text-primary)" : "#0d1320", fontWeight: 700, fontSize: 13,
                     display: "flex", alignItems: "center", justifyContent: "center",
                     cursor: "pointer",
                   }}>
-                    {loading === pkg.id ? "Wird geladen..." : "Jetzt kaufen"}
+                    {loading === pkg.id ? "Loading..." : "Buy now"}
                   </div>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Transaktionen */}
           {transactions.length > 0 && (
             <div>
-              <div style={sectionTitle}>TRANSAKTIONEN</div>
+              <div style={sectionTitle}>Transactions</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {transactions.slice(0, 10).map(tx => (
                   <div key={tx.id} style={{
                     display: "flex", justifyContent: "space-between", alignItems: "center",
-                    padding: "10px 14px", borderRadius: 10,
-                    border: "1px solid rgba(255,255,255,0.06)",
-                    background: "rgba(255,255,255,0.02)",
+                    padding: "12px 14px", borderRadius: 12,
+                    border: "1px solid var(--border)",
+                    background: "rgba(255,255,255,0.03)",
                     fontSize: 12,
                   }}>
                     <div>
@@ -265,13 +278,13 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
                         tx.type === "stripe" ? "Stripe-Zahlung" :
                         tx.type === "deduct" ? "KI-Nutzung" : tx.type
                       }</div>
-                      <div style={{ color: "rgba(148,163,184,0.5)", marginTop: 2, fontSize: 11 }}>
+                      <div style={{ color: "var(--text-muted)", marginTop: 2, fontSize: 11 }}>
                         {new Date(tx.created_at).toLocaleString("de-DE")}
                       </div>
                     </div>
                     <div style={{
                       fontWeight: 800,
-                      color: tx.amount_eur >= 0 ? "rgba(34,197,94,0.9)" : "rgba(239,68,68,0.8)",
+                      color: tx.amount_eur >= 0 ? "#7fd1a7" : "#e08686",
                     }}>
                       {tx.amount_eur >= 0 ? "+" : ""}€ {Math.abs(tx.amount_eur).toFixed(4)}
                     </div>
@@ -287,7 +300,7 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
 }
 
 const sectionTitle: React.CSSProperties = {
-  fontSize: 10, fontWeight: 800, letterSpacing: 1,
-  color: "rgba(148,163,184,0.4)", marginBottom: 12,
+  fontSize: 11, fontWeight: 800, letterSpacing: 1.2,
+  color: "var(--text-muted)", marginBottom: 12,
   textTransform: "uppercase",
 }

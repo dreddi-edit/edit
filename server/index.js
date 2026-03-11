@@ -1,107 +1,6 @@
 
-
 import bcrypt from "bcryptjs"
 import crypto from "crypto"
-
-// --- Safe Mode Proxy - Strips broken JS and CSS ---
-function sanitizeHtmlForEditor(html, baseUrl) {
-  // Parse base URL for rewriting relative URLs
-  let origin = "";
-  let basePath = "";
-  try {
-    const u = new URL(baseUrl || "");
-    origin = u.origin; // e.g. https://example.com
-    basePath = u.origin + u.pathname.replace(/\/[^\/]*$/, "/"); // e.g. https://example.com/path/
-  } catch {}
-
-  // Rewrite relative URLs to absolute for CSS, images, fonts
-  if (origin) {
-    // <link href="..."> - stylesheets
-    html = html.replace(/(<link[^>]*href=["'])(\/[^"\/][^"']*["'])/gi, (m, pre, url) => {
-      if (url.startsWith("//")) return pre + "https:" + url;
-      if (url.startsWith("/")) return pre + origin + url.slice(0, -1) + '"';
-      return m;
-    });
-
-    // <script src="...">
-    html = html.replace(/(<script[^>]*src=["'])(\/[^"']*["'])/gi, (m, pre, url) => {
-      if (url.startsWith("//")) return pre + "https:" + url;
-      if (url.startsWith("/")) return pre + origin + url.slice(0, -1) + '"';
-      return m;
-    });
-
-    // <img src="...">
-    html = html.replace(/(<img[^>]*src=["'])(\/[^"']*["'])/gi, (m, pre, url) => {
-      if (url.startsWith("//")) return pre + "https:" + url;
-      if (url.startsWith("/")) return pre + origin + url.slice(0, -1) + '"';
-      return m;
-    });
-
-    // url(...) in style tags/attributes
-    html = html.replace(/url\(["']?(\/[^)"']+)["']?\)/gi, (m, url) => {
-      return `url("${origin}${url}")`;
-    });
-
-    // Inject <base> tag so relative URLs in CSS/JS work automatically
-    html = html.replace(/<head([^>]*)>/i, `<head$1><base href="${origin}/">`);
-  }
-
-  // Remove only truly broken scripts (not all scripts)
-  html = html.replace(/<script[^>]*src=["'][^"']*storefront[^"']*["'][^>]*><\/script>/gi, '');
-  
-  // Remove inline event handlers
-  html = html.replace(/\son\w+="[^"]*"/gi, '');
-  
-  return html;
-}
-
-// --- Export transforms (mode-aware) ---
-function decodeAssetProxyEverywhere(input){
-  let out = String(input || "");
-  // Replace any occurrence of /asset?url=<ENC> with decoded REAL url (best-effort)
-  out = out.replace(/\/asset\?url=([^&"' )>]+)/g, (m, enc) => {
-    try { return decodeURIComponent(enc); } catch { return m; }
-  });
-  // HTML entities sometimes appear
-  out = out.replace(/&amp;/g, "&");
-  return out;
-}
-
-function transformExportHtml(html, mode){
-  // mode:
-  // - "wp-placeholder": blob/src empty -> placeholder
-  // - "html-clean": only remove /asset proxy
-  // - "html-raw": return raw html unchanged
-  const raw = String(html || "");
-  if (mode === "html-raw") return raw;
-
-  let out = decodeAssetProxyEverywhere(raw);
-
-  if (mode === "wp-placeholder") {
-    // blob: images cannot be exported reliably -> placeholders
-    out = out.replace(/<img\b([^>]*?)\bsrc=("|\')([^"\']*)\2([^>]*?)>/gi, (m, pre, q, src, post) => {
-      const s0 = String(src || "").trim();
-      if (s0.startsWith("blob:") || s0 === "") {
-        let attrs = (pre + " " + post).replace(/\s+/g, " ").trim();
-
-        // remove existing src/srcset
-        attrs = attrs.replace(/\s+\bsrcset=("|\')[^"\']*\1/gi, "");
-        attrs = attrs.replace(/\s+\bsrc=("|\')[^"\']*\1/gi, "");
-
-        if (!/\balt=("|\')/i.test(attrs)) {
-          attrs += ' alt="PLACEHOLDER: replace image in WordPress"';
-        }
-        if (!/\bdata-bo-placeholder=/i.test(attrs)) {
-          attrs += ' data-bo-placeholder="1"';
-        }
-        return `<img ${attrs} src="" />`;
-      }
-      return m;
-    });
-  }
-
-  return out;
-}
 
 import 'dotenv/config';
 import { rewriteHtmlAssets, rewriteCssUrls } from './rewriteAssets.js';
@@ -116,8 +15,25 @@ import { registerScreenshotRoutes } from "./screenshot.js"
 import { registerGoogleServiceRoutes } from "./googleServices.js"
 import { uploadExportZip } from "./cloudStorage.js"
 import { registerProjectRoutes } from "./projects.js"
+import { createRateLimit } from "./rateLimit.js"
+import { registerSeoRoutes } from "./seo.js"
 import { registerTemplateRoutes } from "./templates.js"
+import {
+  isValidationError,
+  readEmail,
+  readId,
+  readOptionalHtml,
+  readOptionalNumber,
+  readOptionalString,
+  readOptionalUrl,
+  readPassword,
+  readRequiredHtml,
+  readRequiredString,
+} from "./validation.js"
 import { sendPasswordReset } from "./email.js"
+import { logAudit } from "./auditLog.js"
+import { detectSiteMeta, getPlatformGuide, normalizeProjectDocument, normalizeSiteUrl, prepareEditorDocument } from "./siteMeta.js"
+import { buildDeliveryArtifact, validateDeliveryArtifact } from "./deliveryArtifacts.js"
 import cors from "cors"
 import { proxy, asset } from "./proxy.js"
 import { claudeRewriteBlock, claudeGenerateLandingCopy, claudeGenerateLandingHtml } from "./claude.js"
@@ -129,12 +45,24 @@ import { resolveModel } from "./autoRouter.js"
 import archiver from "archiver"
 import db from "./db.js"
 import path from "path"
+import fs from "node:fs"
 import dns from "node:dns"
 import { fileURLToPath } from "url"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const dashboardDist = path.join(__dirname, "..", "dashboard", "dist")
+
+function sendError(res, status, message) {
+  res.status(status).json({ ok: false, error: message })
+}
+
+function safeErrorMessage(e, status = 500) {
+  if (process.env.NODE_ENV === "production" && status >= 500) {
+    return "Internal server error"
+  }
+  return String(e?.message || e || "Unknown error")
+}
 
 try {
   dns.setDefaultResultOrder("ipv4first")
@@ -209,10 +137,14 @@ function localRebuild(html) {
 const app = express()
 app.use(express.urlencoded({ extended: true }))
 
+const corsOrigin = process.env.NODE_ENV === "production"
+  ? (process.env.ALLOWED_ORIGIN?.split(",").map(s => s.trim()).filter(Boolean) || [])
+  : [`http://localhost:${process.env.PORT || 8787}`, "http://localhost:8788"]
+if (process.env.NODE_ENV === "production" && corsOrigin.length === 0) {
+  console.warn("WARN: ALLOWED_ORIGIN not set in production – CORS will reject all origins. Set ALLOWED_ORIGIN in .env")
+}
 app.use(cors({
-  origin: process.env.NODE_ENV === "production"
-    ? (process.env.ALLOWED_ORIGIN || true)
-    : [`http://localhost:${process.env.PORT || 8787}`, "http://localhost:8788"],
+  origin: corsOrigin,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   credentials: true
@@ -221,15 +153,30 @@ app.use(cors({
 app.use(cookieParser())
 app.use(express.json({ limit: '25mb' }))
 
+const dashboardIndex = path.join(dashboardDist, "index.html")
+if (!fs.existsSync(dashboardIndex)) {
+  console.warn("WARN: dashboard/dist not built – run 'npm run build' from project root. Serving API-only fallback at /")
+}
 app.use(express.static(dashboardDist))
 
 app.get("/", (_req, res) => {
-  res.sendFile(path.join(dashboardDist, "index.html"))
+  if (fs.existsSync(dashboardIndex)) {
+    return res.sendFile(dashboardIndex)
+  }
+  res.setHeader("Content-Type", "text/html; charset=utf-8")
+  res.send(`
+<!DOCTYPE html><html><head><title>Site Editor</title></head><body style="font-family:system-ui;max-width:600px;margin:80px auto;padding:24px">
+<h1>Site Editor</h1>
+<p>API is running. Build the dashboard:</p>
+<pre style="background:#f5f5f5;padding:12px;border-radius:6px">npm run build</pre>
+<p><a href="/health">/health</a> &ndash; API health check</p>
+</body></html>
+  `)
 })
 
 app.get("/proxy", async (req, res) => {
   try {
-    const url = req.query.url
+    const url = normalizeSiteUrl(req.query.url)
     if (!url || typeof url !== "string") {
       return res.status(400).send("Missing url")
     }
@@ -242,13 +189,16 @@ app.get("/proxy", async (req, res) => {
       return res.status(r.status).send(`Proxy error: ${r.status}`)
     }
     const html = await r.text()
-    
-    // Apply safe mode sanitization with base URL for relative URL rewriting
-    const safeHtml = sanitizeHtmlForEditor(html, url)
-    
-    res.send(safeHtml)
+    const finalUrl = r.url || url
+    const prepared = prepareEditorDocument(html, finalUrl)
+    const meta = prepared.meta
+
+    res.setHeader("X-Site-Platform", meta.platform)
+    if (meta.title) res.setHeader("X-Site-Title", meta.title)
+    if (meta.url) res.setHeader("X-Site-Url", meta.url)
+    res.send(prepared.html)
   } catch (e) {
-    res.status(500).send(`Proxy error: ${e.message}`)
+    sendError(res, 500, safeErrorMessage(e))
   }
 })
 app.get("/asset", asset)
@@ -257,12 +207,49 @@ app.get("/health", (_req, res) => {
   res.status(200).json({ ok: true, port: process.env.PORT || 8787 })
 })
 
-app.post("/api/ai/analyze-and-rebuild", authMiddleware, async (req, res) => {
+app.get("/api/platforms/:platform", authMiddleware, (req, res) => {
+  const requested = readOptionalString(req.params.platform, "Platform", { max: 32, empty: "unknown" })
+  res.json({ ok: true, platform: requested, guide: getPlatformGuide(requested) })
+})
+
+// Public shareable preview (no auth)
+app.get("/share/:token", (req, res, next) => {
   try {
-    const { html } = req.body
-    if (!html) {
-      return res.status(400).json({ ok: false, error: "Missing html" })
-    }
+    const row = db.prepare(
+      "SELECT p.html, p.name FROM project_shares s JOIN projects p ON p.id = s.project_id WHERE s.token = ?"
+    ).get(req.params.token)
+    if (!row || !row.html) return res.status(404).send("Share link not found or expired")
+    res.setHeader("Content-Type", "text/html; charset=utf-8")
+    res.send(row.html)
+  } catch (e) {
+    next(e)
+  }
+})
+
+const aiRateLimit = createRateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  keyPrefix: "ai",
+  message: "Zu viele KI-Anfragen. Bitte spaeter erneut versuchen.",
+})
+
+const exportRateLimit = createRateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  keyPrefix: "export",
+  message: "Zu viele Exporte. Bitte spaeter erneut versuchen.",
+})
+
+const adminResetRateLimit = createRateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  keyPrefix: "admin-reset",
+  message: "Zu viele Reset-Mails. Bitte spaeter erneut versuchen.",
+})
+
+app.post("/api/ai/analyze-and-rebuild", authMiddleware, aiRateLimit, async (req, res) => {
+  try {
+    const html = readRequiredHtml(req.body?.html)
 
     const cheap = localRebuild(html);
     const useAI = String(req.query.ai || "") === "1";
@@ -352,8 +339,9 @@ app.post("/api/ai/analyze-and-rebuild", authMiddleware, async (req, res) => {
       res.json({ ok: true, ...cheap, source: "ai-parse-failed" })
     }
   } catch (error) {
+    if (isValidationError(error)) return res.status(400).json({ ok: false, error: error.message })
     console.error("AI rebuild error:", error)
-    res.json({ ok: true, ...localRebuild(req.body?.html || ""), source: "ai-error", error: error.message })
+    res.json({ ok: true, ...localRebuild(req.body?.html || ""), source: "ai-error", error: safeErrorMessage(error) })
   }
 })
 
@@ -366,20 +354,20 @@ app.get("/api/ai/ollama-health", async (_req, res) => {
   }
 })
 
-app.post("/api/ai/demo-landing-copy", authMiddleware, async (req, res) => {
+app.post("/api/ai/demo-landing-copy", authMiddleware, aiRateLimit, async (req, res) => {
   try {
-    const { name, description, audience, language, complexity } = req.body || {}
-
-    if (!String(name || "").trim()) {
-      return res.status(400).json({ ok: false, error: "Missing product name" })
-    }
+    const name = readRequiredString(req.body?.name, "Product name", { max: 120 })
+    const description = readOptionalString(req.body?.description, "Description", { max: 2000, empty: "" })
+    const audience = readOptionalString(req.body?.audience, "Audience", { max: 400, empty: "" })
+    const language = readOptionalString(req.body?.language, "Language", { max: 40, empty: "english" }) || "english"
+    const complexity = readOptionalNumber(req.body?.complexity, "Complexity", { min: 1, max: 10, integer: true }) ?? 5
 
     const result = await claudeGenerateLandingHtml({
-      name: String(name || "").trim(),
-      description: String(description || "").trim(),
-      audience: String(audience || "").trim(),
-      language: String(language || "english").trim(),
-      complexity: Math.min(10, Math.max(1, Number(complexity || 5))),
+      name,
+      description,
+      audience,
+      language,
+      complexity,
       model: "claude-sonnet-4-6"
     })
 
@@ -390,31 +378,36 @@ app.post("/api/ai/demo-landing-copy", authMiddleware, async (req, res) => {
           req.user.id,
           "claude-sonnet-4-6",
           result.usage.input_tokens || 0,
-          result.usage.output_tokens || 0
+          result.usage.output_tokens || 0,
+          "Landing generator"
         )
       } catch (e) { console.error("deductCredits failed:", e.message) }
     }
+
+    const prepared = prepareEditorDocument(result.html, "")
 
     return res.json({
       ok: true,
       model: "claude-sonnet-4-6",
       provider: "claude",
-      html: result.html,
+      html: prepared.html,
+      platform: detectSiteMeta("", prepared.html).platform,
       usage: result.usage || null,
       cost_eur: deducted
     })
   } catch (error) {
+    if (isValidationError(error)) return res.status(400).json({ ok: false, error: error.message })
     console.error("Demo landing HTML error:", error)
     return res.json({ ok: false, error: error.message })
   }
 })
 
-app.post("/api/ai/rewrite-block", authMiddleware, async (req, res) => {
+app.post("/api/ai/rewrite-block", authMiddleware, aiRateLimit, async (req, res) => {
   try {
-    const { html, instruction, systemHint, model } = req.body
-    if (!html || !instruction) {
-      return res.status(400).json({ ok: false, error: "Missing html or instruction" })
-    }
+    const html = readRequiredHtml(req.body?.html, "HTML", { max: 500_000 })
+    const instruction = readRequiredString(req.body?.instruction, "Instruction", { max: 4000 })
+    const systemHint = readOptionalString(req.body?.systemHint, "System hint", { max: 2000, empty: "" })
+    const model = readOptionalString(req.body?.model, "Model", { max: 80, empty: "" })
 
     let chosenModel = String(model || "auto")
 
@@ -488,7 +481,7 @@ app.post("/api/ai/rewrite-block", authMiddleware, async (req, res) => {
     // Credits abziehen wenn User eingeloggt
     let deducted = 0
     if (req.user?.id && usage) {
-      try { deducted = deductCredits(req.user.id, chosenModel, usage.input_tokens || 0, usage.output_tokens || 0) } catch {}
+      try { deducted = deductCredits(req.user.id, chosenModel, usage.input_tokens || 0, usage.output_tokens || 0, "Block rewrite") } catch {}
     }
 
     res.json({
@@ -500,19 +493,20 @@ app.post("/api/ai/rewrite-block", authMiddleware, async (req, res) => {
       cost_eur: deducted
     })
   } catch (error) {
+    if (isValidationError(error)) return res.status(400).json({ ok: false, error: error.message })
     console.error("AI rewrite error:", error)
-    res.json({ ok: false, error: error.message })
+    sendError(res, 500, safeErrorMessage(error))
   }
 })
 
 
 // Streaming Endpoint für BlockOverlay
-app.post("/api/ai/rewrite-block-stream", authMiddleware, async (req, res) => {
+app.post("/api/ai/rewrite-block-stream", authMiddleware, aiRateLimit, async (req, res) => {
   try {
-    const { html, instruction, systemHint, model } = req.body
-    if (!html || !instruction) {
-      return res.status(400).json({ ok: false, error: "Missing html or instruction" })
-    }
+    const html = readRequiredHtml(req.body?.html, "HTML", { max: 500_000 })
+    const instruction = readRequiredString(req.body?.instruction, "Instruction", { max: 4000 })
+    const systemHint = readOptionalString(req.body?.systemHint, "System hint", { max: 2000, empty: "" })
+    const model = readOptionalString(req.body?.model, "Model", { max: 80, empty: "" })
 
     let chosenModel = String(model || "auto")
 
@@ -587,7 +581,7 @@ app.post("/api/ai/rewrite-block-stream", authMiddleware, async (req, res) => {
       const usage = result?.usage || null
       let deducted = 0
       if (req.user?.id && usage) {
-        try { deducted = deductCredits(req.user.id, chosenModel, usage.input_tokens || 0, usage.output_tokens || 0) } catch {}
+        try { deducted = deductCredits(req.user.id, chosenModel, usage.input_tokens || 0, usage.output_tokens || 0, "Block rewrite") } catch {}
       }
       res.write(`data: ${JSON.stringify({ type: "done", html: result?.html ?? result, usage, cost_eur: deducted })}\n\n`)
       return res.end()
@@ -679,59 +673,168 @@ app.post("/api/ai/rewrite-block-stream", authMiddleware, async (req, res) => {
 
     let deducted = 0
     if (req.user?.id && latestUsage) {
-      try { deducted = deductCredits(req.user.id, chosenModel, latestUsage.input_tokens || 0, latestUsage.output_tokens || 0) } catch {}
+      try { deducted = deductCredits(req.user.id, chosenModel, latestUsage.input_tokens || 0, latestUsage.output_tokens || 0, "Block rewrite") } catch {}
     }
 
     res.write(`data: ${JSON.stringify({ type: "done", html: fullText, usage: latestUsage, cost_eur: deducted })}\n\n`)
     res.end()
 
   } catch (error) {
+    if (isValidationError(error)) {
+      try { return res.status(400).json({ ok: false, error: error.message }) } catch {}
+    }
     console.error("Stream error:", error)
     try { res.write(`data: ${JSON.stringify({ type: "error", error: error.message })}\n\n`); res.end() } catch {}
   }
 })
 
-// Export endpoint – erzeugt ZIP mit HTML+Assets
-app.post("/api/export", async (req, res) => {
+app.post("/api/export/validate", authMiddleware, exportRateLimit, async (req, res) => {
   try {
-    const { url, html, mode } = req.body
+    const url = readOptionalUrl(req.body?.url)
+    const html = readOptionalHtml(req.body?.html, "HTML", { max: 5_000_000 })
+    const platform = readOptionalString(req.body?.platform, "Platform", { max: 32, empty: "" })
+    const mode = readOptionalString(req.body?.mode, "Mode", { max: 40, empty: "wp-placeholder" })
     if (!html && !url) {
       return res.status(400).json({ ok: false, error: "Missing html or url" })
     }
 
-    // Export content: prefer provided HTML (what the editor currently sees)
-    let content = html || `<!DOCTYPE html><html><body><p>No content</p></body></html>`
-
-    // Always de-proxy any /asset?url=... references so exported HTML is portable
-    // Example: srcset="/asset?url=https%3A%2F%2F...&ref=..."  -> "https://..."
-    content = content.replace(/\/asset\?url=([^"'\s&,]+)(?:&amp;ref=[^"'\s,]+|&ref=[^"'\s,]+)?/g, (full, enc) => {
-      try { return decodeURIComponent(enc) } catch { return full }
+    const normalized = normalizeProjectDocument({ html, url, platform })
+    const validation = validateDeliveryArtifact({
+      html: normalized.html || html,
+      url: normalized.meta.url || url,
+      platform: normalized.meta.platform || platform,
+      mode,
     })
 
-    // Export modes (matches dashboard dropdown):
-    // - "wp-placeholder": keep images empty if they were preview-uploaded (blob:) etc.
-    // - "html-clean": remove WP/Jetpack/trackers noise (lightweight clean)
-    // - "html-raw": raw HTML (still de-proxied)
-    const exportMode = (mode || "wp-placeholder").toString()
+    return res.json({
+      ok: true,
+      platform: normalized.meta.platform,
+      url: normalized.meta.url || url || "",
+      readiness: validation.readiness,
+      guide: validation.guide,
+      warnings: validation.warnings,
+    })
+  } catch (error) {
+    if (isValidationError(error)) return sendError(res, 400, error.message)
+    console.error("Export validation error:", error)
+    return sendError(res, 500, safeErrorMessage(error))
+  }
+})
+
+// Export endpoint – erzeugt ZIP mit HTML+Assets + manifest
+app.post("/api/export", authMiddleware, exportRateLimit, async (req, res) => {
+  try {
+    const url = readOptionalUrl(req.body?.url)
+    const html = readOptionalHtml(req.body?.html, "HTML", { max: 5_000_000 })
+    const platform = readOptionalString(req.body?.platform, "Platform", { max: 32, empty: "" })
+    const mode = readOptionalString(req.body?.mode, "Mode", { max: 40, empty: "wp-placeholder" })
+    const projectId = readOptionalNumber(req.body?.project_id ?? req.body?.projectId, "Project", { min: 1, integer: true })
+    if (!html && !url) {
+      return res.status(400).json({ ok: false, error: "Missing html or url" })
+    }
+
+    let sourceUrl = url || ""
+    let sourceHtml = html || ""
+    if (!sourceHtml && sourceUrl) {
+      const response = await fetch(normalizeSiteUrl(sourceUrl), {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; SiteEditor/1.0)",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+      })
+      if (!response.ok) {
+        return sendError(res, response.status, `Export source could not be loaded (${response.status})`)
+      }
+      sourceHtml = await response.text()
+      sourceUrl = response.url || sourceUrl
+    }
+
+    const normalized = normalizeProjectDocument({ html: sourceHtml, url: sourceUrl, platform })
+    const exportMode = String(mode || "wp-placeholder")
     const filename =
       exportMode === "wp-placeholder" ? "site_wp_placeholders.zip" :
       exportMode === "html-clean" ? "site_html_clean.zip" :
       "site_html_raw.zip"
 
-    let exportHtml = injectResponsive(transformExportHtml(content, exportMode))
+    let linkedProject = null
+    let versionId = null
+    if (projectId) {
+      linkedProject = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, req.user.id)
+      if (!linkedProject) {
+        return sendError(res, 404, "Projekt nicht gefunden")
+      }
+      if (normalized.html && normalized.html !== linkedProject.html) {
+        const versionResult = db.prepare("INSERT INTO project_versions (project_id, html) VALUES (?, ?)").run(projectId, normalized.html)
+        versionId = Number(versionResult.lastInsertRowid)
+      }
+      db.prepare(
+        `UPDATE projects SET
+          html = ?,
+          url = ?,
+          platform = ?,
+          last_activity_at = datetime('now'),
+          updated_at = datetime('now')
+        WHERE id = ? AND user_id = ?`
+      ).run(normalized.html, normalized.meta.url || sourceUrl || "", normalized.meta.platform, projectId, req.user.id)
+      linkedProject = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, req.user.id)
+    }
+
+    const artifact = buildDeliveryArtifact({
+      html: normalized.html || sourceHtml,
+      url: normalized.meta.url || sourceUrl,
+      platform: normalized.meta.platform || platform,
+      mode: exportMode,
+      project: linkedProject,
+      versionId,
+    })
+
+    if (linkedProject) {
+      db.prepare(
+        `INSERT INTO project_exports (
+          project_id, user_id, version_id, export_mode, platform, readiness, warning_count, manifest_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        linkedProject.id,
+        req.user.id,
+        versionId,
+        exportMode,
+        artifact.manifest.platform,
+        artifact.readiness,
+        artifact.warnings.length,
+        JSON.stringify(artifact.manifest)
+      )
+      db.prepare(
+        `UPDATE projects SET
+          delivery_status = CASE WHEN delivery_status = 'shipped' THEN delivery_status ELSE 'exported' END,
+          last_export_at = datetime('now'),
+          last_export_mode = ?,
+          last_export_warning_count = ?,
+          updated_at = datetime('now')
+        WHERE id = ? AND user_id = ?`
+      ).run(exportMode, artifact.warnings.length, linkedProject.id, req.user.id)
+      logAudit({
+        userId: req.user.id,
+        action: "project.export",
+        targetType: "project",
+        targetId: linkedProject.id,
+        meta: { mode: exportMode, readiness: artifact.readiness, warningCount: artifact.warnings.length },
+      })
+    }
 
     // If cloud=1 requested, upload to GCS and return link
     if (req.body.cloud === true || req.body.cloud === "1") {
       const chunks = []
       const archiveCloud = archiver("zip", { zlib: { level: 9 } })
-      archiveCloud.append(exportHtml, { name: "index.html" })
+      archiveCloud.append(artifact.html, { name: "index.html" })
+      archiveCloud.append(JSON.stringify(artifact.manifest, null, 2), { name: "manifest.json" })
+      archiveCloud.append(artifact.notes, { name: "DELIVERY_NOTES.md" })
       archiveCloud.on("data", chunk => chunks.push(chunk))
       await archiveCloud.finalize()
       const buffer = Buffer.concat(chunks)
       const uniqueName = `${Date.now()}_${filename}`
       try {
         const gcsUrl = await uploadExportZip(buffer, uniqueName)
-        return res.json({ ok: true, url: gcsUrl, filename })
+        return res.json({ ok: true, url: gcsUrl, filename, manifest: artifact.manifest, warnings: artifact.warnings })
       } catch (e) {
         console.warn("GCS export upload failed:", e.message)
       }
@@ -740,14 +843,19 @@ app.post("/api/export", async (req, res) => {
     // Default: stream ZIP directly
     res.setHeader("Content-Type", "application/zip")
     res.setHeader("Content-Disposition", `attachment; filename=${filename}`)
+    res.setHeader("X-Export-Readiness", artifact.readiness)
+    res.setHeader("X-Export-Warnings", String(artifact.warnings.length))
     const archive = archiver("zip", { zlib: { level: 9 } })
     archive.pipe(res)
-    archive.append(exportHtml, { name: "index.html" })
+    archive.append(artifact.html, { name: "index.html" })
+    archive.append(JSON.stringify(artifact.manifest, null, 2), { name: "manifest.json" })
+    archive.append(artifact.notes, { name: "DELIVERY_NOTES.md" })
     await archive.finalize()
   } catch (error) {
+    if (isValidationError(error)) return sendError(res, 400, error.message)
     console.error("Export error:", error)
     if (!res.headersSent) {
-      res.status(500).json({ ok: false, error: error.message })
+      sendError(res, 500, safeErrorMessage(error))
     }
   }
 })
@@ -763,6 +871,7 @@ app.get(['/wp-content/*', '/wp-includes/*', '/_static/*'], (req, res) => {
 
 registerAuthRoutes(app)
 registerProjectRoutes(app)
+registerSeoRoutes(app)
 registerTemplateRoutes(app)
 registerCreditRoutes(app)
 registerSettingsRoutes(app)
@@ -780,6 +889,26 @@ function ownerOnly(req, res, next) {
 
   next()
 }
+
+app.get("/api/admin/audit", authMiddleware, ownerOnly, (req, res) => {
+  try {
+    const limit = Math.max(1, Math.min(200, Number(req.query.limit || 100) || 100))
+    const logs = db.prepare(`
+      SELECT al.id, al.user_id, al.action, al.target_type, al.target_id, al.meta_json, al.created_at, u.email, u.name
+      FROM audit_logs al
+      LEFT JOIN users u ON u.id = al.user_id
+      ORDER BY al.created_at DESC
+      LIMIT ?
+    `).all(limit).map((row) => {
+      let meta = {}
+      try { meta = JSON.parse(row.meta_json || "{}") } catch {}
+      return { ...row, meta }
+    })
+    res.json({ ok: true, logs })
+  } catch (e) {
+    sendError(res, 500, safeErrorMessage(e))
+  }
+})
 
 registerStripeRoutes(app)
 registerScreenshotRoutes(app)
@@ -833,30 +962,22 @@ app.get("/api/admin/users", authMiddleware, ownerOnly, (_req, res) => {
     
     res.json({ ok: true, users: usersWithAffiliations })
   } catch (e) {
-    res.status(500).json({ ok: false, error: e.message })
+    sendError(res, 500, safeErrorMessage(e))
   }
 })
 
 
-app.post("/api/admin/send-reset", authMiddleware, ownerOnly, async (req, res) => {
+app.post("/api/admin/send-reset", authMiddleware, ownerOnly, adminResetRateLimit, async (req, res) => {
   try {
-    const { userId } = req.body
-    if (!userId) return res.status(400).json({ ok: false, error: "userId required" })
+    const userId = readId(req.body?.userId, "userId")
 
     const user = db.prepare("SELECT id, email, name FROM users WHERE id = ?").get(userId)
     if (!user) return res.status(404).json({ ok: false, error: "User not found" })
 
-    db.exec(`CREATE TABLE IF NOT EXISTS password_resets (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      token TEXT NOT NULL,
-      expires_at TEXT NOT NULL,
-      used INTEGER DEFAULT 0
-    )`)
-
     const resetToken = crypto.randomBytes(32).toString("hex")
     const expires = new Date(Date.now() + 3600000).toISOString()
 
+    db.prepare("DELETE FROM password_resets WHERE user_id = ? OR used = 1").run(user.id)
     db.prepare("INSERT INTO password_resets (user_id, token, expires_at) VALUES (?, ?, ?)").run(user.id, resetToken, expires)
 
     const sent = await sendPasswordReset(user.email, resetToken, user.name || "")
@@ -864,9 +985,11 @@ app.post("/api/admin/send-reset", authMiddleware, ownerOnly, async (req, res) =>
       return res.status(500).json({ ok: false, error: "Reset email failed" })
     }
 
+    logAudit({ userId: req.user.id, action: "admin.send_reset", targetType: "user", targetId: user.id, meta: { email: user.email } })
     res.json({ ok: true, message: "Password reset email sent", email: user.email })
   } catch (e) {
-    res.status(500).json({ ok: false, error: e.message })
+    if (isValidationError(e)) return sendError(res, 400, e.message)
+    sendError(res, 500, safeErrorMessage(e))
   }
 })
 
@@ -932,7 +1055,7 @@ app.delete("/api/admin/users/:id", authMiddleware, ownerOnly, (req, res) => {
       if (result.changes === 0) {
         return res.status(404).json({ ok: false, error: "User not found" })
       }
-      
+      logAudit({ userId: req.user.id, action: "admin.delete_user", targetType: "user", targetId: userId, meta: { email: user.email } })
       res.json({ ok: true, message: "User deleted successfully" })
     } catch (fkError) {
       // If foreign key still fails, provide more specific error
@@ -942,32 +1065,25 @@ app.delete("/api/admin/users/:id", authMiddleware, ownerOnly, (req, res) => {
       })
     }
   } catch (e) {
-    res.status(500).json({ ok: false, error: e.message })
+    sendError(res, 500, safeErrorMessage(e))
   }
 })
 
 // Add credits to user
 app.post("/api/admin/users/:id/add-credits", authMiddleware, ownerOnly, async (req, res) => {
   try {
-    const { id } = req.params
-    const { credits } = req.body
-    const userId = parseInt(id)
-    
-    if (isNaN(userId)) {
-      return res.status(400).json({ ok: false, error: "Invalid user ID" })
-    }
-    
-    if (typeof credits !== "number" || credits <= 0) {
-      return res.status(400).json({ ok: false, error: "Credits must be a positive number" })
-    }
+    const userId = readId(req.params.id, "User ID")
+    const credits = readOptionalNumber(req.body?.credits, "Credits", { min: 1 })
+    if (credits === undefined) return res.status(400).json({ ok: false, error: "Credits must be a positive number" })
     
     // Import and use the credits system
     const { addCredits } = await import("./credits.js")
     addCredits(userId, credits / 100) // Convert cents to EUR
-    
+    logAudit({ userId: req.user.id, action: "admin.add_credits", targetType: "user", targetId: userId, meta: { credits } })
     res.json({ ok: true, message: `Added $${(credits / 100).toFixed(2)} credits to user` })
   } catch (e) {
-    res.status(500).json({ ok: false, error: e.message })
+    if (isValidationError(e)) return sendError(res, 400, e.message)
+    sendError(res, 500, safeErrorMessage(e))
   }
 })
 
@@ -980,10 +1096,10 @@ app.post("/api/admin/migrate-credits", authMiddleware, ownerOnly, (req, res) => 
     `)
     res.json({ ok: true, message: "Credits column added successfully" })
   } catch (e) {
-    if (e.message.includes("duplicate column name")) {
+    if (e.message?.includes("duplicate column name")) {
       res.json({ ok: true, message: "Credits column already exists" })
     } else {
-      res.status(500).json({ ok: false, error: e.message })
+      sendError(res, 500, safeErrorMessage(e))
     }
   }
 })
@@ -991,20 +1107,15 @@ app.post("/api/admin/migrate-credits", authMiddleware, ownerOnly, (req, res) => 
 // Send password reset
 
 // Create new user
-app.post("/api/admin/users", authMiddleware, ownerOnly, (req, res) => {
+app.post("/api/admin/users", authMiddleware, ownerOnly, async (req, res) => {
   try {
-    const { email, password, name, credits = 0 } = req.body
-    
-    if (!email || !password) {
-      return res.status(400).json({ ok: false, error: "Email and password required" })
-    }
-    
-    if (password.length < 6) {
-      return res.status(400).json({ ok: false, error: "Password must be at least 6 characters" })
-    }
+    const email = readEmail(req.body?.email)
+    const password = readPassword(req.body?.password, "Password")
+    const name = readOptionalString(req.body?.name, "Name", { max: 120, empty: "" })
+    const credits = readOptionalNumber(req.body?.credits, "Credits", { min: 0 }) ?? 0
     
     // Check if user already exists
-    const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(email)
+    const existing = db.prepare("SELECT id FROM users WHERE lower(email) = ?").get(email)
     if (existing) {
       return res.status(400).json({ ok: false, error: "Email already registered" })
     }
@@ -1016,23 +1127,30 @@ app.post("/api/admin/users", authMiddleware, ownerOnly, (req, res) => {
     const result = db.prepare(`
       INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)
     `).run(email, hash, name || email.split("@")[0])
-    
-    // Initialize user settings with credits
-    db.prepare(`
-      INSERT INTO user_settings (user_id, credits) VALUES (?, ?)
-    `).run(result.lastInsertRowid, credits)
-    
+    const newUserId = result.lastInsertRowid
+
+    // Initialize user_settings (plan, etc.)
+    db.prepare(`INSERT OR IGNORE INTO user_settings (user_id) VALUES (?)`).run(newUserId)
+    // Initial balance: frontend sends cents (dollars × 100), store as EUR in credits table
+    const creditsEur = Number(credits) / 100
+    if (creditsEur > 0) {
+      const { addCredits } = await import("./credits.js")
+      addCredits(newUserId, creditsEur)
+    }
+
+    logAudit({ userId: req.user.id, action: "admin.create_user", targetType: "user", targetId: newUserId, meta: { email, credits } })
     res.json({ 
       ok: true, 
       message: "User created successfully",
       user: {
-        id: result.lastInsertRowid,
+        id: newUserId,
         email,
         name: name || email.split("@")[0]
       }
     })
   } catch (e) {
-    res.status(500).json({ ok: false, error: e.message })
+    if (isValidationError(e)) return sendError(res, 400, e.message)
+    sendError(res, 500, safeErrorMessage(e))
   }
 })
 
@@ -1165,20 +1283,22 @@ app.post("/reset-password", async (req, res) => {
   `)
 })
 
-const PORT = process.env.PORT || 8787
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`site-editor-server running on ${PORT}`)
+app.use((err, _req, res, _next) => {
+  console.error("Unhandled error:", err?.message || err)
+  sendError(res, 500, safeErrorMessage(err))
 })
 
 app.post("/api/admin/users/:id/set-plan", authMiddleware, ownerOnly, (req, res) => {
   try {
-    const { plan } = req.body
+    const plan = readRequiredString(req.body?.plan, "Plan", { max: 20 })
     const valid = ["basis", "starter", "pro", "scale"]
     if (!valid.includes(plan)) return res.json({ ok: false, error: "Invalid plan" })
-    const uid = Number(req.params.id)
+    const uid = readId(req.params.id, "User ID")
     db.prepare(`INSERT INTO user_settings (user_id, plan) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET plan = excluded.plan`).run(uid, plan)
+    logAudit({ userId: req.user.id, action: "admin.set_plan", targetType: "user", targetId: uid, meta: { plan } })
     res.json({ ok: true, plan })
   } catch (e) {
+    if (isValidationError(e)) return res.json({ ok: false, error: e.message })
     res.json({ ok: false, error: e.message })
   }
 })
@@ -1190,4 +1310,9 @@ app.get("/api/user/plan", authMiddleware, (req, res) => {
   } catch (e) {
     res.json({ ok: false, plan: "basis" })
   }
+})
+
+const PORT = process.env.PORT || 8787
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`site-editor-server running on http://localhost:${PORT}`)
 })

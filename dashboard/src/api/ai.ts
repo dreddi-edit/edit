@@ -1,14 +1,14 @@
-export async function aiRewrite(html:string,instruction:string){
+import { ENDPOINTS } from "../config"
+import { apiFetch } from "./client"
 
-  const r = await fetch("/api/ai/rewrite-block",{
-    method:"POST",
-    headers:{ "content-type":"application/json" },
-    body:JSON.stringify({ html, instruction })
+type RewriteRes = { ok: boolean; error?: string; html?: string }
+
+export async function aiRewrite(html: string, instruction: string): Promise<string> {
+  const d = await apiFetch<RewriteRes>(ENDPOINTS.rewrite, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ html, instruction }),
   })
-
-  const j = await r.json()
-
-  if(!j.ok) throw new Error(j.error || "AI failed")
-
-  return j.html as string
+  if (!d?.ok || !d.html) throw new Error(d?.error ?? "AI rewrite failed")
+  return d.html
 }

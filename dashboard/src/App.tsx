@@ -1,19 +1,124 @@
-import { apiMe, apiLogout, type User } from "./api/auth"
-import { apiSaveProject, apiCreateProject, type Project } from "./api/projects"
+import { apiMe, type User } from "./api/auth"
+import { apiGetPlan } from "./api/credits"
+import { apiFetch } from "./api/client"
+import {
+  apiGetProject,
+  apiGetProjectWorkflowHistory,
+  apiSaveProject,
+  apiSetProjectWorkflowStage,
+  type ExportWarning,
+  type PlatformGuide,
+  type Project,
+  type WorkflowEvent,
+  type WorkflowStage,
+} from "./api/projects"
 import AuthScreen from "./components/AuthScreen"
 import ResetPasswordScreen from "./components/ResetPasswordScreen"
 import ProjectDashboard from "./components/ProjectDashboard"
 import { toast, ToastContainer } from "./components/Toast"
-import CreditsPanel from "./components/CreditsPanel"
-import SettingsPanel from "./components/SettingsPanel"
-import { useRef, useState, useEffect } from 'react';
+import { useRef, useState, useEffect, type CSSProperties } from 'react';
 import BlockOverlay from "./components/BlockOverlay";
 import { ENDPOINTS } from './config';
 import { COMPONENT_LIBRARY, COMPONENT_CATEGORIES } from './components/ComponentLibrary';
 import { useTranslation } from "./i18n/useTranslation"
+import { detectSitePlatform, getPlatformMeta, normalizePlatform, type SitePlatform } from "./utils/sitePlatform"
+
+type BlockFilter =
+  | "all"
+  | "button"
+  | "heading"
+  | "image"
+  | "form"
+  | "navigation"
+  | "container"
+  | "list"
+  | "content"
+
+type StructureSnapshotItem = {
+  id: string
+  rootId: string
+  displayLabel: string
+  label: string
+  kind: string
+  childCount: number
+  isExpanded: boolean
+  isSelected: boolean
+}
+
+const BLOCK_FILTER_OPTIONS: Array<{ value: BlockFilter; label: string }> = [
+  { value: "all", label: "All blocks" },
+  { value: "button", label: "Buttons" },
+  { value: "heading", label: "Headings" },
+  { value: "image", label: "Images" },
+  { value: "form", label: "Forms" },
+  { value: "navigation", label: "Navigation" },
+  { value: "container", label: "Containers" },
+  { value: "list", label: "Lists" },
+  { value: "content", label: "Content" },
+]
+
+const EDIT_RAIL_EXPANDED_WIDTH = 272
+const EDIT_RAIL_COLLAPSED_WIDTH = 72
+const DEFAULT_CHROME_BACKGROUND = "rgba(5, 12, 24, 0.96)"
+const DEFAULT_CHROME_BORDER = "rgba(96, 165, 250, 0.18)"
+const structureMoveButtonStyle: CSSProperties = {
+  height: 28,
+  width: 28,
+  borderRadius: 8,
+  border: "1px solid rgba(148,163,184,0.18)",
+  background: "rgba(255,255,255,0.04)",
+  color: "white",
+  fontSize: 12,
+  fontWeight: 800,
+  cursor: "pointer",
+}
+
+function titleCaseFallback(value: string): string {
+  return String(value || "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (match) => match.toUpperCase())
+}
+
+function parseRgbChannels(color: string): [number, number, number] | null {
+  const match = String(color || "").match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i)
+  if (!match) return null
+  return [Number(match[1]), Number(match[2]), Number(match[3])]
+}
+
+function getColorBrightness(color: string): number | null {
+  const channels = parseRgbChannels(color)
+  if (!channels) return null
+  const [r, g, b] = channels
+  return (r * 299 + g * 587 + b * 114) / 1000
+}
+
+function pickEditorChromeFromDocument(doc: Document | null): { background: string; border: string } {
+  if (!doc) return { background: DEFAULT_CHROME_BACKGROUND, border: DEFAULT_CHROME_BORDER }
+  const candidates = Array.from(
+    doc.querySelectorAll("header, nav, [role='banner'], .site-header, .navbar, .header, .topbar, body")
+  ) as HTMLElement[]
+
+  for (const el of candidates) {
+    const style = doc.defaultView?.getComputedStyle(el)
+    const color = style?.backgroundColor || ""
+    if (!color || color === "transparent" || color === "rgba(0, 0, 0, 0)") continue
+    const brightness = getColorBrightness(color)
+    if (brightness == null || brightness > 192) continue
+    return {
+      background: color.replace("rgb(", "rgba(").replace(")", ", 0.96)"),
+      border: "rgba(255,255,255,0.08)",
+    }
+  }
+
+  return { background: DEFAULT_CHROME_BACKGROUND, border: DEFAULT_CHROME_BORDER }
+}
 
 export default function App() {
   const { t } = useTranslation();
+  const resolvePlatform = (platform?: string | null, pageUrl?: string, html?: string): SitePlatform => {
+    const normalized = normalizePlatform(platform)
+    return normalized !== "unknown" ? normalized : detectSitePlatform(pageUrl, html)
+  }
   const AI_MODELS = [
     { value: "auto", label: "Auto" },
     { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
@@ -27,33 +132,10 @@ export default function App() {
     { value: "ollama:qwen2.5-coder:7b", label: "Ollama Qwen 2.5 Coder 7B" },
   ]
 
-  const WP_ELEMENTS = [
-    "Paragraph","Heading","List","Quote","Code","Preformatted","Table","Pullquote","Separator","Spacer",
-    "Buttons","Button","Columns","Column","Group","Row","Stack","Cover","Media & Text","Image","Gallery",
-    "Audio","Video","File","Embed","Social Icons","Navigation","Search","Latest Posts","Categories",
-    "Tag Cloud","Archives","Shortcode","Custom HTML","More","Page Break","Query Loop","Comments"
-  ]
-  const HTML_ELEMENTS = [
-    "div","section","article","header","footer","main","aside","nav","h1","h2","h3","p","span","a",
-    "button","ul","ol","li","img","figure","figcaption","video","audio","table","form","input",
-    "textarea","select","label","iframe","hr"
-  ]
-  const LAYOUT_ELEMENTS = [
-    "Section","Container","Wrapper","2 Columns","3 Columns","4 Columns","Hero","Feature Grid",
-    "CTA Section","Testimonials","Pricing","FAQ","Contact Section","Footer Section"
-  ]
-  const MEDIA_ELEMENTS = [
-    "Image","Gallery","Slider","Video","Audio","Icon","Logo Strip","Map","Background Image"
-  ]
-  const FORM_ELEMENTS = [
-    "Contact Form","Name Field","Email Field","Phone Field","Textarea","Checkbox","Radio",
-    "Select","Submit Button","Newsletter Form"
-  ]
-  const ADVANCED_ELEMENTS = [
-    "Accordion","Tabs","Modal","Alert Box","Progress Bar","Countdown","Pricing Table",
-    "Timeline","Stats Counter","FAQ Accordion","Testimonial Card","Team Card"
-  ]
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
+  const currentHtmlRef = useRef("")
+  const skipNextLiveIframeSyncRef = useRef(false)
+  const loadRequestRef = useRef(0)
   const [url, setUrl] = useState("")
   const [mode, setMode] = useState<"view" | "edit">("view")
   const [layoutMode] = useState<"flow" | "canvas">("flow")
@@ -61,10 +143,19 @@ export default function App() {
   const [status, setStatus] = useState<"idle" | "blocked" | "ok">("idle")
   const [currentHtml, setCurrentHtml] = useState<string>("")
   const [loadedUrl, setLoadedUrl] = useState<string>("")
+  const [currentPlatform, setCurrentPlatform] = useState<SitePlatform>("unknown")
+  const [currentPlatformGuide, setCurrentPlatformGuide] = useState<PlatformGuide | null>(null)
+  const [exportWarnings, setExportWarnings] = useState<ExportWarning[]>([])
+  const [exportReadiness, setExportReadiness] = useState<"ready" | "guarded">("ready")
+  const [workflowHistory, setWorkflowHistory] = useState<WorkflowEvent[]>([])
   const [aiScanLoading, setAiScanLoading] = useState(false)
   const [sessionCost, setSessionCost] = useState(0)
   const [sessionTokens, setSessionTokens] = useState({input: 0, output: 0})
-  const [aiApproval, setAiApproval] = useState<null | {
+  const [editorChrome, setEditorChrome] = useState({
+    background: DEFAULT_CHROME_BACKGROUND,
+    border: DEFAULT_CHROME_BORDER,
+  })
+  const [aiApproval] = useState<null | {
     id: string
     model: string
     scope: string
@@ -75,10 +166,7 @@ export default function App() {
 
   // Auth check beim Start
   useEffect(() => {
-    fetch("/api/credits/balance", { credentials: "include" })
-      .then(r => r.json()).then(d => { if (d.ok) setBalance(d.balance_eur) }).catch(() => {})
-    fetch("/api/user/plan", { credentials: "include" })
-      .then(r => r.json()).then(d => { if (d.ok && d.plan) setDemoPlan(d.plan as any) }).catch(() => {})
+    apiGetPlan().then(p => p != null && setDemoPlan(p))
     apiMe().then(user => {
       if (user) { setAuthUser(user); setView("dashboard") }
       else { setAuthUser(null); setView("auth") }
@@ -94,16 +182,16 @@ export default function App() {
 
 
 
-  const trackUsage = (payload: any) => {
-    if (!payload) return;
-
-    const usage = payload?.usage || payload || null
-    const inp = Number(usage?.input_tokens || 0)
-    const out = Number(usage?.output_tokens || 0)
-    const explicitCost = Number(payload?.cost_eur || 0)
+  const trackUsage = (payload: unknown) => {
+    if (!payload || typeof payload !== "object") return;
+    const p = payload as Record<string, unknown>;
+    const usage = (p?.usage || p) as Record<string, unknown> | null;
+    const inp = Number(usage?.input_tokens ?? 0)
+    const out = Number(usage?.output_tokens ?? 0)
+    const explicitCost = Number(p?.cost_eur ?? 0)
 
     let fallbackCost = 0
-    const model = String(payload?.model || "")
+    const model = String(p?.model ?? "")
 
     const pricing: Record<string, { input: number; output: number }> = {
       "claude-sonnet-4-6": { input: 3.6, output: 18 },
@@ -155,40 +243,31 @@ export default function App() {
   }
   
   // AI approval queue
-  const [aiApprovalQueue, setAiApprovalQueue] = useState<any[]>([])
+  type AiApprovalItem = { id: string; model: string; scope: string; estInputTokens: number; estOutputTokens: number; prompt: string }
+  const [aiApprovalQueue, setAiApprovalQueue] = useState<AiApprovalItem[]>([])
   
-  const enqueue = (item: any) => {
-    setAiApprovalQueue((prev: any[]) => [...prev, item])
+  const enqueue = (item: AiApprovalItem) => {
+    setAiApprovalQueue((prev: AiApprovalItem[]) => [...prev, item])
   }
   
   const dequeue = () => {
-    setAiApprovalQueue((prev: any[]) => prev.slice(1))
+    setAiApprovalQueue((prev: AiApprovalItem[]) => prev.slice(1))
     return aiApprovalQueue[0] || null
   }
 
   const currentAiApproval = aiApprovalQueue.length ? aiApprovalQueue[0] : aiApproval
 
-  async function sendResetPw(userId:number){
-  await fetch("/api/admin/send-reset",{
-    method:"POST",
-    credentials:"include",
-    headers:{ "content-type":"application/json"},
-    body:JSON.stringify({userId})
-  })
-  alert("Reset email sent")
-}
-
-
-const [adminUsers, setAdminUsers] = useState<any[]>([])
+type AdminUser = { id: number; email: string; name?: string; credits?: number; created_at?: string }
+const [adminUsers, setAdminUsers] = useState<AdminUser[]>([])
 const [adminUserPlans, setAdminUserPlans] = useState<Record<number, "basis" | "starter" | "pro" | "scale">>({})
 const [adminLoading, setAdminLoading] = useState(false)
-const [showCreateUser, setShowCreateUser] = useState(false)
-const [newUser, setNewUser] = useState({ email: "", password: "", name: "", credits: 0 })
-  const [approvalOn, setApprovalOn] = useState(true)
-  const [showCredits, setShowCredits] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
-  const [balance, setBalance] = useState<number | null>(null)
+  const [showCreateUser, setShowCreateUser] = useState(false)
+  const [newUser, setNewUser] = useState({ email: "", password: "", name: "", credits: 0 })
   const [demoPlan, setDemoPlan] = useState<"basis" | "starter" | "pro" | "scale">("basis")
+  const [blockFilter, setBlockFilter] = useState<BlockFilter>("all")
+  const [isEditRailCollapsed, setIsEditRailCollapsed] = useState(false)
+  const [structureItems, setStructureItems] = useState<StructureSnapshotItem[]>([])
+  const [selectedRootId, setSelectedRootId] = useState<string | null>(null)
 
   const demoPlanMeta: Record<"basis" | "starter" | "pro" | "scale", {
     label: string
@@ -244,14 +323,7 @@ const [newUser, setNewUser] = useState({ email: "", password: "", name: "", cred
 
   const activePlanMeta = demoPlanMeta[demoPlan]
   const [exportMode, setExportMode] = useState<"wp-placeholder" | "html-clean" | "html-raw">("wp-placeholder")
-  const [selectedElementGroup, setSelectedElementGroup] = useState({
-    wordpress: "",
-    html: "",
-    layout: "",
-    media: "",
-    form: "",
-    advanced: "",
-  })
+  const [exporting, setExporting] = useState(false)
   const [leftAiPrompt, setLeftAiPrompt] = useState("")
   const [leftAiModel, setLeftAiModel] = useState("auto")
   const [leftAiRunning, setLeftAiRunning] = useState(false)
@@ -264,7 +336,7 @@ const loadAdminUsers = async () => {
     const d = await r.json()
     if (d.ok) {
       setAdminUsers(d.users || [])
-      const plans: Record<number, any> = {}
+      const plans: Record<number, "basis" | "starter" | "pro" | "scale"> = {}
       for (const u of d.users || []) { plans[u.id] = u.plan || "basis" }
       setAdminUserPlans(plans)
     } else alert(d.error || t("Admin load failed"))
@@ -353,7 +425,7 @@ const assignPlan = async (userId: number, userEmail: string) => {
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ plan })
   }).then(r => r.json()).then(d => {
-    if (d.ok) { if (authUser && (authUser as any).id === userId) setDemoPlan(plan); alert(`✅ Plan "${plan}" saved`) }
+    if (d.ok) { if (authUser && authUser !== "loading" && authUser.id === userId) setDemoPlan(plan); alert(`✅ Plan "${plan}" saved`) }
     else { alert("Failed: " + d.error) }
   }).catch(() => alert("Network error"))
 }
@@ -387,7 +459,39 @@ const createUser = async () => {
 
 const autoSave = async (html: string) => {
     if (!currentProject) return
-    try { await apiSaveProject(currentProject.id, { html }) } catch {}
+    try {
+      const saved = await apiSaveProject(currentProject.id, { html, platform: currentPlatform })
+      if (saved) setCurrentProject(prev => (prev && prev.id === saved.id ? { ...prev, ...saved } : saved))
+    } catch { /* autosave failure is non-fatal */ }
+  }
+
+  useEffect(() => {
+    currentHtmlRef.current = currentHtml
+  }, [currentHtml])
+
+  const loadWorkflowHistory = async (projectId: number) => {
+    try {
+      const events = await apiGetProjectWorkflowHistory(projectId)
+      setWorkflowHistory(events)
+    } catch {
+      setWorkflowHistory([])
+    }
+  }
+
+  const changeWorkflowStage = async (stage: WorkflowStage) => {
+    if (!currentProject) return
+    const currentStage = currentProject.workflowStage || "draft"
+    if (currentStage === stage) return
+    const comment = window.prompt(`Workflow note for ${stage.replace(/_/g, " ")}:`, "") || ""
+    try {
+      const project = await apiSetProjectWorkflowStage(currentProject.id, stage, comment)
+      setCurrentProject(project)
+      setExportWarnings([])
+      await loadWorkflowHistory(project.id)
+      toast.success(`Workflow moved to ${stage.replace(/_/g, " ")}`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Workflow update failed")
+    }
   }
 
   const renderToIframe = (html: string) => {
@@ -396,70 +500,129 @@ const autoSave = async (html: string) => {
     iframe.srcdoc = html || "<!doctype html><html><head></head><body></body></html>";
   };
 
-  useEffect(() => { if (view === "editor" && currentHtml) renderToIframe(currentHtml); }, [currentHtml, view]);
+  const commitLiveEditorHtml = (html: string) => {
+    const nextHtml = String(html || "")
+    const prevHtml = currentHtmlRef.current
+    if (prevHtml && prevHtml !== nextHtml) undoPush(prevHtml)
+    skipNextLiveIframeSyncRef.current = true
+    setCurrentHtml(nextHtml)
+    autoSave(nextHtml)
+  }
 
-  const load = async (forceReload = false) => {
-    const u = url.trim();
-    if (!u) return;
-    if (!forceReload && loadedUrl === u && currentHtml) return;
+  useEffect(() => {
+    if (view !== "editor") return
+    if (skipNextLiveIframeSyncRef.current && mode === "edit") {
+      skipNextLiveIframeSyncRef.current = false
+      return
+    }
+    renderToIframe(currentHtml)
+  }, [currentHtml, mode, view]);
+
+  const hasMeaningfulProjectHtml = (html: string) => {
+    const raw = String(html || "").trim()
+    if (!raw) return false
+    const bodyMatch = raw.match(/<body[^>]*>([\s\S]*?)<\/body>/i)
+    const body = bodyMatch ? bodyMatch[1] : raw
+    const withoutNonVisual = body
+      .replace(/<script\b[\s\S]*?<\/script>/gi, "")
+      .replace(/<style\b[\s\S]*?<\/style>/gi, "")
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .trim()
+    const text = withoutNonVisual.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+    const structure = withoutNonVisual.match(/<(main|section|article|div|header|footer|nav|form|img|figure|h1|h2|h3|p|ul|ol|li|button|a)\b/gi) || []
+    return text.length >= 40 || structure.length >= 4
+  }
+
+  const resetLoadedDocument = (nextUrl = "", nextPlatform: SitePlatform = "unknown") => {
+    setUrl(nextUrl)
+    setLoadedUrl("")
+    setCurrentHtml("")
+    setCurrentPlatform(nextPlatform)
+    setCurrentPlatformGuide(null)
+    setExportWarnings([])
+    setExportReadiness("ready")
+    renderToIframe("")
+  }
+
+  const load = async (forceReload = false, requestedUrl?: string) => {
+    const targetUrl = String(requestedUrl ?? url).trim();
+    if (!targetUrl) return;
+    if (!forceReload && loadedUrl === targetUrl && currentHtml) return;
+    const requestId = ++loadRequestRef.current
     try {
+      resetLoadedDocument(targetUrl)
       setStatus("blocked");
-      const r = await fetch(`${ENDPOINTS.proxy}?url=${encodeURIComponent(u)}`, { credentials: "include" });
+      const r = await fetch(`${ENDPOINTS.proxy}?url=${encodeURIComponent(targetUrl)}`, { credentials: "include" });
+      if (!r.ok) {
+        const text = await r.text();
+        let msg = "Page could not be loaded.";
+        try { const d = JSON.parse(text); if (d?.error) msg = d.error; } catch { /* ignore */ }
+        if (requestId !== loadRequestRef.current) return;
+        toast.error(msg);
+        setStatus("idle");
+        return;
+      }
       const html = await r.text();
-      setLoadedUrl(u); setCurrentHtml(html); renderToIframe(html); setStatus("ok");
-    } catch { setStatus("idle"); }
+      if (requestId !== loadRequestRef.current) return;
+      if (!html.trim()) {
+        throw new Error("The loaded page returned empty HTML.")
+      }
+      const resolvedUrl = r.headers.get("x-site-url") || targetUrl
+      const headerPlatform = normalizePlatform(r.headers.get("x-site-platform"))
+      const detectedPlatform = headerPlatform !== "unknown" ? headerPlatform : detectSitePlatform(resolvedUrl, html)
+      setUrl(resolvedUrl)
+      setLoadedUrl(resolvedUrl)
+      setCurrentHtml(html)
+      setCurrentPlatform(detectedPlatform)
+      renderToIframe(html)
+      setStatus("ok");
+    } catch (e) {
+      if (requestId !== loadRequestRef.current) return;
+      setStatus("idle");
+      toast.error(e instanceof Error ? e.message : "Page could not be loaded.");
+    }
   };
 
   const handleOpenProject = async (p: Project) => {
-    setCurrentProject(p)
+    const project = await apiGetProject(p.id).catch(() => p)
+    setCurrentProject(project)
+    loadWorkflowHistory(project.id).catch(() => {})
     if (view !== "admin") setView("editor")
 
-    const inlineHtml = String((p as any)?.html || "").trim()
+    const projectHtml = String(project.html ?? "")
+    const inlineHtml = projectHtml.trim()
 
-    if (inlineHtml) {
-      setUrl("")
-      setLoadedUrl("")
+    if (inlineHtml && hasMeaningfulProjectHtml(inlineHtml)) {
+      setUrl(project.url || "")
+      setLoadedUrl(project.url || "")
       setCurrentHtml(inlineHtml)
+      setCurrentPlatform(resolvePlatform(project.platform, project.url, inlineHtml))
+      setCurrentPlatformGuide(project.platformGuide ?? null)
+      setExportWarnings(project.latestExport?.manifest?.warnings || [])
+      setExportReadiness(project.latestExport?.readiness || "ready")
       renderToIframe(inlineHtml)
       setStatus("ok")
       return
     }
 
-    if (p.html && p.html.length > 0) {
+    if (project.url) setUrl(project.url)
+    if (!project.url && projectHtml) {
       setUrl("")
       setLoadedUrl("")
-      setCurrentHtml(p.html)
-      renderToIframe(p.html)
+      setCurrentHtml(projectHtml)
+      setCurrentPlatform(resolvePlatform(project.platform, project.url, projectHtml))
+      setCurrentPlatformGuide(project.platformGuide ?? null)
+      setExportWarnings(project.latestExport?.manifest?.warnings || [])
+      setExportReadiness(project.latestExport?.readiness || "ready")
+      renderToIframe(projectHtml)
       setStatus("ok")
       return
     }
-
-    if (p.url) setUrl(p.url)
-    if (!p.url && p.html) {
-      setCurrentHtml(p.html)
-      renderToIframe(p.html)
-      setStatus("ok")
-      return
+    if (project.url) {
+      setExportWarnings([])
+      setExportReadiness("ready")
+      setTimeout(() => load(true, project.url || ""), 100)
     }
-    if (p.html) {
-      setCurrentHtml(p.html)
-      renderToIframe(p.html)
-      setLoadedUrl(p.url || "")
-      setStatus("ok")
-    } else if (p.url) {
-      setTimeout(() => load(true), 100)
-    }
-  }
-
-  const handleNewProject = async () => {
-    if (!currentHtml) { toast.warning("Bitte zuerst eine Website laden"); return }
-    const name = url ? new URL(url).hostname : "Neues Projekt"
-    try {
-      const id = await apiCreateProject(name, url, currentHtml)
-      const p: Project = { id, name, url, updated_at: new Date().toISOString(), created_at: new Date().toISOString() }
-      setCurrentProject(p)
-      toast.success("Projekt gespeichert!")
-    } catch (e: any) { toast.error(e.message) }
   }
 
   const handleModeSwitch = () => {
@@ -473,40 +636,137 @@ const autoSave = async (html: string) => {
 
   const handleExport = async () => {
     if (!currentHtml) { toast.warning("Bitte lade zuerst eine Website"); return; }
+    setExporting(true);
     try {
+      const validation = await apiFetch<{
+        ok: boolean
+        platform: SitePlatform
+        readiness: "ready" | "guarded"
+        warnings: ExportWarning[]
+        guide: PlatformGuide
+        url: string
+      }>("/api/export/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ html: currentHtml, url: loadedUrl, mode: exportMode, platform: currentPlatform })
+      })
+      setCurrentPlatformGuide(validation.guide)
+      setCurrentPlatform(validation.platform || currentPlatform)
+      setExportWarnings(validation.warnings || [])
+      setExportReadiness(validation.readiness || "ready")
+      if ((validation.warnings || []).length) {
+        toast.warning(`${validation.warnings.length} delivery warning${validation.warnings.length === 1 ? "" : "s"} added to manifest`)
+      }
+
       const r = await fetch("/api/export", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html: currentHtml, url: loadedUrl, mode: exportMode })
+        body: JSON.stringify({
+          html: currentHtml,
+          url: loadedUrl,
+          mode: exportMode,
+          platform: currentPlatform,
+          project_id: currentProject?.id,
+        })
       });
-      if (!r.ok) throw new Error();
+      if (!r.ok) {
+        const text = await r.text();
+        let msg = "Export fehlgeschlagen";
+        try { const d = JSON.parse(text); if (d?.error) msg = d.error; } catch { /* ignore */ }
+        throw new Error(msg);
+      }
       const a = document.createElement("a");
       a.href = URL.createObjectURL(await r.blob());
       a.download = exportMode === "wp-placeholder" ? "site_wp_placeholders.zip" : (exportMode === "html-clean" ? "site_html_clean.zip" : "site_html_raw.zip");
       document.body.appendChild(a); a.click(); a.remove();
-    } catch { toast.error("Export fehlgeschlagen"); }
+      if (currentProject?.id) {
+        const refreshed = await apiGetProject(currentProject.id).catch(() => null)
+        if (refreshed) {
+          setCurrentProject(refreshed)
+          await loadWorkflowHistory(refreshed.id)
+        }
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Export fehlgeschlagen");
+    } finally {
+      setExporting(false);
+    }
   };
 
-const handleAiRescan = (mode: "block" | "page") => {
+  useEffect(() => {
+    if (!currentPlatform || currentPlatform === "unknown") {
+      setCurrentPlatformGuide(null)
+      return
+    }
+    if (currentProject?.platformGuide && currentProject.platform === currentPlatform) {
+      setCurrentPlatformGuide(currentProject.platformGuide)
+      return
+    }
+    apiFetch<{ ok: boolean; guide: PlatformGuide }>(`/api/platforms/${currentPlatform}`)
+      .then((data) => setCurrentPlatformGuide(data.guide))
+      .catch(() => setCurrentPlatformGuide(null))
+  }, [currentPlatform, currentProject?.id, currentProject?.platform, currentProject?.platformGuide])
+
+  useEffect(() => {
+    if (loadedUrl) localStorage.setItem("se_last_loaded_url", loadedUrl)
+    if (currentPlatform) localStorage.setItem("se_last_site_platform", currentPlatform)
+  }, [loadedUrl, currentPlatform])
+
+  useEffect(() => {
+    const onStructure = (event: Event) => {
+      const detail = (event as CustomEvent).detail as { items?: StructureSnapshotItem[]; selectedRootId?: string | null } | null
+      setStructureItems(detail?.items || [])
+      setSelectedRootId(detail?.selectedRootId || null)
+    }
+    window.addEventListener("bo:structure", onStructure as EventListener)
+    return () => window.removeEventListener("bo:structure", onStructure as EventListener)
+  }, [])
+
+  useEffect(() => {
+    if (view !== "editor") return
+    const timer = window.setTimeout(() => {
+      const doc = iframeRef.current?.contentDocument || null
+      setEditorChrome(pickEditorChromeFromDocument(doc))
+    }, 80)
+    return () => window.clearTimeout(timer)
+  }, [view, currentHtml, loadedUrl, mode])
+
+  const handleAiRescan = (mode: "block" | "page") => {
     setAiScanLoading(true);
     window.dispatchEvent(new CustomEvent("blockoverlay:rescan", { detail: { mode } }));
     setTimeout(() => setAiScanLoading(false), 4000);
   };
 
+  const moveStructureItem = (rootId: string, delta: number) => {
+    window.dispatchEvent(new CustomEvent("bo:move-root", { detail: { rootId, delta } }))
+  }
+
+  const addSelectedComponent = () => {
+    const component = COMPONENT_LIBRARY[selectedComponent as keyof typeof COMPONENT_LIBRARY]
+    if (!component) return
+    window.dispatchEvent(new CustomEvent("bo:insert-component", {
+      detail: {
+        html: component.template,
+        targetRootId: selectedRootId || structureItems[structureItems.length - 1]?.rootId || null,
+      }
+    }))
+    toast.success(`${component.name} added successfully!`)
+  }
+
   useEffect(() => {
-    const handler = (e: any) => trackUsage(e?.detail || null)
-    window.addEventListener("bo:ai-usage", handler as any)
-    return () => window.removeEventListener("bo:ai-usage", handler as any)
+    const handler = (e: Event) => trackUsage((e as CustomEvent).detail ?? null)
+    window.addEventListener("bo:ai-usage", handler)
+    return () => window.removeEventListener("bo:ai-usage", handler)
   }, [])
 
   useEffect(() => {
     const onDone = () => setLeftAiRunning(false)
-    window.addEventListener("bo:left-ai-done", onDone as any)
-    return () => window.removeEventListener("bo:left-ai-done", onDone as any)
+    window.addEventListener("bo:left-ai-done", onDone)
+    return () => window.removeEventListener("bo:left-ai-done", onDone)
   }, [])
 
   useEffect(() => {
-    const onReq = (e: any) => {
-      const d = e?.detail || {}
+    const onReq = (e: Event) => {
+      const d = (e as CustomEvent).detail ?? {}
       enqueue({
         id: String(d.id || ""),
         model: String(d.model || "unknown"),
@@ -516,31 +776,40 @@ const handleAiRescan = (mode: "block" | "page") => {
         prompt: String(d.prompt || "")
       })
     }
-    window.addEventListener("bo:ai-approval-request", onReq as any)
-    return () => window.removeEventListener("bo:ai-approval-request", onReq as any)
+    window.addEventListener("bo:ai-approval-request", onReq)
+    return () => window.removeEventListener("bo:ai-approval-request", onReq)
   }, [])
 
 
   const isEdit = mode === "edit";
   const isLoading = status === "blocked";
-
+  const currentPlatformMeta = getPlatformMeta(currentPlatform);
+  const editRailWidth = isEdit ? (isEditRailCollapsed ? EDIT_RAIL_COLLAPSED_WIDTH : EDIT_RAIL_EXPANDED_WIDTH) : 0
+  const blockFamilyChips = [
+    { label: currentPlatformMeta.label, tint: currentPlatformMeta.accent, background: currentPlatformMeta.background, value: "all" as BlockFilter },
+    { label: "HTML", tint: "rgba(148,163,184,0.92)", background: "rgba(148,163,184,0.12)", value: "content" as BlockFilter },
+    { label: "Layout", tint: "rgba(249,115,22,0.92)", background: "rgba(249,115,22,0.12)", value: "container" as BlockFilter },
+    { label: "Media", tint: "rgba(45,212,191,0.92)", background: "rgba(45,212,191,0.12)", value: "image" as BlockFilter },
+    { label: "Form", tint: "rgba(56,189,248,0.92)", background: "rgba(56,189,248,0.12)", value: "form" as BlockFilter },
+    { label: "CTA", tint: "rgba(168,85,247,0.92)", background: "rgba(168,85,247,0.12)", value: "button" as BlockFilter },
+  ]
   
   useEffect(() => {
-    const onSignal = (e: any) => {
+    const onSignal = (e: Event) => {
       try {
-        const d = e?.detail || {};
-        if (typeof d.dragging === "boolean") setIsDraggingBlock(d.dragging);
-      } catch {}
+        const d = (e as CustomEvent).detail ?? {};
+        if (typeof (d as { dragging?: boolean }).dragging === "boolean") setIsDraggingBlock((d as { dragging: boolean }).dragging);
+      } catch { /* ignore malformed event */ }
     };
     const onDragEnd = () => setIsDraggingBlock(false);
 
-    window.addEventListener("bo:dragging", onSignal as any);
-    window.addEventListener("dragend", onDragEnd as any);
-    window.addEventListener("drop", onDragEnd as any);
+    window.addEventListener("bo:dragging", onSignal);
+    window.addEventListener("dragend", onDragEnd);
+    window.addEventListener("drop", onDragEnd);
     return () => {
-      window.removeEventListener("bo:dragging", onSignal as any);
-      window.removeEventListener("dragend", onDragEnd as any);
-      window.removeEventListener("drop", onDragEnd as any);
+      window.removeEventListener("bo:dragging", onSignal);
+      window.removeEventListener("dragend", onDragEnd);
+      window.removeEventListener("drop", onDragEnd);
     };
   }, []);
 
@@ -553,8 +822,19 @@ useEffect(() => {
   if (resetToken) return <ResetPasswordScreen token={resetToken} onDone={() => window.location.replace("/")} />
 
   if (authUser === "loading") return (
-    <div style={{ height: "100vh", background: "#080c18", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ color: "rgba(148,163,184,0.5)", fontSize: 16 }}>⟳ Laden...</div>
+    <div style={{
+      height: "100vh", background: "var(--bg-root)",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontFamily: "var(--font-sans)",
+    }}>
+      <div style={{
+        color: "var(--text-muted)", fontSize: 15,
+        display: "flex", alignItems: "center", gap: 10,
+      }}>
+        <span style={{ animation: "spin 0.8s linear infinite" }}>⟳</span>
+        Laden…
+      </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
     </div>
   )
 
@@ -622,7 +902,7 @@ useEffect(() => {
             <div style={{ display: "grid", gridTemplateColumns: "48px 1fr 140px 100px 100px 160px", padding: "10px 20px", background: "#0f172a", borderBottom: "1px solid #1e293b", fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: 0.8 }}>
               <div>ID</div><div>User</div><div>Plan</div><div>Credits</div><div>Joined</div><div style={{ textAlign: "right" }}>Actions</div>
             </div>
-            {adminUsers.map((u: any) => {
+            {adminUsers.map((u: AdminUser) => {
               const plan = adminUserPlans[u.id] || "basis"
               const color = planColors[plan] || "#6366f1"
               return (
@@ -657,8 +937,8 @@ useEffect(() => {
           <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
             <div style={{ background: "#0d1525", padding: 28, borderRadius: 14, border: "1px solid #1e293b", width: 400 }}>
               <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 20 }}>Create User</div>
-              {["email","password","name"].map(f => (<input key={f} placeholder={f} type={f==="password"?"password":"text"} value={(newUser as any)[f]} onChange={e => setNewUser((p:any) => ({...p,[f]:e.target.value}))} style={{ display:"block", width:"100%", marginBottom:10, padding:"9px 12px", borderRadius:8, border:"1px solid #1e293b", background:"#060b14", color:"white", fontSize:13, boxSizing:"border-box" }} />))}
-              <input placeholder={t("credits (€)")} type="number" value={newUser.credits} onChange={e => setNewUser((p:any) => ({...p,credits:Number(e.target.value)}))} style={{ display:"block", width:"100%", marginBottom:16, padding:"9px 12px", borderRadius:8, border:"1px solid #1e293b", background:"#060b14", color:"white", fontSize:13, boxSizing:"border-box" }} />
+              {(["email","password","name"] as const).map(f => (<input key={f} placeholder={f} type={f==="password"?"password":"text"} value={newUser[f]} onChange={e => setNewUser(p => ({...p,[f]:e.target.value}))} style={{ display:"block", width:"100%", marginBottom:10, padding:"9px 12px", borderRadius:8, border:"1px solid #1e293b", background:"#060b14", color:"white", fontSize:13, boxSizing:"border-box" }} />))}
+              <input placeholder={t("credits (€)")} type="number" value={newUser.credits} onChange={e => setNewUser(p => ({...p,credits:Number(e.target.value)}))} style={{ display:"block", width:"100%", marginBottom:16, padding:"9px 12px", borderRadius:8, border:"1px solid #1e293b", background:"#060b14", color:"white", fontSize:13, boxSizing:"border-box" }} />
               <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
                 <button onClick={() => setShowCreateUser(false)} style={{ padding:"8px 16px", borderRadius:8, border:"1px solid #1e293b", background:"transparent", color:"#94a3b8", cursor:"pointer", fontSize:13 }}>Cancel</button>
                 <button onClick={createUser} style={{ padding:"8px 16px", borderRadius:8, border:"none", background:"#6366f1", color:"white", cursor:"pointer", fontSize:13, fontWeight:700 }}>Create</button>
@@ -671,7 +951,7 @@ useEffect(() => {
   }
 
   return (
-    <div style={{ height: "100vh", background: "#0b1220", fontFamily: "system-ui, sans-serif" }}>
+    <div style={{ height: "100vh", background: "var(--bg-root)", fontFamily: "var(--font-sans)" }}>
 
         {/* Drag Grid Overlay */}
         {isEdit && isDraggingBlock && (
@@ -679,16 +959,16 @@ useEffect(() => {
             data-bo-grid-overlay="1"
             style={{
               position: "fixed",
-              left: 0,
+              left: editRailWidth,
               top: 58,
               right: 0,
               bottom: 0,
               zIndex: 99999,
               pointerEvents: "none",
               backgroundImage:
-                "linear-gradient(to right, rgba(99,102,241,0.20) 1px, transparent 1px), linear-gradient(to bottom, rgba(99,102,241,0.20) 1px, transparent 1px)",
+                "linear-gradient(to right, rgba(96,165,250,0.14) 1px, transparent 1px), linear-gradient(to bottom, rgba(96,165,250,0.14) 1px, transparent 1px)",
               backgroundSize: "40px 40px",
-              boxShadow: "inset 0 0 0 2px rgba(99,102,241,0.25)",
+              boxShadow: "inset 0 0 0 1px rgba(96,165,250,0.22)",
             }}
           >
             <div style={{
@@ -697,8 +977,8 @@ useEffect(() => {
               top: 10,
               padding: "6px 10px",
               borderRadius: 10,
-              background: "rgba(15,23,42,0.85)",
-              border: "1px solid rgba(99,102,241,0.35)",
+              background: "rgba(9,13,18,0.92)",
+              border: "1px solid rgba(96,165,250,0.24)",
               color: "white",
               fontSize: 12,
               fontWeight: 800,
@@ -711,46 +991,43 @@ useEffect(() => {
       {/* ── Toolbar ── */}
       <div style={{
         position: "fixed", top: 0, left: 0, right: 0, height: 58,
-        display: "flex", alignItems: "center", gap: 8, padding: "0 16px",
-        background: isEdit
-          ? "linear-gradient(135deg, rgba(127,29,29,0.97) 0%, rgba(153,27,27,0.97) 100%)"
-          : "linear-gradient(135deg, rgba(15,23,42,0.98) 0%, rgba(23,33,60,0.98) 100%)",
-        borderBottom: isEdit ? "1px solid rgba(239,68,68,0.3)" : "1px solid rgba(99,102,241,0.2)",
-        boxShadow: "0 2px 20px rgba(0,0,0,0.4)",
+        display: "flex", alignItems: "center", gap: 10, padding: "0 16px",
+        background: view === "editor" ? editorChrome.background : "var(--header-bg)",
+        borderBottom: view === "editor" ? `1px solid ${editorChrome.border}` : "1px solid var(--border)",
+        boxShadow: "0 8px 30px rgba(0,0,0,0.18)",
         zIndex: 80,
         transition: "background 0.3s ease",
       }}>
 
         {/* Back to Dashboard */}
         <button onClick={() => setView("dashboard")} style={{
-          height: 36, padding: "0 12px", borderRadius: 10, flexShrink: 0,
-          border: "1px solid rgba(99,102,241,0.3)",
-          background: "rgba(99,102,241,0.1)",
-          color: "white", cursor: "pointer", fontSize: 18, fontWeight: 900,
-        }}>⬡</button>
+          height: 34, padding: "0 12px", borderRadius: 10, flexShrink: 0,
+          border: "1px solid var(--border)",
+          background: "rgba(255,255,255,0.03)",
+          color: "white", cursor: "pointer", fontSize: 12, fontWeight: 800,
+          display: "inline-flex", alignItems: "center", gap: 6,
+        }}>← Dashboard</button>
 
         {/* Logo */}
         <div style={{
-          fontSize: 18, fontWeight: 900, color: "white", marginRight: 4,
-          background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-          WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+          fontSize: 16, fontWeight: 800, color: "var(--text-primary)", marginRight: 2,
+          letterSpacing: -0.3,
           flexShrink: 0,
-        }}>⬡ Editor</div>
+        }}>Site Editor</div>
 
           {/* Active Plan Badge */}
           <div
             style={{
-              minHeight: 36,
-              padding: "6px 12px",
-              borderRadius: 10,
+              height: 30,
+              padding: "0 10px",
+              borderRadius: 999,
               flexShrink: 0,
               display: "flex",
               alignItems: "center",
-              gap: 8,
+              gap: 6,
               border: `1px solid ${activePlanMeta.border}`,
               background: activePlanMeta.bg,
               color: "white",
-              lineHeight: 1.15,
             }}
           >
             <div
@@ -763,14 +1040,9 @@ useEffect(() => {
                 flexShrink: 0,
               }}
             />
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              <span style={{ fontSize: 11, fontWeight: 900, color: activePlanMeta.accent }}>
-                PLAN · {activePlanMeta.label}
-              </span>
-              <span style={{ fontSize: 11, opacity: 0.8 }}>
-                {activePlanMeta.projects}
-              </span>
-            </div>
+            <span style={{ fontSize: 11, fontWeight: 900, color: activePlanMeta.accent, whiteSpace: "nowrap" }}>
+              PLAN · {activePlanMeta.label}
+            </span>
           </div>
 
 
@@ -782,9 +1054,9 @@ useEffect(() => {
               style={{
                 minHeight: 36, padding: "6px 12px", borderRadius: 10, flexShrink: 0,
                 display: "flex", alignItems: "center", gap: 8,
-                border: "1px solid rgba(234,179,8,0.35)",
-                background: "rgba(234,179,8,0.1)",
-                fontSize: 12, fontWeight: 800, color: "rgba(234,179,8,0.95)",
+              border: "1px solid rgba(245,158,11,0.25)",
+              background: "rgba(245,158,11,0.1)",
+              fontSize: 12, fontWeight: 800, color: "rgba(253,224,71,0.92)",
                 cursor: "pointer",
                 lineHeight: 1.15,
               }}>
@@ -794,38 +1066,62 @@ useEffect(() => {
             </div>
           )}
 
-        {/* URL Input */}
-        <div style={{ flex: "0 1 360px", minWidth: 200, position: "relative" }}>
+        {/* URL Input + Load */}
+        <div style={{
+          flex: "0 1 430px",
+          minWidth: 240,
+          height: 38,
+          display: "flex",
+          alignItems: "center",
+          borderRadius: 12,
+          border: isEdit ? "1px solid rgba(248,113,113,0.24)" : "1px solid var(--border)",
+          background: "rgba(255,255,255,0.03)",
+          overflow: "hidden",
+        }}>
           <div style={{
-            position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)",
-            fontSize: 13, color: "rgba(148,163,184,0.5)",
+            width: 34,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: 13,
+            color: "rgba(148,163,184,0.5)",
+            flexShrink: 0,
           }}>◎</div>
           <input
             value={url} onChange={e => setUrl(e.target.value)}
             onKeyDown={e => e.key === "Enter" && load(true)}
             placeholder="https://..."
             style={{
-              width: "100%", height: 36, borderRadius: 10,
-              border: isEdit ? "1px solid rgba(239,68,68,0.4)" : "1px solid rgba(99,102,241,0.3)",
-              background: "rgba(0,0,0,0.3)", color: "white",
-              padding: "0 12px 0 30px", outline: "none", fontSize: 13,
-              transition: "border 0.2s",
+              flex: 1,
+              height: "100%",
+              border: "none",
+              background: "transparent",
+              color: "var(--text-primary)",
+              padding: "0 12px 0 0",
+              outline: "none",
+              fontSize: 13,
+              minWidth: 0,
             }}
           />
+          <div style={{ width: 1, alignSelf: "stretch", background: "rgba(148,163,184,0.18)" }} />
+          <button onClick={() => load(true)}
+            onMouseDown={e => (e.currentTarget.style.transform="scale(0.96)")}
+            onMouseUp={e => (e.currentTarget.style.transform="scale(1)")}
+            onMouseLeave={e => (e.currentTarget.style.transform="scale(1)")}
+            style={{
+              height: "100%",
+              padding: "0 16px",
+              border: "none",
+              borderRadius: 0,
+              flexShrink: 0,
+              background: "rgba(255,255,255,0.04)",
+              color: "white",
+              cursor: "pointer",
+              fontWeight: 700,
+              fontSize: 13,
+              transition: "transform 0.1s, background 0.2s",
+            }}>{isLoading ? <span style={{display:"inline-block",animation:"spin 0.7s linear infinite"}}>⟳</span> : "↺"} Load</button>
         </div>
-
-        {/* Load Button */}
-        <button onClick={() => load(true)}
-          onMouseDown={e => (e.currentTarget.style.transform="scale(0.93)")}
-          onMouseUp={e => (e.currentTarget.style.transform="scale(1)")}
-          onMouseLeave={e => (e.currentTarget.style.transform="scale(1)")}
-          style={{
-            height: 36, padding: "0 16px", borderRadius: 10, flexShrink: 0,
-            border: "1px solid rgba(99,102,241,0.4)",
-            background: "rgba(0,0,0,0.35)",
-            color: "white", cursor: "pointer", fontWeight: 700, fontSize: 13,
-            transition: "transform 0.1s, background 0.2s",
-          }}>{isLoading ? <span style={{display:"inline-block",animation:"spin 0.7s linear infinite"}}>⟳</span> : "↺"} Load</button>
 
         {/* Status Badge */}
         <div style={{
@@ -844,6 +1140,45 @@ useEffect(() => {
           {status === "idle" ? "Bereit" : status === "blocked" ? "Lädt…" : "OK"}
         </div>
 
+        <div
+          title={currentPlatformGuide?.safeEditScope || currentPlatformMeta.label}
+          style={{
+          height: 36, padding: "0 12px", borderRadius: 10, flexShrink: 0,
+          display: "flex", alignItems: "center", gap: 8,
+          border: `1px solid ${currentPlatformMeta.border}`,
+          background: currentPlatformMeta.background,
+          color: currentPlatformMeta.accent,
+          fontSize: 12, fontWeight: 800,
+        }}>
+          <div style={{ width: 7, height: 7, borderRadius: "50%", background: currentPlatformMeta.accent, boxShadow: `0 0 6px ${currentPlatformMeta.accent}` }} />
+          {currentPlatformMeta.label}
+        </div>
+
+        {currentProject && (
+          <select
+            value={currentProject.workflowStage || "draft"}
+            onChange={e => changeWorkflowStage(e.target.value as WorkflowStage)}
+            title={workflowHistory[0] ? `Last workflow change: ${String(workflowHistory[0].to_stage || "draft").replace(/_/g, " ")}` : "Workflow stage"}
+            style={{
+              height: 36,
+              padding: "0 10px",
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.08)",
+              background: "rgba(255,255,255,0.03)",
+              color: "white",
+              fontWeight: 700,
+              fontSize: 12,
+              outline: "none",
+            }}
+          >
+            <option value="draft">Draft</option>
+            <option value="internal_review">Internal review</option>
+            <option value="client_review">Client review</option>
+            <option value="approved">Approved</option>
+            <option value="shipped">Shipped</option>
+          </select>
+        )}
+
         <button
           onClick={() => { const prev = undoPop(); if (prev) setCurrentHtml(prev) }}
           onMouseDown={e => (e.currentTarget.style.transform="scale(0.93)")}
@@ -855,8 +1190,8 @@ useEffect(() => {
             padding: "0 14px",
             borderRadius: 10,
             flexShrink: 0,
-            border: "1px solid rgba(255,255,255,0.18)",
-            background: "rgba(0,0,0,0.32)",
+            border: "1px solid var(--border)",
+            background: "rgba(255,255,255,0.03)",
             color: "white",
             cursor: "pointer",
             fontWeight: 700,
@@ -873,52 +1208,22 @@ useEffect(() => {
         {/* Edit/View Toggle */}
         <button onClick={handleModeSwitch} style={{
           height: 36, padding: "0 16px", borderRadius: 10, flexShrink: 0,
-          border: isEdit ? "1px solid rgba(239,68,68,0.5)" : "1px solid rgba(34,197,94,0.4)",
-          background: isEdit
-            ? "linear-gradient(135deg, rgba(239,68,68,0.25), rgba(220,38,38,0.25))"
-            : "linear-gradient(135deg, rgba(34,197,94,0.2), rgba(16,185,129,0.2))",
+          border: isEdit ? "1px solid rgba(248,113,113,0.22)" : "1px solid rgba(34,197,94,0.24)",
+          background: isEdit ? "rgba(127,29,29,0.24)" : "rgba(21,128,61,0.18)",
           color: "white", cursor: "pointer", fontWeight: 700, fontSize: 13,
         }}>{isEdit ? t("↓ Speichern") : t("✐ Bearbeiten")}</button>
-
-          {/* AI Buttons – nur im Edit Mode */}
-          {isEdit && (
-            <button
-              onClick={() => handleAiRescan("block")}
-              disabled={aiScanLoading}
-              onMouseDown={e => { if(!aiScanLoading) e.currentTarget.style.transform="scale(0.93)"; }}
-              onMouseUp={e => (e.currentTarget.style.transform="scale(1)")}
-              onMouseLeave={e => (e.currentTarget.style.transform="scale(1)")}
-              title="Ausgewählten Block mit KI verfeinern"
-              style={{
-                height: 36,
-                padding: "0 14px",
-                borderRadius: 10,
-                flexShrink: 0,
-                border: "1px solid rgba(255,255,255,0.18)",
-                background: "rgba(0,0,0,0.32)",
-                color: "white",
-                cursor: aiScanLoading ? "wait" : "pointer",
-                fontWeight: 700,
-                fontSize: 12,
-                opacity: aiScanLoading ? 0.65 : 1,
-                transition: "transform 0.1s"
-              }}
-            >
-              {aiScanLoading ? <span style={{display:"inline-block",animation:"spin 0.7s linear infinite"}}>⟳</span> : t("Refine Block")}
-            </button>
-          )}
 
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
             <select
               value={exportMode}
-              onChange={e => setExportMode(e.target.value as any)}
+              onChange={e => setExportMode(e.target.value as "wp-placeholder" | "html-clean" | "html-raw")}
               title="Download-Format"
               style={{
                 height: 36,
                 padding: "0 10px",
                 borderRadius: 10,
-                border: "1px solid rgba(255,255,255,0.18)",
-                background: "rgba(0,0,0,0.32)",
+                border: "1px solid var(--border)",
+                background: "rgba(255,255,255,0.03)",
                 color: "white",
                 cursor: "pointer",
                 fontWeight: 700,
@@ -933,25 +1238,32 @@ useEffect(() => {
 
             <button
               onClick={handleExport}
+              disabled={exporting}
               title="Download"
-              onMouseDown={e => (e.currentTarget.style.transform="scale(0.93)")}
-              onMouseUp={e => (e.currentTarget.style.transform="scale(1)")}
-              onMouseLeave={e => (e.currentTarget.style.transform="scale(1)")}
+              aria-busy={exporting ? "true" : undefined}
+              onMouseDown={e => { if (!exporting) (e.currentTarget as HTMLElement).style.transform = "scale(0.93)" }}
+              onMouseUp={e => (e.currentTarget as HTMLElement).style.transform = "scale(1)"}
+              onMouseLeave={e => (e.currentTarget as HTMLElement).style.transform = "scale(1)"}
               style={{
                 height: 36,
                 padding: "0 14px",
                 borderRadius: 10,
                 flexShrink: 0,
-                border: "1px solid rgba(255,255,255,0.18)",
-                background: "rgba(0,0,0,0.32)",
+                border: "1px solid var(--border)",
+                background: exporting
+                  ? "rgba(96,165,250,0.22)"
+                  : exportReadiness === "guarded"
+                  ? "rgba(245,158,11,0.12)"
+                  : "rgba(255,255,255,0.03)",
                 color: "white",
-                cursor: "pointer",
+                cursor: exporting ? "wait" : "pointer",
                 fontWeight: 700,
                 fontSize: 12,
-                transition: "transform 0.1s"
+                transition: "transform 0.1s",
+                opacity: exporting ? 0.9 : 1,
               }}
             >
-              Download
+              {exporting ? "⟳ …" : "Download"}
             </button>
           </div>
 
@@ -964,8 +1276,8 @@ useEffect(() => {
       `}</style>
 
       {/* Progress Bar */}
-      <div style={{ position:"fixed", left:0, right:0, top:58, height:2, background:"rgba(148,163,184,0.1)", zIndex:90, overflow:"hidden", opacity:isLoading?1:0, transition:"opacity 120ms" }}>
-        <div style={{ height:"100%", width:"40%", background:"linear-gradient(90deg, #6366f1, #8b5cf6)", transform:"translateX(-120%)", animation:isLoading?"loadingbar 800ms ease-in-out infinite":"none" }} />
+      <div style={{ position:"fixed", left:0, right:0, top: 64, height: 2, background:"rgba(148,163,184,0.1)", zIndex:90, overflow:"hidden", opacity:isLoading?1:0, transition:"opacity 120ms" }}>
+        <div style={{ height:"100%", width:"40%", background:"linear-gradient(90deg, #38bdf8, #60a5fa)", transform:"translateX(-120%)", animation:isLoading?"loadingbar 800ms ease-in-out infinite":"none" }} />
       </div>
 
       {currentAiApproval && (
@@ -1014,7 +1326,7 @@ useEffect(() => {
             <button
               onClick={() => {
                 window.dispatchEvent(new CustomEvent("bo:ai-approval-response", { detail: { id: currentAiApproval.id, approved: false } }))
-                dequeue(currentAiApproval?.id ?? "")
+                dequeue()
               }}
               style={{
                 height:36,
@@ -1034,7 +1346,7 @@ useEffect(() => {
             <button
               onClick={() => {
                 window.dispatchEvent(new CustomEvent("bo:ai-approval-response", { detail: { id: currentAiApproval.id, approved: true } }))
-                dequeue(currentAiApproval?.id ?? "")
+                dequeue()
               }}
               style={{
                 height:36,
@@ -1062,266 +1374,424 @@ useEffect(() => {
           <div style={{ color:"rgba(148,163,184,0.7)", fontSize:13, textAlign:"center", maxWidth:280 }}>Seite wird über den Proxy geladen.</div>
         </div>
       )}
-        {isEdit && (
+      {isEdit && (
+        <div style={{
+          position: "fixed",
+          left: 0,
+          top: 58,
+          bottom: 0,
+          width: editRailWidth,
+          overflowY: "auto",
+          zIndex: 96,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          padding: isEditRailCollapsed ? "12px 10px 18px" : "14px 14px 20px",
+          borderRight: "1px solid rgba(148,163,184,0.14)",
+          background: "rgba(4,8,20,0.985)",
+          boxShadow: "10px 0 26px rgba(0,0,0,0.14)",
+          boxSizing: "border-box",
+          transition: "width 0.22s ease, padding 0.22s ease",
+        }}>
           <div style={{
-            position: "fixed",
-            left: 10,
-            top: 70,
-            width: 148,
-            zIndex: 96,
             display: "flex",
-            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: isEditRailCollapsed ? "center" : "space-between",
             gap: 8,
+            paddingBottom: 12,
+            borderBottom: "1px solid rgba(148,163,184,0.14)",
           }}>
-            <select value={selectedElementGroup.wordpress} onChange={e => setSelectedElementGroup(prev => ({ ...prev, wordpress: e.target.value }))} title="WordPress Elemente" style={{ height: 34, padding: "0 8px", borderRadius: 8, border: "1px solid rgba(148,163,184,0.25)", background: "rgba(5,10,25,0.96)", color: "white", fontWeight: 700, fontSize: 12, outline: "none" }}>
-              <option value="">WordPress</option>
-              {WP_ELEMENTS.map(item => <option key={item} value={item}>{item}</option>)}
-            </select>
+            <button
+              onClick={() => setIsEditRailCollapsed((prev) => !prev)}
+              title={isEditRailCollapsed ? "Expand tools" : "Collapse tools"}
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: 10,
+                border: "1px solid rgba(148,163,184,0.18)",
+                background: "rgba(255,255,255,0.03)",
+                color: "white",
+                cursor: "pointer",
+                fontSize: 16,
+                fontWeight: 900,
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              {isEditRailCollapsed ? "›" : "‹"}
+            </button>
+          </div>
 
-            <select value={selectedElementGroup.html} onChange={e => setSelectedElementGroup(prev => ({ ...prev, html: e.target.value }))} title="HTML Elemente" style={{ height: 34, padding: "0 8px", borderRadius: 8, border: "1px solid rgba(148,163,184,0.25)", background: "rgba(5,10,25,0.96)", color: "white", fontWeight: 700, fontSize: 12, outline: "none" }}>
-              <option value="">HTML</option>
-              {HTML_ELEMENTS.map(item => <option key={item} value={item}>{item}</option>)}
-            </select>
-
-            <select value={selectedElementGroup.layout} onChange={e => setSelectedElementGroup(prev => ({ ...prev, layout: e.target.value }))} title="Layout Elemente" style={{ height: 34, padding: "0 8px", borderRadius: 8, border: "1px solid rgba(148,163,184,0.25)", background: "rgba(5,10,25,0.96)", color: "white", fontWeight: 700, fontSize: 12, outline: "none" }}>
-              <option value="">Layout</option>
-              {LAYOUT_ELEMENTS.map(item => <option key={item} value={item}>{item}</option>)}
-            </select>
-
-            <select value={selectedElementGroup.media} onChange={e => setSelectedElementGroup(prev => ({ ...prev, media: e.target.value }))} title="Media Elemente" style={{ height: 34, padding: "0 8px", borderRadius: 8, border: "1px solid rgba(148,163,184,0.25)", background: "rgba(5,10,25,0.96)", color: "white", fontWeight: 700, fontSize: 12, outline: "none" }}>
-              <option value="">Media</option>
-              {MEDIA_ELEMENTS.map(item => <option key={item} value={item}>{item}</option>)}
-            </select>
-
-            <select value={selectedElementGroup.form} onChange={e => setSelectedElementGroup(prev => ({ ...prev, form: e.target.value }))} title="Form Elemente" style={{ height: 34, padding: "0 8px", borderRadius: 8, border: "1px solid rgba(148,163,184,0.25)", background: "rgba(5,10,25,0.96)", color: "white", fontWeight: 700, fontSize: 12, outline: "none" }}>
-              <option value="">Form</option>
-              {FORM_ELEMENTS.map(item => <option key={item} value={item}>{item}</option>)}
-            </select>
-
-            <select value={selectedElementGroup.advanced} onChange={e => setSelectedElementGroup(prev => ({ ...prev, advanced: e.target.value }))} title="Advanced Elemente" style={{ height: 34, padding: "0 8px", borderRadius: 8, border: "1px solid rgba(148,163,184,0.25)", background: "rgba(5,10,25,0.96)", color: "white", fontWeight: 700, fontSize: 12, outline: "none" }}>
-              <option value="">Advanced</option>
-              {ADVANCED_ELEMENTS.map(item => <option key={item} value={item}>{item}</option>)}
-            </select>
-
-            {/* Component Library */}
-            <div style={{
-              marginTop: 10,
-              paddingTop: 10,
-              borderTop: "1px solid rgba(148,163,184,0.18)",
-              display: "flex",
-              flexDirection: "column",
-              gap: 8
-            }}>
+          {isEditRailCollapsed ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <div style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 50,
+                height: 50,
+                alignSelf: "center",
+                borderRadius: 16,
+                border: `1px solid ${currentPlatformMeta.border}`,
+                background: currentPlatformMeta.background,
+                color: currentPlatformMeta.accent,
                 fontSize: 11,
                 fontWeight: 900,
-                letterSpacing: 0.3,
-                color: "rgba(255,255,255,0.92)"
+                textAlign: "center",
+                lineHeight: 1.15,
+                padding: 6,
+                boxSizing: "border-box",
               }}>
-                ⬡ Components
+                {currentPlatformMeta.label}
               </div>
-              
-              <select
-                value={selectedComponent || ""}
-                onChange={e => setSelectedComponent(e.target.value)}
-                title="Professional Components"
+              <button
+                onClick={() => handleAiRescan("block")}
+                disabled={aiScanLoading}
+                title="AI Block"
                 style={{
-                  height: 34,
-                  padding: "0 8px",
-                  borderRadius: 8,
-                  border: "1px solid rgba(148,163,184,0.25)",
-                  background: "rgba(5,10,25,0.96)",
+                  width: 50,
+                  height: 40,
+                  alignSelf: "center",
+                  borderRadius: 12,
+                  border: "1px solid rgba(96,165,250,0.3)",
+                  background: "rgba(59,130,246,0.14)",
                   color: "white",
-                  fontWeight: 700,
-                  fontSize: 12,
-                  outline: "none"
+                  fontWeight: 800,
+                  fontSize: 11,
+                  cursor: aiScanLoading ? "wait" : "pointer",
+                  opacity: aiScanLoading ? 0.65 : 1,
                 }}
               >
-                <option value="">Choose Component</option>
-                {Object.entries(COMPONENT_LIBRARY).map(([key, comp]) => (
-                  <option key={key} value={key}>
-                    {COMPONENT_CATEGORIES[comp.category]?.icon} {comp.name}
-                  </option>
-                ))}
-              </select>
-              
-              {selectedComponent && (
-                <button
-                  onClick={() => {
-                    const component = COMPONENT_LIBRARY[selectedComponent as keyof typeof COMPONENT_LIBRARY];
-                    if (component && iframeRef.current?.contentDocument) {
-                      const doc = iframeRef.current.contentDocument;
-                      const tempDiv = doc.createElement('div');
-                      tempDiv.innerHTML = component.template;
-                      const element = tempDiv.firstElementChild;
-                      if (element) {
-                        doc.body.appendChild(element);
-                        setCurrentHtml(doc.documentElement.outerHTML);
-                        toast.success(`${component.name} added successfully!`);
-                      }
-                    }
-                  }}
+                AI
+              </button>
+              <button
+                onClick={() => handleAiRescan("page")}
+                disabled={aiScanLoading}
+                title="AI Page"
+                style={{
+                  width: 50,
+                  height: 40,
+                  alignSelf: "center",
+                  borderRadius: 12,
+                  border: "1px solid rgba(96,165,250,0.2)",
+                  background: "rgba(59,130,246,0.08)",
+                  color: "white",
+                  fontWeight: 800,
+                  fontSize: 11,
+                  cursor: aiScanLoading ? "wait" : "pointer",
+                  opacity: aiScanLoading ? 0.65 : 1,
+                }}
+              >
+                Page
+              </button>
+            </div>
+          ) : (
+            <>
+              <div style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+                paddingBottom: 12,
+                borderBottom: "1px solid rgba(148,163,184,0.14)",
+              }}>
+                <div style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  alignSelf: "flex-start",
+                  padding: "6px 10px",
+                  borderRadius: 999,
+                  border: `1px solid ${currentPlatformMeta.border}`,
+                  background: currentPlatformMeta.background,
+                  color: currentPlatformMeta.accent,
+                  fontSize: 12,
+                  fontWeight: 800,
+                }}>
+                  <div style={{ width: 7, height: 7, borderRadius: "50%", background: currentPlatformMeta.accent }} />
+                  {currentPlatformMeta.label}
+                </div>
+                <div style={{ fontSize: 11, color: "rgba(226,232,240,0.72)", lineHeight: 1.45 }}>
+                  {loadedUrl ? loadedUrl.replace(/^https?:\/\//, "") : "No site loaded"}
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {blockFamilyChips.map((chip) => {
+                    const isActive = chip.value === "all" ? blockFilter === "all" : blockFilter === chip.value
+                    return (
+                      <button
+                        key={`${chip.label}-${chip.value}`}
+                        onClick={() => setBlockFilter(chip.value)}
+                        style={{
+                          height: 28,
+                          padding: "0 10px",
+                          borderRadius: 999,
+                          border: `1px solid ${isActive ? chip.tint : "rgba(148,163,184,0.18)"}`,
+                          background: isActive ? chip.background : "rgba(255,255,255,0.03)",
+                          color: isActive ? chip.tint : "rgba(226,232,240,0.8)",
+                          fontSize: 11,
+                          fontWeight: 800,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {chip.label}
+                      </button>
+                    )
+                  })}
+                </div>
+                {exportWarnings.length > 0 && (
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(251,191,36,0.94)" }}>
+                    {exportWarnings.length} export warning{exportWarnings.length === 1 ? "" : "s"}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: 0.4, color: "rgba(255,255,255,0.92)" }}>
+                  Overlay
+                </div>
+                <select
+                  value={blockFilter}
+                  onChange={e => setBlockFilter(e.target.value as BlockFilter)}
+                  title="Visible blocks"
                   style={{
-                    height: 34,
-                    borderRadius: 8,
-                    border: "1px solid rgba(34,197,94,0.38)",
-                    background: "linear-gradient(135deg, rgba(34,197,94,0.22), rgba(16,185,129,0.18))",
+                    height: 36,
+                    padding: "0 10px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(148,163,184,0.25)",
+                    background: "rgba(5,10,25,0.96)",
+                    color: "white",
+                    fontWeight: 700,
+                    fontSize: 12,
+                    outline: "none",
+                  }}
+                >
+                  {BLOCK_FILTER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <button
+                    onClick={() => handleAiRescan("block")}
+                    disabled={aiScanLoading}
+                    style={{
+                      height: 34,
+                      borderRadius: 10,
+                      border: "1px solid rgba(96,165,250,0.3)",
+                      background: "rgba(59,130,246,0.14)",
+                      color: "white",
+                      fontWeight: 800,
+                      fontSize: 12,
+                      cursor: aiScanLoading ? "wait" : "pointer",
+                      opacity: aiScanLoading ? 0.65 : 1,
+                    }}
+                  >
+                    {aiScanLoading ? "..." : "AI Block"}
+                  </button>
+                  <button
+                    onClick={() => handleAiRescan("page")}
+                    disabled={aiScanLoading}
+                    style={{
+                      height: 34,
+                      borderRadius: 10,
+                      border: "1px solid rgba(96,165,250,0.3)",
+                      background: "rgba(59,130,246,0.08)",
+                      color: "white",
+                      fontWeight: 800,
+                      fontSize: 12,
+                      cursor: aiScanLoading ? "wait" : "pointer",
+                      opacity: aiScanLoading ? 0.65 : 1,
+                    }}
+                  >
+                    {aiScanLoading ? "..." : "AI Page"}
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ height: 1, background: "rgba(148,163,184,0.14)" }} />
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: 0.4, color: "rgba(255,255,255,0.92)" }}>
+                  Structure
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 180, overflowY: "auto", paddingRight: 4 }}>
+                  {structureItems.length === 0 ? (
+                    <div style={{ fontSize: 11, color: "rgba(148,163,184,0.68)", lineHeight: 1.4 }}>
+                      Load a site to reorder motherblocks.
+                    </div>
+                  ) : structureItems.map((item) => (
+                    <div
+                      key={item.id}
+                      style={{
+                        padding: 8,
+                        borderRadius: 10,
+                        border: item.isSelected ? "1px solid rgba(96,165,250,0.34)" : "1px solid rgba(148,163,184,0.14)",
+                        background: item.isSelected ? "rgba(37,99,235,0.12)" : "rgba(255,255,255,0.03)",
+                        display: "grid",
+                        gridTemplateColumns: "1fr auto",
+                        gap: 8,
+                        alignItems: "center",
+                      }}
+                    >
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 11, fontWeight: 800, color: "white", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {item.displayLabel}
+                        </div>
+                        <div style={{ fontSize: 10, color: "rgba(148,163,184,0.72)", marginTop: 2 }}>
+                          {item.childCount > 0 ? `${item.childCount} child blocks` : titleCaseFallback(item.kind)}
+                        </div>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 28px)", gap: 4 }}>
+                        <button onClick={() => moveStructureItem(item.rootId, -2)} style={structureMoveButtonStyle}>⇡</button>
+                        <button onClick={() => moveStructureItem(item.rootId, -1)} style={structureMoveButtonStyle}>↑</button>
+                        <button onClick={() => moveStructureItem(item.rootId, 1)} style={structureMoveButtonStyle}>↓</button>
+                        <button onClick={() => moveStructureItem(item.rootId, 2)} style={structureMoveButtonStyle}>⇣</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ height: 1, background: "rgba(148,163,184,0.14)" }} />
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: 0.4, color: "rgba(255,255,255,0.92)" }}>
+                  Components
+                </div>
+                <select
+                  value={selectedComponent || ""}
+                  onChange={e => setSelectedComponent(e.target.value)}
+                  title="Professional Components"
+                  style={{
+                    height: 36,
+                    padding: "0 10px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(148,163,184,0.25)",
+                    background: "rgba(5,10,25,0.96)",
+                    color: "white",
+                    fontWeight: 700,
+                    fontSize: 12,
+                    outline: "none"
+                  }}
+                >
+                  <option value="">Choose component</option>
+                  {Object.entries(COMPONENT_LIBRARY).map(([key, comp]) => (
+                    <option key={key} value={key}>
+                      {COMPONENT_CATEGORIES[comp.category as keyof typeof COMPONENT_CATEGORIES]?.icon} {comp.name}
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  disabled={!selectedComponent}
+                  onClick={addSelectedComponent}
+                  style={{
+                    height: 36,
+                    borderRadius: 10,
+                    border: "1px solid rgba(34,197,94,0.28)",
+                    background: selectedComponent ? "rgba(21,128,61,0.16)" : "rgba(255,255,255,0.04)",
                     color: "white",
                     fontWeight: 800,
                     fontSize: 12,
-                    cursor: "pointer"
+                    cursor: selectedComponent ? "pointer" : "not-allowed",
+                    opacity: selectedComponent ? 1 : 0.55,
                   }}
                 >
-                  ➕ Add Component
-                </button>
-              )}
-            </div>
-
-            <div style={{
-              marginTop: 10,
-              paddingTop: 10,
-              borderTop: "1px solid rgba(148,163,184,0.18)",
-              display: "flex",
-              flexDirection: "column",
-              gap: 8
-            }}>
-              <div style={{
-                fontSize: 11,
-                fontWeight: 900,
-                letterSpacing: 0.3,
-                color: "rgba(255,255,255,0.92)"
-              }}>
-                KI Assistent
-              </div>
-
-            <select
-              value={leftAiModel}
-              onChange={e => setLeftAiModel(e.target.value)}
-              title="KI Modell"
-              style={{
-                height: 34,
-                padding: "0 8px",
-                borderRadius: 8,
-                border: "1px solid rgba(148,163,184,0.25)",
-                background: "rgba(5,10,25,0.96)",
-                color: "white",
-                fontWeight: 700,
-                fontSize: 12,
-                outline: "none"
-              }}
-            >
-              {AI_MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-            </select>
-
-            <textarea
-              value={leftAiPrompt}
-              onChange={e => setLeftAiPrompt(e.target.value)}
-              placeholder={`KI Prompt an ${AI_MODELS.find(m => m.value === leftAiModel)?.label || leftAiModel}...`}
-              style={{
-                minHeight: 90,
-                resize: "vertical",
-                padding: "10px 8px",
-                borderRadius: 8,
-                border: "1px solid rgba(148,163,184,0.25)",
-                background: "rgba(5,10,25,0.96)",
-                color: "white",
-                fontSize: 12,
-                outline: "none"
-              }}
-            />
-            
-            {/* AI Content Generation Templates */}
-            <div style={{ marginTop: 8 }}>
-              <div style={{ fontSize: 10, color: "rgba(255,255,255,0.6)", marginBottom: 4 }}>Quick Templates:</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <button
-                  onClick={() => setLeftAiPrompt("Generate a compelling headline for this section")}
-                  style={{
-                    padding: "4px 8px",
-                    borderRadius: 4,
-                    border: "1px solid rgba(148,163,184,0.2)",
-                    background: "rgba(255,255,255,0.05)",
-                    color: "rgba(255,255,255,0.8)",
-                    fontSize: 10,
-                    cursor: "pointer"
-                  }}
-                >
-                  ≡ Headline
-                </button>
-                <button
-                  onClick={() => setLeftAiPrompt("Write professional marketing copy for this product/service")}
-                  style={{
-                    padding: "4px 8px",
-                    borderRadius: 4,
-                    border: "1px solid rgba(148,163,184,0.2)",
-                    background: "rgba(255,255,255,0.05)",
-                    color: "rgba(255,255,255,0.8)",
-                    fontSize: 10,
-                    cursor: "pointer"
-                  }}
-                >
-                  ↗ Marketing Copy
-                </button>
-                <button
-                  onClick={() => setLeftAiPrompt("Create a clear call-to-action button text")}
-                  style={{
-                    padding: "4px 8px",
-                    borderRadius: 4,
-                    border: "1px solid rgba(148,163,184,0.2)",
-                    background: "rgba(255,255,255,0.05)",
-                    color: "rgba(255,255,255,0.8)",
-                    fontSize: 10,
-                    cursor: "pointer"
-                  }}
-                >
-                  ◎ Call-to-Action
+                  Add component
                 </button>
               </div>
-            </div>
 
-            <button
-              data-left-ai-run="1"
-              onClick={() => {
-                if (!leftAiPrompt.trim()) {
-                  toast.warning(t("Please enter an AI prompt first"))
-                  return
-                }
-                setLeftAiRunning(true)
-                window.dispatchEvent(new CustomEvent("bo:left-ai-run", {
-                  detail: {
-                    model: leftAiModel === "auto" ? "claude-sonnet-4-6" : leftAiModel,
-                    prompt: leftAiPrompt
-                  }
-                }))
-              }}
-              onMouseDown={e => { if(!leftAiRunning) e.currentTarget.style.transform = "scale(0.96)" }}
-              onMouseUp={e => (e.currentTarget.style.transform = "scale(1)")}
-              onMouseLeave={e => (e.currentTarget.style.transform = "scale(1)")}
-              style={{
-                height: 36,
-                borderRadius: 8,
-                border: "1px solid rgba(59,130,246,0.38)",
-                background: "linear-gradient(135deg, rgba(59,130,246,0.22), rgba(99,102,241,0.18))",
-                color: "white",
-                fontWeight: 800,
-                fontSize: 12,
-                cursor: leftAiRunning ? "wait" : "pointer",
-                opacity: leftAiRunning ? 0.7 : 1,
-                transition: "transform 0.1s"
-              }}
-            >
-              {leftAiRunning ? <span style={{display:"inline-block", animation:"spin 0.7s linear infinite"}}>⟳</span> : "✨"} Run
-            </button>
-            </div>
-          </div>
-        )}
+              <div style={{ height: 1, background: "rgba(148,163,184,0.14)" }} />
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ fontSize: 11, fontWeight: 900, letterSpacing: 0.4, color: "rgba(255,255,255,0.92)" }}>
+                  AI Assistant
+                </div>
+                <select
+                  value={leftAiModel}
+                  onChange={e => setLeftAiModel(e.target.value)}
+                  title="AI model"
+                  style={{
+                    height: 36,
+                    padding: "0 10px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(148,163,184,0.25)",
+                    background: "rgba(5,10,25,0.96)",
+                    color: "white",
+                    fontWeight: 700,
+                    fontSize: 12,
+                    outline: "none"
+                  }}
+                >
+                  {AI_MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                </select>
+
+                <textarea
+                  value={leftAiPrompt}
+                  onChange={e => setLeftAiPrompt(e.target.value)}
+                  placeholder={`Prompt ${AI_MODELS.find(m => m.value === leftAiModel)?.label || leftAiModel}...`}
+                  style={{
+                    minHeight: 120,
+                    resize: "vertical",
+                    padding: "10px 10px",
+                    borderRadius: 10,
+                    border: "1px solid rgba(148,163,184,0.25)",
+                    background: "rgba(5,10,25,0.96)",
+                    color: "white",
+                    fontSize: 12,
+                    lineHeight: 1.45,
+                    outline: "none"
+                  }}
+                />
+
+                <button
+                  data-left-ai-run="1"
+                  onClick={() => {
+                    if (!leftAiPrompt.trim()) {
+                      toast.warning(t("Please enter an AI prompt first"))
+                      return
+                    }
+                    setLeftAiRunning(true)
+                    window.dispatchEvent(new CustomEvent("bo:left-ai-run", {
+                      detail: {
+                        model: leftAiModel === "auto" ? "claude-sonnet-4-6" : leftAiModel,
+                        prompt: leftAiPrompt
+                      }
+                    }))
+                  }}
+                  style={{
+                    height: 36,
+                    borderRadius: 10,
+                    border: "1px solid rgba(59,130,246,0.28)",
+                    background: "rgba(37,99,235,0.16)",
+                    color: "white",
+                    fontWeight: 800,
+                    fontSize: 12,
+                    cursor: leftAiRunning ? "wait" : "pointer",
+                    opacity: leftAiRunning ? 0.7 : 1,
+                  }}
+                >
+                  {leftAiRunning ? "Running..." : "Run prompt"}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 {/* Main Content */}
-      <div style={{ position:"fixed", left: isEdit ? 240 : 0, top:58, right:0, bottom:0, overflow:"hidden" }}>
+      <div style={{ position:"fixed", left: editRailWidth, top:58, right:0, bottom:0, overflow:"hidden", transition: "left 0.22s ease" }}>
         <iframe ref={iframeRef} title="preview" style={{
           position:"absolute", left:0, top:0, width:"100%", height:"100%",
           border:"none", background:"white", display:"block"
         }} sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation" />
-        <BlockOverlay iframeRef={iframeRef} enabled={isEdit} canvasMode={layoutMode === "canvas"} onStatus={setStatus} onHtmlChange={(html) => { undoPush(currentHtml); setCurrentHtml(html); autoSave(html); }} />
+        <BlockOverlay
+          iframeRef={iframeRef}
+          enabled={isEdit}
+          canvasMode={layoutMode === "canvas"}
+          blockFilter={blockFilter}
+          onStatus={setStatus}
+          onHtmlChange={commitLiveEditorHtml}
+        />
       </div>
     <ToastContainer />
     </div>
