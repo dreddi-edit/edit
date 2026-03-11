@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { translations } from "./translations"
 import { translateTexts } from "../utils/googleApis"
 import { TOP_TRANSLATION_LANGUAGES } from "../utils/htmlTranslation"
@@ -7,6 +7,7 @@ export type Language = string
 
 const BUILTIN_LANGUAGES = new Set(["en", "de", "es"])
 const CACHE_PREFIX = "ui-language-pack:"
+const RUNTIME_CACHE_PREFIX = "ui-runtime-pack:"
 
 function getCachedPack(lang: Language): Record<string, string> | null {
   try {
@@ -22,6 +23,21 @@ function decodeEntities(value: string): string {
   const textarea = document.createElement("textarea")
   textarea.innerHTML = value
   return textarea.value
+}
+
+function getCachedRuntimePack(lang: Language): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(`${RUNTIME_CACHE_PREFIX}${lang}`)
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function setCachedRuntimePack(lang: Language, value: Record<string, string>) {
+  try {
+    localStorage.setItem(`${RUNTIME_CACHE_PREFIX}${lang}`, JSON.stringify(value))
+  } catch {}
 }
 
 async function ensureLanguagePack(lang: Language) {
@@ -65,4 +81,51 @@ export function useTranslation() {
   }
 
   return { t, lang, setLang }
+}
+
+export function useRuntimeTranslations(
+  lang: Language,
+  texts: string[],
+  fallback: (key: string) => string = (key) => key,
+) {
+  const [runtimePack, setRuntimePack] = useState<Record<string, string>>(() => getCachedRuntimePack(lang))
+  const normalizedTexts = Array.from(new Set(texts.map(text => String(text || "").trim()).filter(Boolean)))
+  const textSignature = normalizedTexts.join("\u0000")
+
+  useEffect(() => {
+    setRuntimePack(getCachedRuntimePack(lang))
+  }, [lang])
+
+  useEffect(() => {
+    if (BUILTIN_LANGUAGES.has(lang) || !normalizedTexts.length) return
+    const cached = getCachedRuntimePack(lang)
+    const missing = normalizedTexts.filter(text => !cached[text])
+    if (!missing.length) return
+
+    let cancelled = false
+
+    void translateTexts(missing, lang)
+      .then(results => {
+        if (cancelled) return
+        const nextEntries = missing.reduce<Record<string, string>>((acc, text, index) => {
+          acc[text] = decodeEntities(results[index]?.translatedText || text)
+          return acc
+        }, {})
+        const merged = { ...cached, ...nextEntries }
+        setCachedRuntimePack(lang, merged)
+        setRuntimePack(merged)
+      })
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [lang, textSignature])
+
+  return (text: string) => {
+    const normalized = String(text || "")
+    if (!normalized) return normalized
+    if (BUILTIN_LANGUAGES.has(lang)) return fallback(normalized)
+    return runtimePack[normalized] || fallback(normalized)
+  }
 }
