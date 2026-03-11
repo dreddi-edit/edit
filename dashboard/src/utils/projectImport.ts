@@ -1,29 +1,186 @@
 import type { ProjectImportEntry, ProjectImportPreview } from "../api/projects"
 
+export type ImportUploadItem = {
+  file: File
+  relativePath?: string
+}
+
+export type AutoImportPayload =
+  | {
+      kind: "zip" | "brief" | "screenshot"
+      fileName: string
+      mimeType?: string
+      contentBase64: string
+    }
+  | {
+      kind: "entries"
+      entries: ProjectImportEntry[]
+      title: string
+      entryMode: "single-file" | "folder" | "assets"
+      summary?: string
+    }
+
+const TEXT_EXTENSIONS = new Set([".html", ".htm", ".svg", ".md", ".markdown", ".txt", ".php", ".liquid", ".twig", ".njk", ".nunjucks", ".hbs", ".handlebars", ".mustache", ".ejs", ".erb", ".aspx", ".jsp"])
+const BRIEF_EXTENSIONS = new Set([".pdf", ".docx"])
+const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif"])
+const ASSET_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".svg", ".ico", ".mp4", ".webm", ".mov", ".mp3", ".wav", ".ogg", ".woff", ".woff2", ".ttf", ".otf", ".eot"])
+
+function extensionOf(name: string) {
+  const match = String(name || "").toLowerCase().match(/(\.[^.\/]+)$/)
+  return match?.[1] || ""
+}
+
 function normalizeEntryName(name: string) {
   return String(name || "")
     .replace(/\\/g, "/")
     .replace(/^\/+/, "")
 }
 
-export async function fileToImportEntry(file: File): Promise<ProjectImportEntry> {
+function normalizeUploadName(file: File, overrideName?: string) {
+  return normalizeEntryName(overrideName || file.webkitRelativePath || file.name)
+}
+
+async function fileToBase64(file: File) {
   const buffer = await file.arrayBuffer()
   const bytes = new Uint8Array(buffer)
   let binary = ""
   for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index])
+  return btoa(binary)
+}
+
+export async function fileToImportEntry(file: File, overrideName?: string): Promise<ProjectImportEntry> {
   return {
-    name: normalizeEntryName(file.webkitRelativePath || file.name),
+    name: normalizeUploadName(file, overrideName),
     mimeType: file.type || "application/octet-stream",
-    contentBase64: btoa(binary),
+    contentBase64: await fileToBase64(file),
   }
 }
 
-export async function filesToImportEntries(files: Iterable<File>): Promise<ProjectImportEntry[]> {
+export async function filesToImportEntries(files: Iterable<File | ImportUploadItem>): Promise<ProjectImportEntry[]> {
   const entries = []
-  for (const file of files) {
-    entries.push(await fileToImportEntry(file))
+  for (const item of files) {
+    if (item instanceof File) {
+      entries.push(await fileToImportEntry(item))
+      continue
+    }
+    entries.push(await fileToImportEntry(item.file, item.relativePath))
   }
   return entries
+}
+
+function detectCommonRoot(names: string[]) {
+  const parts = names
+    .map((name) => normalizeEntryName(name).split("/").filter(Boolean))
+    .filter((segments) => segments.length > 1)
+  if (!parts.length) return ""
+  const root = parts[0]?.[0] || ""
+  return root && parts.every((segments) => segments[0] === root) ? root : ""
+}
+
+function isLikelyLogoOrAsset(name: string) {
+  return /(logo|icon|favicon|brand|font|asset|sprite|thumb|thumbnail|cover|hero-image)/i.test(name)
+}
+
+function isAssetLike(item: ImportUploadItem) {
+  const name = normalizeUploadName(item.file, item.relativePath)
+  const ext = extensionOf(name)
+  return ASSET_EXTENSIONS.has(ext)
+}
+
+export async function buildAutoImportPayload(items: ImportUploadItem[]): Promise<AutoImportPayload> {
+  const uploads = Array.from(items || []).filter((item) => item?.file)
+  if (!uploads.length) throw new Error("No files selected.")
+
+  const names = uploads.map((item) => normalizeUploadName(item.file, item.relativePath))
+  const rootName = detectCommonRoot(names)
+
+  if (uploads.length === 1) {
+    const single = uploads[0]
+    const fileName = normalizeUploadName(single.file, single.relativePath)
+    const ext = extensionOf(fileName)
+    const contentBase64 = await fileToBase64(single.file)
+    if (ext === ".zip") {
+      return { kind: "zip", fileName: single.file.name, contentBase64, mimeType: single.file.type || "application/zip" }
+    }
+    if (BRIEF_EXTENSIONS.has(ext)) {
+      return { kind: "brief", fileName: single.file.name, contentBase64, mimeType: single.file.type || "" }
+    }
+    if (IMAGE_EXTENSIONS.has(ext) && !isLikelyLogoOrAsset(fileName)) {
+      return { kind: "screenshot", fileName: single.file.name, contentBase64, mimeType: single.file.type || "" }
+    }
+    if (isAssetLike(single) && !TEXT_EXTENSIONS.has(ext)) {
+      return {
+        kind: "entries",
+        entries: await filesToImportEntries(uploads),
+        title: "Asset library",
+        entryMode: "assets",
+        summary: "Asset library imported into one project page",
+      }
+    }
+    return {
+      kind: "entries",
+      entries: await filesToImportEntries(uploads),
+      title: fileName.replace(/\.[^.]+$/, "") || "Imported file",
+      entryMode: "single-file",
+    }
+  }
+
+  if (uploads.every(isAssetLike)) {
+    return {
+      kind: "entries",
+      entries: await filesToImportEntries(uploads),
+      title: "Asset library",
+      entryMode: "assets",
+      summary: "Asset library imported into one project page",
+    }
+  }
+
+  return {
+    kind: "entries",
+    entries: await filesToImportEntries(uploads),
+    title: rootName || "Imported upload",
+    entryMode: "folder",
+    summary: "Folder imported into project pages",
+  }
+}
+
+async function readDirectoryEntry(entry: any, prefix = ""): Promise<ImportUploadItem[]> {
+  if (!entry) return []
+  if (entry.isFile) {
+    const file = await new Promise<File>((resolve, reject) => entry.file(resolve, reject))
+    return [{ file, relativePath: normalizeEntryName(prefix || entry.fullPath || file.name) }]
+  }
+  if (!entry.isDirectory) return []
+  const reader = entry.createReader()
+  const children: any[] = await new Promise((resolve, reject) => {
+    const collected: any[] = []
+    const readNext = () => {
+      reader.readEntries((entries: any[]) => {
+        if (!entries.length) {
+          resolve(collected)
+          return
+        }
+        collected.push(...entries)
+        readNext()
+      }, reject)
+    }
+    readNext()
+  })
+  const nested = await Promise.all(children.map((child) => readDirectoryEntry(child, child.fullPath || "")))
+  return nested.flat()
+}
+
+export async function collectDroppedUploadItems(dataTransfer: DataTransfer): Promise<ImportUploadItem[]> {
+  const items = Array.from(dataTransfer.items || [])
+  const entryItems = items
+    .map((item) => ((item as any).webkitGetAsEntry ? (item as any).webkitGetAsEntry() : null))
+    .filter(Boolean)
+  if (entryItems.length) {
+    const nested = await Promise.all(entryItems.map((entry) => readDirectoryEntry(entry, entry.fullPath || "")))
+    const results = nested.flat().filter((item) => item?.file)
+    if (results.length) return results
+  }
+  return Array.from(dataTransfer.files || []).map((file) => ({ file }))
 }
 
 export function summarizeImportPreview(preview: ProjectImportPreview) {

@@ -61,6 +61,8 @@ const WORDPRESS_THEME_SIGNALS = new Set([
 const WORDPRESS_SUPPORT_NAMES = new Set(["functions", "header", "footer", "sidebar", "comments", "searchform", "theme", "screenshot"])
 const SHOPIFY_THEME_SEGMENTS = new Set(["sections", "snippets", "templates", "layout", "config"])
 const LOCALE_FILE_PATTERN = /(?:^|[._-])(en|de|fr|es|it|nl|pt|pl|cs|sv|no|da|fi|tr|ro|hu|el|ar|he|ja|ko|zh|uk|ru)(?:[._-]|$)/i
+const MAX_AI_IMPORT_FILES = 36
+const MAX_AI_SNIPPET_LENGTH = 3600
 
 function cleanText(value) {
   return String(value || "").replace(/\s+/g, " ").trim()
@@ -727,6 +729,108 @@ function buildAnalysisOverview(analysis) {
   return parts.join(" ")
 }
 
+function parseJsonObjectCandidate(value) {
+  const source = stripCodeFence(String(value || "").trim())
+  if (!source) return null
+  try {
+    return JSON.parse(source)
+  } catch {}
+  const start = source.indexOf("{")
+  const end = source.lastIndexOf("}")
+  if (start >= 0 && end > start) {
+    try {
+      return JSON.parse(source.slice(start, end + 1))
+    } catch {}
+  }
+  return null
+}
+
+function shouldRunAiImportAnalysis(analysis, options = {}) {
+  if (options.disableAiAnalysis) return false
+  if (String(process.env.NODE_ENV || "").toLowerCase() === "test") return false
+  if (!process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) return false
+  if ((analysis.fileCount || 0) > MAX_AI_IMPORT_FILES) return false
+  if (String(options.entryMode || "").toLowerCase() === "assets") return false
+  return true
+}
+
+function resolveAnalysisEntryPath(relativePath, rootPrefix = "") {
+  const normalized = normalizeEntryPath(relativePath)
+  if (!normalized) return ""
+  if (!rootPrefix) return normalized
+  return normalizeEntryPath(`${rootPrefix}/${normalized}`)
+}
+
+function buildAiImportSnippet(text, filePath) {
+  const ext = path.extname(filePath).toLowerCase()
+  if (CSS_FILE_EXTENSIONS.has(ext) || SCRIPT_FILE_EXTENSIONS.has(ext) || TEXT_FILE_EXTENSIONS.has(ext)) {
+    return String(text || "").slice(0, MAX_AI_SNIPPET_LENGTH)
+  }
+  return stripTemplateSyntax(preprocessTemplateSource(filePath, text), ext).slice(0, MAX_AI_SNIPPET_LENGTH)
+}
+
+function buildAiImportPrompt({ entryPaths, textEntries, analysis, options = {} }) {
+  const rootPrefix = analysis.rootPrefix || ""
+  const relativeTextPaths = entryPaths
+    .map((entryPath) => stripCommonRootPrefix(entryPath, rootPrefix))
+    .filter((entryPath) => {
+      const fullPath = resolveAnalysisEntryPath(entryPath, rootPrefix)
+      return textEntries.has(fullPath)
+    })
+
+  const prioritized = Array.from(
+    new Set([
+      ...analysis.pageCandidates,
+      ...analysis.contentSources,
+      ...analysis.supportFiles,
+      ...relativeTextPaths,
+    ]),
+  ).slice(0, 16)
+
+  const snippets = prioritized
+    .map((relativePath) => {
+      const fullPath = resolveAnalysisEntryPath(relativePath, rootPrefix)
+      const entry = textEntries.get(fullPath)
+      if (!entry) return ""
+      return [
+        `FILE: ${relativePath}`,
+        buildAiImportSnippet(entry.text, fullPath),
+      ].join("\n")
+    })
+    .filter(Boolean)
+    .join("\n\n---\n\n")
+
+  const manifest = [
+    `Entry mode: ${options.entryMode || "auto"}`,
+    `Detected platform hint: ${analysis.platform}`,
+    `Detected project type hint: ${analysis.projectType}`,
+    `Detected homepage hint: ${analysis.homepageFile || "none"}`,
+    `All files: ${entryPaths.map((entryPath) => stripCommonRootPrefix(entryPath, rootPrefix)).join(", ")}`,
+    `Initial page candidates: ${(analysis.pageCandidates || []).join(", ") || "none"}`,
+    `Initial content sources: ${(analysis.contentSources || []).join(", ") || "none"}`,
+    `Initial support files: ${(analysis.supportFiles || []).join(", ") || "none"}`,
+  ].join("\n")
+
+  return [
+    "You analyze uploaded website bundles and decide how they should be imported into an editor.",
+    "Return ONLY valid JSON.",
+    "Never invent files that are not in the manifest.",
+    "Page candidates must only include real page/template files, not logos, CSS, scripts, config, or content source files.",
+    "Use contentSources for translation text files, copy docs, or locale sources.",
+    "Use supportFiles for partials, config, helpers, snippets, functions, layouts, and non-page templates.",
+    "Use homepageFile for the file that should become '/'.",
+    "For each page candidate, include a path like '/', '/about', '/contact'.",
+    "Schema:",
+    '{"projectType":"string","platform":"wordpress|shopify|static|other","confidence":"high|medium|low","homepageFile":"string","pageCandidates":[{"file":"string","path":"string","title":"string"}],"supportFiles":["string"],"contentSources":["string"],"warnings":["string"],"overview":"string"}',
+    "",
+    "Manifest:",
+    manifest,
+    "",
+    "Representative file snippets:",
+    snippets || "No text snippets available.",
+  ].join("\n")
+}
+
 function isLikelyPageEntry(entryPath) {
   const normalized = normalizeEntryPath(entryPath)
   if (!normalized) return false
@@ -922,6 +1026,169 @@ function analyzeImportEntries(entries, options = {}) {
   return { analysis, pageEntries: uniquePageEntries, textEntries, assetEntries }
 }
 
+async function maybeRunAiImportStructure({ entries, textEntries, analysis, options = {} }) {
+  const entryPaths = Array.isArray(entries) ? entries.map((entry) => normalizeEntryPath(entry.name)).filter(Boolean) : []
+  if (!shouldRunAiImportAnalysis(analysis, options)) return null
+  const prompt = buildAiImportPrompt({ entryPaths, textEntries, analysis, options })
+  try {
+    const generated = await callGemini({ prompt, model: "gemini-2.5-pro" })
+    return parseJsonObjectCandidate(generated)
+  } catch {
+    return null
+  }
+}
+
+function normalizeAiAnalysisPathList(value, validPaths) {
+  const list = Array.isArray(value) ? value : []
+  return Array.from(
+    new Set(
+      list
+        .map((item) => {
+          const candidate = normalizeEntryPath(typeof item === "string" ? item : item?.file || "")
+          if (!candidate) return ""
+          if (validPaths.has(candidate)) return candidate
+          const basename = path.posix.basename(candidate)
+          return Array.from(validPaths).find((entry) => entry === basename || entry.endsWith(`/${basename}`)) || ""
+        })
+        .filter(Boolean),
+    ),
+  )
+}
+
+function buildPageEntriesFromSelection(pageSelections, { textEntries, assetEntries, rootPrefix = "" }) {
+  const pageEntries = []
+  const seenPagePaths = new Set()
+  for (const selection of pageSelections) {
+    const entryPath = resolveAnalysisEntryPath(selection.entryPath, rootPrefix)
+    const entry = textEntries.get(entryPath)
+    if (!entry) continue
+    const pagePath = String(selection.pagePath || buildImportedPagePath(selection.entryPath, "") || "/").trim() || "/"
+    if (seenPagePaths.has(pagePath)) continue
+    seenPagePaths.add(pagePath)
+    const rawHtml = convertTextEntryToHtml(entryPath, entry.text || "")
+    const html = inlineHtmlAssets(rawHtml, entryPath, assetEntries, textEntries)
+    const fallbackTitle = extractDocumentTitleFromHtml(html, pathToTitle(selection.entryPath))
+    pageEntries.push({
+      entryPath: selection.entryPath,
+      pagePath,
+      priority: pagePath === "/" ? 999 : getPageCandidatePriority(selection.entryPath),
+      name: cleanText(selection.title) || fallbackTitle,
+      title: cleanText(selection.title) || fallbackTitle,
+      html,
+    })
+  }
+  return pageEntries
+}
+
+function mergeImportAnalysisWithAi({ baseline, aiStructure, entries, textEntries, assetEntries, options = {} }) {
+  if (!aiStructure || typeof aiStructure !== "object") return baseline
+
+  const entryPaths = Array.isArray(entries) ? entries.map((entry) => normalizeEntryPath(entry.name)).filter(Boolean) : []
+  const relativePaths = entryPaths.map((entryPath) => stripCommonRootPrefix(entryPath, baseline.analysis.rootPrefix || ""))
+  const validPaths = new Set(relativePaths)
+  const singleFileMode = String(options.entryMode || "").toLowerCase() === "single-file"
+  const validPagePaths = new Set(
+    relativePaths.filter((entryPath) => {
+      const resolved = resolveAnalysisEntryPath(entryPath, baseline.analysis.rootPrefix || "")
+      if (!textEntries.has(resolved)) return false
+      const ext = path.extname(entryPath).toLowerCase()
+      if (HTML_LIKE_FILE_EXTENSIONS.has(ext)) return true
+      if (singleFileMode && (TEXT_FILE_EXTENSIONS.has(ext) || ext === ".svg")) return true
+      return false
+    }),
+  )
+
+  const aiPageCandidatesRaw = Array.isArray(aiStructure.pageCandidates) ? aiStructure.pageCandidates : []
+  const aiPageSelections = aiPageCandidatesRaw
+    .map((candidate) => {
+      const candidateFile = normalizeEntryPath(typeof candidate === "string" ? candidate : candidate?.file || "")
+      if (!candidateFile) return null
+      const matched =
+        validPagePaths.has(candidateFile)
+          ? candidateFile
+          : Array.from(validPagePaths).find((entry) => entry === path.posix.basename(candidateFile) || entry.endsWith(`/${path.posix.basename(candidateFile)}`))
+      if (!matched) return null
+      return {
+        entryPath: matched,
+        pagePath: cleanText(typeof candidate === "string" ? "" : candidate?.path || "") || buildImportedPagePath(matched, ""),
+        title: cleanText(typeof candidate === "string" ? "" : candidate?.title || ""),
+      }
+    })
+    .filter(Boolean)
+
+  const baselineSelections = baseline.pageEntries.map((entry) => ({
+    entryPath: entry.entryPath,
+    pagePath: entry.pagePath,
+    title: entry.title || entry.name,
+  }))
+
+  const mergedSelections = aiPageSelections.length ? aiPageSelections : baselineSelections
+  const pageEntries = buildPageEntriesFromSelection(mergedSelections, {
+    textEntries,
+    assetEntries,
+    rootPrefix: baseline.analysis.rootPrefix || "",
+  })
+
+  const finalPagePaths = new Set(pageEntries.map((entry) => entry.entryPath))
+  const supportFiles = Array.from(
+    new Set([
+      ...normalizeAiAnalysisPathList(aiStructure.supportFiles, validPaths),
+      ...baseline.analysis.supportFiles,
+    ]),
+  ).filter((entryPath) => !finalPagePaths.has(entryPath))
+
+  const contentSources = Array.from(
+    new Set([
+      ...normalizeAiAnalysisPathList(aiStructure.contentSources, validPaths),
+      ...baseline.analysis.contentSources,
+    ]),
+  ).filter((entryPath) => !finalPagePaths.has(entryPath))
+
+  const homepageFileCandidate = normalizeAiAnalysisPathList([aiStructure.homepageFile], validPagePaths)[0]
+    || (pageEntries.find((entry) => entry.pagePath === "/")?.entryPath || baseline.analysis.homepageFile || "")
+
+  if (homepageFileCandidate) {
+    for (const entry of pageEntries) {
+      if (entry.entryPath === homepageFileCandidate) entry.pagePath = "/"
+    }
+    pageEntries.sort((left, right) => {
+      if (left.pagePath === "/") return -1
+      if (right.pagePath === "/") return 1
+      return left.pagePath.localeCompare(right.pagePath)
+    })
+  }
+
+  const platform = ["wordpress", "shopify", "static", "other"].includes(String(aiStructure.platform || "").toLowerCase())
+    ? String(aiStructure.platform).toLowerCase()
+    : baseline.analysis.platform
+  const projectType = cleanText(aiStructure.projectType) || baseline.analysis.projectType
+  const confidence = ["high", "medium", "low"].includes(String(aiStructure.confidence || "").toLowerCase())
+    ? String(aiStructure.confidence).toLowerCase()
+    : baseline.analysis.confidence
+  const warnings = Array.from(new Set([...(baseline.analysis.warnings || []), ...((Array.isArray(aiStructure.warnings) ? aiStructure.warnings : []).map((item) => cleanText(item)).filter(Boolean))]))
+  const overview = cleanText(aiStructure.overview) || baseline.analysis.overview
+
+  return {
+    analysis: {
+      ...baseline.analysis,
+      projectType,
+      platform,
+      confidence,
+      homepageFile: homepageFileCandidate || baseline.analysis.homepageFile,
+      homepagePath: pageEntries.find((entry) => entry.pagePath === "/")?.pagePath || baseline.analysis.homepagePath || "/",
+      pageCandidates: pageEntries.map((entry) => entry.entryPath),
+      supportFiles: supportFiles.sort((left, right) => left.localeCompare(right)),
+      contentSources: contentSources.sort((left, right) => left.localeCompare(right)),
+      warnings,
+      overview,
+      pageCount: pageEntries.length,
+    },
+    pageEntries,
+    textEntries,
+    assetEntries,
+  }
+}
+
 async function maybeGenerateImportOverview(analysis) {
   const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY
   if (!key) return analysis.overview
@@ -948,7 +1215,21 @@ async function maybeGenerateImportOverview(analysis) {
 }
 
 async function buildPagesFromEntries(entries, options = {}) {
-  const { analysis, pageEntries, assetEntries } = analyzeImportEntries(entries, options)
+  const baseline = analyzeImportEntries(entries, options)
+  const aiStructure = await maybeRunAiImportStructure({
+    entries,
+    textEntries: baseline.textEntries,
+    analysis: baseline.analysis,
+    options,
+  })
+  const { analysis, pageEntries, assetEntries } = mergeImportAnalysisWithAi({
+    baseline,
+    aiStructure,
+    entries,
+    textEntries: baseline.textEntries,
+    assetEntries: baseline.assetEntries,
+    options,
+  })
   const pages = []
 
   for (const entry of pageEntries) {
@@ -996,7 +1277,7 @@ async function buildPagesFromEntries(entries, options = {}) {
     return left.path.localeCompare(right.path)
   })
 
-  analysis.overview = await maybeGenerateImportOverview(analysis)
+  analysis.overview = aiStructure?.overview ? cleanText(aiStructure.overview) || analysis.overview : await maybeGenerateImportOverview(analysis)
   const summary =
     pages.length > 0
       ? `${pages.length} structured page${pages.length === 1 ? "" : "s"} from ${analysis.fileCount} file${analysis.fileCount === 1 ? "" : "s"} · ${analysis.styleCount} styles · ${analysis.scriptCount} scripts · ${analysis.assetCount} assets`

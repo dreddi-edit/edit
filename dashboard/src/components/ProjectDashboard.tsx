@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from "react"
+import { useEffect, useRef, useState, type CSSProperties, type DragEvent } from "react"
 import {
   apiGetProjects,
   apiCreateProject,
@@ -31,7 +31,7 @@ import {
   type StudioToolId,
 } from "../utils/planAccess"
 import { getTopActiveModelsByCategory } from "../utils/modelCatalog"
-import { filesToImportEntries, summarizeImportPreview } from "../utils/projectImport"
+import { buildAutoImportPayload, collectDroppedUploadItems, summarizeImportPreview } from "../utils/projectImport"
 import "./project-dashboard-dark.css"
 
 const BASE = ""
@@ -565,18 +565,12 @@ const DASHBOARD_RUNTIME_STRINGS = Array.from(
       "Sitemap.xml",
       "Import website",
       "Importing...",
-      "HTML / Markdown",
-      "Single page, SVG, Markdown, or plain text.",
-      "Folder import",
-      "Import a local site folder with multiple pages and assets.",
-      "ZIP website",
-      "Upload an exported HTML/CSS/JS site bundle.",
-      "DOCX / PDF brief",
-      "Turn a brief into a structured project page.",
-      "Screenshot import",
-      "Generate an editable page from a screenshot.",
-      "Asset library",
-      "Batch import images, videos, logos, and brand files.",
+      "Upload files, ZIPs, briefs, screenshots, or drop a folder here",
+      "One upload zone handles pages, briefs, screenshots, ZIPs, folders, and asset packs. The importer classifies the package and builds the right project structure automatically.",
+      "Browse files",
+      "Choose folder",
+      "HTML, ZIP, PDF, DOCX, screenshots, logos, and multi-file site folders all work here.",
+      "Analyzing upload...",
       "Imported source ready",
       "Import check",
       "Homepage",
@@ -593,6 +587,7 @@ const DASHBOARD_RUNTIME_STRINGS = Array.from(
       "assets",
       "and",
       "more",
+      "Upload analyzed",
       "Clear import",
       "Easy imports now support live URL crawl, sitemap.xml, ZIP websites, folders, HTML, SVG, Markdown, DOCX, PDF briefs, screenshots, and asset libraries.",
       "Enter a website URL first.",
@@ -1728,12 +1723,9 @@ export default function ProjectDashboard({
   const { t, lang } = useTranslation()
   const rt = useRuntimeTranslations(lang, DASHBOARD_RUNTIME_STRINGS, t)
   const exportSectionRef = useRef<HTMLDivElement | null>(null)
-  const localFileInputRef = useRef<HTMLInputElement | null>(null)
+  const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const folderInputRef = useRef<HTMLInputElement | null>(null)
-  const zipInputRef = useRef<HTMLInputElement | null>(null)
-  const briefInputRef = useRef<HTMLInputElement | null>(null)
-  const screenshotInputRef = useRef<HTMLInputElement | null>(null)
-  const assetInputRef = useRef<HTMLInputElement | null>(null)
+  const uploadDragDepthRef = useRef(0)
   const [projects, setProjects] = useState<Project[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
   const [transactions, setTransactions] = useState<CreditTransaction[]>([])
@@ -1793,6 +1785,7 @@ export default function ProjectDashboard({
   const [newImportAnalysis, setNewImportAnalysis] = useState<ProjectImportAnalysis | null>(null)
   const [newImportMode, setNewImportMode] = useState<ProjectImportMode>("crawl")
   const [newImporting, setNewImporting] = useState(false)
+  const [newImportDragActive, setNewImportDragActive] = useState(false)
   const [landingName, setLandingName] = useState("")
   const [landingDesc, setLandingDesc] = useState("")
   const [landingAudience, setLandingAudience] = useState("")
@@ -2110,12 +2103,10 @@ export default function ProjectDashboard({
     setNewImportSummary("")
     setNewImportAnalysis(null)
     setNewImportMode("crawl")
-    if (localFileInputRef.current) localFileInputRef.current.value = ""
+    setNewImportDragActive(false)
+    uploadDragDepthRef.current = 0
+    if (uploadInputRef.current) uploadInputRef.current.value = ""
     if (folderInputRef.current) folderInputRef.current.value = ""
-    if (zipInputRef.current) zipInputRef.current.value = ""
-    if (briefInputRef.current) briefInputRef.current.value = ""
-    if (screenshotInputRef.current) screenshotInputRef.current.value = ""
-    if (assetInputRef.current) assetInputRef.current.value = ""
   }
 
   const resetStudioTool = () => {
@@ -2438,133 +2429,63 @@ export default function ProjectDashboard({
     }
   }
 
-  const handleUploadProjectFile = async (file?: File | null) => {
-    if (!file) return
-    const extension = file.name.split(".").pop()?.toLowerCase() || ""
-    if (!["html", "htm", "svg", "md", "markdown", "txt"].includes(extension)) {
-      toast.warning(rt("Upload currently supports HTML, SVG, Markdown, and text files."))
-      return
-    }
-
+  const runAutoUploadImport = async (items: Array<{ file: File; relativePath?: string }>) => {
+    if (!items.length) return
     setNewImporting(true)
     try {
-      const entries = await filesToImportEntries([file])
-      const preview = await apiPreviewProjectImport({
-        kind: "entries",
-        entries,
-        title: fileNameWithoutExtension(file.name),
-        entryMode: "single-file",
-      })
+      const payload = await buildAutoImportPayload(items)
+      const preview = await apiPreviewProjectImport(payload)
       applyImportPreview(preview)
-      toast.success(preview.summary || `${rt("Loaded")} ${file.name}`)
+      toast.success(preview.summary || rt("Upload analyzed"))
     } catch (error) {
       toast.error(errMsg(error))
     } finally {
       setNewImporting(false)
+      setNewImportDragActive(false)
+      uploadDragDepthRef.current = 0
     }
   }
 
-  const handleFolderImport = async (files: FileList | null | undefined) => {
-    const selectedFiles = Array.from(files || [])
-    if (!selectedFiles.length) return
-    setNewImporting(true)
+  const handleUniversalUpload = async (files: FileList | null | undefined) => {
+    const selectedFiles = Array.from(files || []).map((file) => ({
+      file,
+      relativePath: file.webkitRelativePath || file.name,
+    }))
+    await runAutoUploadImport(selectedFiles)
+  }
+
+  const handleUploadDrop = async (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setNewImportDragActive(false)
+    uploadDragDepthRef.current = 0
     try {
-      const entries = await filesToImportEntries(selectedFiles)
-      const preview = await apiPreviewProjectImport({
-        kind: "entries",
-        entries,
-        title: selectedFiles[0]?.webkitRelativePath?.split("/")[0] || rt("Imported folder"),
-        summary: rt("Folder imported into project pages"),
-        entryMode: "folder",
-      })
-      applyImportPreview(preview)
-      toast.success(preview.summary || rt("Folder imported"))
+      const items = await collectDroppedUploadItems(event.dataTransfer)
+      await runAutoUploadImport(items)
     } catch (error) {
       toast.error(errMsg(error))
-    } finally {
-      setNewImporting(false)
     }
   }
 
-  const handleZipImport = async (file?: File | null) => {
-    if (!file) return
-    setNewImporting(true)
-    try {
-      const [entry] = await filesToImportEntries([file])
-      const preview = await apiPreviewProjectImport({
-        kind: "zip",
-        fileName: file.name,
-        contentBase64: entry.contentBase64,
-      })
-      applyImportPreview(preview)
-      toast.success(preview.summary || rt("ZIP website imported"))
-    } catch (error) {
-      toast.error(errMsg(error))
-    } finally {
-      setNewImporting(false)
-    }
+  const handleUploadDragEnter = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    uploadDragDepthRef.current += 1
+    setNewImportDragActive(true)
   }
 
-  const handleBriefImport = async (file?: File | null) => {
-    if (!file) return
-    setNewImporting(true)
-    try {
-      const [entry] = await filesToImportEntries([file])
-      const preview = await apiPreviewProjectImport({
-        kind: "brief",
-        fileName: file.name,
-        mimeType: file.type || "",
-        contentBase64: entry.contentBase64,
-      })
-      applyImportPreview(preview)
-      toast.success(preview.summary || rt("Brief imported"))
-    } catch (error) {
-      toast.error(errMsg(error))
-    } finally {
-      setNewImporting(false)
-    }
+  const handleUploadDragOver = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = "copy"
+    if (!newImportDragActive) setNewImportDragActive(true)
   }
 
-  const handleScreenshotImport = async (file?: File | null) => {
-    if (!file) return
-    setNewImporting(true)
-    try {
-      const [entry] = await filesToImportEntries([file])
-      const preview = await apiPreviewProjectImport({
-        kind: "screenshot",
-        fileName: file.name,
-        mimeType: file.type || "",
-        contentBase64: entry.contentBase64,
-      })
-      applyImportPreview(preview)
-      toast.success(preview.summary || rt("Screenshot converted"))
-    } catch (error) {
-      toast.error(errMsg(error))
-    } finally {
-      setNewImporting(false)
-    }
-  }
-
-  const handleAssetImport = async (files: FileList | null | undefined) => {
-    const selectedFiles = Array.from(files || [])
-    if (!selectedFiles.length) return
-    setNewImporting(true)
-    try {
-      const entries = await filesToImportEntries(selectedFiles)
-      const preview = await apiPreviewProjectImport({
-        kind: "entries",
-        entries,
-        title: rt("Asset library"),
-        summary: rt("Asset library imported into one project page"),
-        entryMode: "assets",
-      })
-      applyImportPreview(preview)
-      toast.success(preview.summary || rt("Asset library imported"))
-    } catch (error) {
-      toast.error(errMsg(error))
-    } finally {
-      setNewImporting(false)
-    }
+  const handleUploadDragLeave = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    uploadDragDepthRef.current = Math.max(0, uploadDragDepthRef.current - 1)
+    if (uploadDragDepthRef.current === 0) setNewImportDragActive(false)
   }
 
   const loadTemplates = async () => {
@@ -3810,11 +3731,11 @@ export default function ProjectDashboard({
             </div>
             <div className="pd-modal-body">
               <input
-                ref={localFileInputRef}
+                ref={uploadInputRef}
                 type="file"
-                accept=".html,.htm,.svg,.md,.markdown,.txt,text/html,image/svg+xml,text/markdown,text/plain"
                 hidden
-                onChange={event => void handleUploadProjectFile(event.target.files?.[0] || null)}
+                multiple
+                onChange={event => void handleUniversalUpload(event.target.files)}
               />
               <input
                 ref={folderInputRef}
@@ -3822,36 +3743,7 @@ export default function ProjectDashboard({
                 hidden
                 multiple
                 {...({ webkitdirectory: "true", directory: "true" } as Record<string, string>)}
-                onChange={event => void handleFolderImport(event.target.files)}
-              />
-              <input
-                ref={zipInputRef}
-                type="file"
-                hidden
-                accept=".zip,application/zip"
-                onChange={event => void handleZipImport(event.target.files?.[0] || null)}
-              />
-              <input
-                ref={briefInputRef}
-                type="file"
-                hidden
-                accept=".docx,.pdf,.md,.markdown,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/markdown,text/plain"
-                onChange={event => void handleBriefImport(event.target.files?.[0] || null)}
-              />
-              <input
-                ref={screenshotInputRef}
-                type="file"
-                hidden
-                accept="image/*"
-                onChange={event => void handleScreenshotImport(event.target.files?.[0] || null)}
-              />
-              <input
-                ref={assetInputRef}
-                type="file"
-                hidden
-                multiple
-                accept="image/*,video/*,.svg,.ico,.woff,.woff2,.ttf,.otf"
-                onChange={event => void handleAssetImport(event.target.files)}
+                onChange={event => void handleUniversalUpload(event.target.files)}
               />
               <div className="pd-field-grid">
                 <label className="pd-field-label">
@@ -3893,31 +3785,49 @@ export default function ProjectDashboard({
                       {newImporting ? rt("Importing...") : rt("Import website")}
                     </button>
                   </div>
-                  <div className="pd-import-grid">
-                    <button className="pd-btn pd-import-card" type="button" onClick={() => localFileInputRef.current?.click()}>
-                      <strong>{rt("HTML / Markdown")}</strong>
-                      <span>{rt("Single page, SVG, Markdown, or plain text.")}</span>
-                    </button>
-                    <button className="pd-btn pd-import-card" type="button" onClick={() => folderInputRef.current?.click()}>
-                      <strong>{rt("Folder import")}</strong>
-                      <span>{rt("Import a local site folder with multiple pages and assets.")}</span>
-                    </button>
-                    <button className="pd-btn pd-import-card" type="button" onClick={() => zipInputRef.current?.click()}>
-                      <strong>{rt("ZIP website")}</strong>
-                      <span>{rt("Upload an exported HTML/CSS/JS site bundle.")}</span>
-                    </button>
-                    <button className="pd-btn pd-import-card" type="button" onClick={() => briefInputRef.current?.click()}>
-                      <strong>{rt("DOCX / PDF brief")}</strong>
-                      <span>{rt("Turn a brief into a structured project page.")}</span>
-                    </button>
-                    <button className="pd-btn pd-import-card" type="button" onClick={() => screenshotInputRef.current?.click()}>
-                      <strong>{rt("Screenshot import")}</strong>
-                      <span>{rt("Generate an editable page from a screenshot.")}</span>
-                    </button>
-                    <button className="pd-btn pd-import-card" type="button" onClick={() => assetInputRef.current?.click()}>
-                      <strong>{rt("Asset library")}</strong>
-                      <span>{rt("Batch import images, videos, logos, and brand files.")}</span>
-                    </button>
+                  <div
+                    className={`pd-import-dropzone${newImportDragActive ? " is-dragging" : ""}`}
+                    onClick={() => uploadInputRef.current?.click()}
+                    onDragEnter={handleUploadDragEnter}
+                    onDragOver={handleUploadDragOver}
+                    onDragLeave={handleUploadDragLeave}
+                    onDrop={(event) => void handleUploadDrop(event)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault()
+                        uploadInputRef.current?.click()
+                      }
+                    }}
+                  >
+                    <strong>{newImporting ? rt("Analyzing upload...") : rt("Upload files, ZIPs, briefs, screenshots, or drop a folder here")}</strong>
+                    <span>{rt("One upload zone handles pages, briefs, screenshots, ZIPs, folders, and asset packs. The importer classifies the package and builds the right project structure automatically.")}</span>
+                    <div className="pd-import-drop-actions">
+                      <button
+                        className="pd-btn pd-btn-primary"
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          uploadInputRef.current?.click()
+                        }}
+                      >
+                        {rt("Browse files")}
+                      </button>
+                      <button
+                        className="pd-btn"
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          folderInputRef.current?.click()
+                        }}
+                      >
+                        {rt("Choose folder")}
+                      </button>
+                    </div>
+                    <div className="pd-import-drop-hints">
+                      <span>{rt("HTML, ZIP, PDF, DOCX, screenshots, logos, and multi-file site folders all work here.")}</span>
+                    </div>
                   </div>
                   {(newUploadName || newImportSummary) ? (
                     <div className="pd-import-summary">
@@ -4019,12 +3929,10 @@ export default function ProjectDashboard({
                           setNewUploadName("")
                           setNewImportSummary("")
                           setNewImportAnalysis(null)
-                          if (localFileInputRef.current) localFileInputRef.current.value = ""
+                          setNewImportDragActive(false)
+                          uploadDragDepthRef.current = 0
+                          if (uploadInputRef.current) uploadInputRef.current.value = ""
                           if (folderInputRef.current) folderInputRef.current.value = ""
-                          if (zipInputRef.current) zipInputRef.current.value = ""
-                          if (briefInputRef.current) briefInputRef.current.value = ""
-                          if (screenshotInputRef.current) screenshotInputRef.current.value = ""
-                          if (assetInputRef.current) assetInputRef.current.value = ""
                         }}
                       >
                         {rt("Clear import")}
