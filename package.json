@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "scripts": {
     "build": "npm --prefix server install && npm --prefix dashboard install && npm --prefix dashboard run build",
-    "start": "npm --prefix server run dev",
+    "start": "npm --prefix server run start",
     "dev": "concurrently -n s,d \"npm run dev:server\" \"npm run dev:dashboard\"",
     "dev:server": "npm --prefix server run dev",
     "dev:dashboard": "npm --prefix dashboard run dev",

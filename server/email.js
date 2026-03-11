@@ -2,18 +2,26 @@ import { Resend } from 'resend'
 
 const APP_URL = process.env.APP_URL || "https://edit-production-ca78.up.railway.app"
 const PASSWORD_RESET_EMAIL_OVERRIDE = (process.env.PASSWORD_RESET_EMAIL_OVERRIDE || process.env.RESET_MAIL_TO || "").trim()
+let resend = null
 
-if (!process.env.RESEND_API_KEY) {
-  console.error("RESEND_API_KEY missing")
+function getResend() {
+  const key = (process.env.RESEND_API_KEY || "").trim()
+  if (!key) return null
+  if (!resend) resend = new Resend(key)
+  return resend
 }
-
-const resend = new Resend(process.env.RESEND_API_KEY)
 
 async function send(to, subject, html) {
   console.log(`EMAIL attempt -> to=${to} subject=${subject}`)
+  const client = getResend()
+
+  if (!client) {
+    console.warn("EMAIL skipped: RESEND_API_KEY missing")
+    return false
+  }
 
   try {
-    const { data, error } = await resend.emails.send({
+    const { data, error } = await client.emails.send({
       from: "Site Editor <onboarding@resend.dev>",
       to: [to],
       subject,
