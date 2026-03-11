@@ -27,6 +27,7 @@ type ExportFilter = "all" | "wp-placeholder" | "html-clean" | "ready" | "guarded
 type AIStudioFilter = "all" | "creation" | "optimization" | "growth" | "autonomy"
 type SpendRange = "1h" | "24h" | "7d" | "30d"
 type UsageMode = "model" | "task"
+type StudioTool = "cro-agent" | "self-healing" | "global-expansion"
 type Template = { id: number; name: string; url?: string; platform?: SitePlatform; thumbnail?: string; created_at: string }
 type ChecklistItem = { id: string; label: string; done: boolean }
 type NoteItem = { id: string; text: string; done: boolean }
@@ -43,6 +44,21 @@ type AIStudioService = {
   surface: string
   actionLabel: string
   status: string
+}
+type StudioAudit = {
+  url: string
+  scores: { performance: number; accessibility: number; seo: number; bestPractices: number }
+  metrics: { fcp: string; lcp: string; cls: string; ttfb: string }
+  opportunities: Array<{ id: string; title: string; value: string }>
+}
+type StudioSection = { label: string; items: string[] }
+type StudioMarketPlan = { market: string; language: string; angle: string; offer: string }
+type StudioResult = {
+  headline: string
+  summary: string
+  sections: StudioSection[]
+  markets?: StudioMarketPlan[]
+  audit?: StudioAudit
 }
 
 const DEFAULT_CHECKLIST: ChecklistItem[] = [
@@ -188,6 +204,101 @@ const AI_STUDIO_SERVICES: AIStudioService[] = [
     status: "Realtime",
   },
 ]
+
+const STUDIO_TOOL_META: Record<StudioTool, { eyebrow: string; title: string; description: string; actionLabel: string }> = {
+  "cro-agent": {
+    eyebrow: "Optimization",
+    title: "Autonomous CRO Agent",
+    description: "Audit a live page, detect conversion friction, and return a queue of experiments and quick wins.",
+    actionLabel: "Run CRO analysis",
+  },
+  "self-healing": {
+    eyebrow: "Reliability",
+    title: "Self-Healing Website",
+    description: "Scan the site for performance and SEO regressions, then generate a repair plan ranked by urgency.",
+    actionLabel: "Run health scan",
+  },
+  "global-expansion": {
+    eyebrow: "Growth",
+    title: "One-Click Global Expansion",
+    description: "Generate a market entry plan with localized angles, offers, and rollout priorities for new regions.",
+    actionLabel: "Build expansion plan",
+  },
+}
+
+function parseJsonCandidate(text: string) {
+  const candidates = [text]
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  if (fenced?.[1]) candidates.push(fenced[1])
+  const firstBrace = text.indexOf("{")
+  const lastBrace = text.lastIndexOf("}")
+  if (firstBrace >= 0 && lastBrace > firstBrace) candidates.push(text.slice(firstBrace, lastBrace + 1))
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate)
+    } catch {}
+  }
+  return null
+}
+
+function normalizeStringList(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return value
+    .map(item => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean)
+    .slice(0, 6)
+}
+
+function normalizeStudioResult(payload: unknown, fallbackSummary = ""): StudioResult {
+  if (!payload || typeof payload !== "object") {
+    return {
+      headline: "Plan generated",
+      summary: fallbackSummary.trim(),
+      sections: [],
+    }
+  }
+
+  const record = payload as Record<string, unknown>
+  const sections = Array.isArray(record.sections)
+    ? record.sections
+        .map(section => {
+          if (!section || typeof section !== "object") return null
+          const value = section as Record<string, unknown>
+          const label = typeof value.label === "string" ? value.label.trim() : ""
+          const items = normalizeStringList(value.items)
+          if (!label || !items.length) return null
+          return { label, items }
+        })
+        .filter((section): section is StudioSection => Boolean(section))
+        .slice(0, 4)
+    : []
+
+  const markets = Array.isArray(record.markets)
+    ? record.markets
+        .map(entry => {
+          if (!entry || typeof entry !== "object") return null
+          const value = entry as Record<string, unknown>
+          const market = typeof value.market === "string" ? value.market.trim() : ""
+          const language = typeof value.language === "string" ? value.language.trim() : ""
+          const angle = typeof value.angle === "string" ? value.angle.trim() : ""
+          const offer = typeof value.offer === "string" ? value.offer.trim() : ""
+          if (!market || !language || !angle) return null
+          return { market, language, angle, offer }
+        })
+        .filter((entry): entry is StudioMarketPlan => Boolean(entry))
+        .slice(0, 4)
+    : undefined
+
+  return {
+    headline:
+      typeof record.headline === "string" && record.headline.trim() ? record.headline.trim() : "Plan generated",
+    summary:
+      typeof record.summary === "string" && record.summary.trim() ? record.summary.trim() : fallbackSummary.trim(),
+    sections,
+    markets: markets?.length ? markets : undefined,
+  }
+}
 
 function loadChecklist(): ChecklistItem[] {
   try {
@@ -772,11 +883,20 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
   const [showNewProject, setShowNewProject] = useState(false)
   const [showLandingGenerator, setShowLandingGenerator] = useState(false)
   const [showTemplateExtract, setShowTemplateExtract] = useState(false)
+  const [activeStudioTool, setActiveStudioTool] = useState<StudioTool | null>(null)
   const [creatingProject, setCreatingProject] = useState(false)
   const [landingGenerating, setLandingGenerating] = useState(false)
   const [templateExtracting, setTemplateExtracting] = useState(false)
+  const [studioRunning, setStudioRunning] = useState(false)
   const [downloadingExportId, setDownloadingExportId] = useState<number | null>(null)
   const [templateExtractFeedback, setTemplateExtractFeedback] = useState("")
+  const [studioProjectId, setStudioProjectId] = useState<number | "">("")
+  const [studioUrl, setStudioUrl] = useState("")
+  const [studioGoal, setStudioGoal] = useState("")
+  const [studioAudience, setStudioAudience] = useState("")
+  const [studioMarkets, setStudioMarkets] = useState("Germany, Austria, Switzerland")
+  const [studioNotes, setStudioNotes] = useState("")
+  const [studioResult, setStudioResult] = useState<StudioResult | null>(null)
   const [applyingTemplateId, setApplyingTemplateId] = useState<number | null>(null)
   const [newName, setNewName] = useState("")
   const [newUrl, setNewUrl] = useState("")
@@ -887,6 +1007,9 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
 
   const currentPlanMeta = planMeta[plan]
   const normalizedProjects = projects
+  const selectedStudioProject =
+    typeof studioProjectId === "number" ? normalizedProjects.find(project => project.id === studioProjectId) : undefined
+  const studioToolMeta = activeStudioTool ? STUDIO_TOOL_META[activeStudioTool] : null
   const filteredProjects = normalizedProjects.filter(project => {
     const query = projectSearch.trim().toLowerCase()
     const matchesQuery =
@@ -1046,6 +1169,120 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
     setNewUploadHtml("")
     setNewUploadName("")
     if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
+  const resetStudioTool = () => {
+    setActiveStudioTool(null)
+    setStudioRunning(false)
+    setStudioProjectId("")
+    setStudioUrl("")
+    setStudioGoal("")
+    setStudioAudience("")
+    setStudioMarkets("Germany, Austria, Switzerland")
+    setStudioNotes("")
+    setStudioResult(null)
+  }
+
+  const openStudioTool = (tool: StudioTool) => {
+    const suggestedProject = normalizedProjects.find(project => project.url) ?? normalizedProjects[0]
+    setActiveStudioTool(tool)
+    setStudioProjectId(suggestedProject?.id ?? "")
+    setStudioUrl(suggestedProject?.url || "")
+    setStudioAudience(suggestedProject?.clientName || "")
+    setStudioGoal(
+      tool === "cro-agent"
+        ? "Increase qualified conversions on the main landing page."
+        : tool === "self-healing"
+        ? "Keep the site healthy, fast, and conversion-safe after every content change."
+        : "Launch the site into high-value nearby markets with localized positioning."
+    )
+    setStudioMarkets("Germany, Austria, Switzerland")
+    setStudioNotes("")
+    setStudioResult(null)
+  }
+
+  const runStudioTool = async () => {
+    if (!activeStudioTool) return
+    const resolvedUrl = (studioUrl.trim() || selectedStudioProject?.url || "").trim()
+    if (!/^https?:\/\//i.test(resolvedUrl)) {
+      toast.warning("A full website URL is required for this workflow.")
+      return
+    }
+
+    setStudioRunning(true)
+    try {
+      const auditResponse = await apiFetch<StudioAudit & { ok: boolean; error?: string }>("/api/seo/audit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: resolvedUrl }),
+      })
+      if (!auditResponse.ok) throw new Error(auditResponse.error || "Audit failed")
+
+      const audit: StudioAudit = {
+        url: auditResponse.url,
+        scores: auditResponse.scores,
+        metrics: auditResponse.metrics,
+        opportunities: auditResponse.opportunities,
+      }
+
+      const prompt =
+        activeStudioTool === "cro-agent"
+          ? [
+              "You are an elite conversion-rate strategist.",
+              "Return JSON only. No markdown, no prose outside JSON.",
+              'Schema: {"headline":"string","summary":"string","sections":[{"label":"Conversion Risks","items":["..."]},{"label":"Experiment Queue","items":["..."]},{"label":"Immediate Wins","items":["..."]}]}',
+              `Site URL: ${resolvedUrl}`,
+              `Project: ${selectedStudioProject?.name || "Unknown"}`,
+              `Client: ${selectedStudioProject?.clientName || studioAudience || "Unknown"}`,
+              `Primary goal: ${studioGoal.trim() || "Increase qualified conversions."}`,
+              `Audience: ${studioAudience.trim() || "General website visitors"}`,
+              `Notes: ${studioNotes.trim() || "None"}`,
+              `Audit JSON: ${JSON.stringify(audit)}`,
+              "Prioritize changes with the highest conversion upside and lowest implementation risk.",
+            ].join("\n")
+          : activeStudioTool === "self-healing"
+          ? [
+              "You are a website reliability and growth engineer.",
+              "Return JSON only. No markdown, no prose outside JSON.",
+              'Schema: {"headline":"string","summary":"string","sections":[{"label":"Failures to Watch","items":["..."]},{"label":"Safe Fixes","items":["..."]},{"label":"Monitoring Routine","items":["..."]}]}',
+              `Site URL: ${resolvedUrl}`,
+              `Project: ${selectedStudioProject?.name || "Unknown"}`,
+              `Goal: ${studioGoal.trim() || "Keep the site healthy and resilient."}`,
+              `Notes: ${studioNotes.trim() || "None"}`,
+              `Audit JSON: ${JSON.stringify(audit)}`,
+              "Focus on regressions, fragile areas, and quick repairs that reduce future breakage.",
+            ].join("\n")
+          : [
+              "You are a global market expansion strategist.",
+              "Return JSON only. No markdown, no prose outside JSON.",
+              'Schema: {"headline":"string","summary":"string","sections":[{"label":"Priority Markets","items":["..."]},{"label":"Localization Moves","items":["..."]},{"label":"Launch Sequence","items":["..."]}],"markets":[{"market":"string","language":"string","angle":"string","offer":"string"}]}',
+              `Site URL: ${resolvedUrl}`,
+              `Project: ${selectedStudioProject?.name || "Unknown"}`,
+              `Client: ${selectedStudioProject?.clientName || studioAudience || "Unknown"}`,
+              `Expansion goal: ${studioGoal.trim() || "Choose the best nearby markets and localization angle."}`,
+              `Target markets: ${studioMarkets.trim() || "Germany, Austria, Switzerland"}`,
+              `Notes: ${studioNotes.trim() || "None"}`,
+              `Audit JSON: ${JSON.stringify(audit)}`,
+              "Propose the best launch order, language, positioning angle, and offer for each market.",
+            ].join("\n")
+
+      const geminiResponse = await apiFetch<{ ok: boolean; error?: string; data?: { text?: string } }>("/api/google/gemini/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, model: "gemini-2.5-pro" }),
+      })
+      if (!geminiResponse.ok) throw new Error(geminiResponse.error || "Strategy generation failed")
+
+      const rawText = String(geminiResponse.data?.text || "").trim()
+      const parsed = normalizeStudioResult(parseJsonCandidate(rawText), rawText)
+      setStudioResult({ ...parsed, audit })
+      updateChecklist("ai", true)
+      toast.success(`${studioToolMeta?.title || "AI Studio"} ready`)
+    } catch (error) {
+      toast.error(errMsg(error))
+    } finally {
+      setStudioRunning(false)
+    }
   }
 
   const loadAssignableMembers = async () => {
@@ -1377,6 +1614,14 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
   }
 
   const openAIStudioService = (service: AIStudioService) => {
+    if (
+      service.id === "cro-agent" ||
+      service.id === "self-healing" ||
+      service.id === "global-expansion"
+    ) {
+      openStudioTool(service.id)
+      return
+    }
     if (service.id === "company-box" || service.id === "funnel-generator") {
       setShowLandingGenerator(true)
       toast.info(`Opening ${service.name}`)
@@ -1926,6 +2171,182 @@ export default function ProjectDashboard({ user, onOpen, onLogout }: { user: Use
       {showCredits ? <CreditsPanel onClose={() => { setShowCredits(false); loadDashboard() }} /> : null}
       {showSettings ? <SettingsPanel onClose={() => setShowSettings(false)} onThemeChange={value => setTheme(value as "dark" | "light")} /> : null}
       {showInvite ? <ReferralInvite theme={theme} userEmail={user.email} onClose={() => setShowInvite(false)} /> : null}
+
+      {activeStudioTool && studioToolMeta ? (
+        <div className="pd-modal-backdrop" onClick={resetStudioTool}>
+          <div className="pd-modal pd-modal-wide" onClick={event => event.stopPropagation()}>
+            <div className="pd-modal-header">
+              <div>
+                <div className="pd-modal-eyebrow">{studioToolMeta.eyebrow}</div>
+                <div className="pd-modal-title">{studioToolMeta.title}</div>
+              </div>
+              <button className="pd-modal-close" type="button" onClick={resetStudioTool}>X</button>
+            </div>
+            <div className="pd-modal-body">
+              <div className="pd-helper-copy pd-studio-intro">{studioToolMeta.description}</div>
+              <div className="pd-field-grid">
+                <label className="pd-field-label">
+                  Source project
+                  <select
+                    className="pd-field-select"
+                    value={studioProjectId === "" ? "" : String(studioProjectId)}
+                    onChange={event => {
+                      const value = event.target.value
+                      if (!value) {
+                        setStudioProjectId("")
+                        return
+                      }
+                      const nextProject = normalizedProjects.find(project => project.id === Number(value))
+                      setStudioProjectId(Number(value))
+                      if (nextProject?.url) setStudioUrl(nextProject.url)
+                      if (nextProject?.clientName) setStudioAudience(nextProject.clientName)
+                    }}
+                  >
+                    <option value="">Manual URL</option>
+                    {normalizedProjects.map(project => (
+                      <option key={project.id} value={project.id}>
+                        {project.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="pd-field-label">
+                  Website URL
+                  <input
+                    className="pd-field-input"
+                    value={studioUrl}
+                    onChange={event => setStudioUrl(event.target.value)}
+                    placeholder="https://..."
+                  />
+                </label>
+                <label className="pd-field-label">
+                  Primary goal
+                  <input className="pd-field-input" value={studioGoal} onChange={event => setStudioGoal(event.target.value)} />
+                </label>
+                <label className="pd-field-label">
+                  Audience / client
+                  <input className="pd-field-input" value={studioAudience} onChange={event => setStudioAudience(event.target.value)} />
+                </label>
+                {activeStudioTool === "global-expansion" ? (
+                  <label className="pd-field-label pd-field-label-full">
+                    Target markets
+                    <input
+                      className="pd-field-input"
+                      value={studioMarkets}
+                      onChange={event => setStudioMarkets(event.target.value)}
+                      placeholder="Germany, Austria, Switzerland"
+                    />
+                  </label>
+                ) : null}
+                <label className="pd-field-label pd-field-label-full">
+                  Notes
+                  <textarea
+                    className="pd-field-textarea"
+                    value={studioNotes}
+                    onChange={event => setStudioNotes(event.target.value)}
+                    placeholder={
+                      activeStudioTool === "cro-agent"
+                        ? "Share known friction points, conversion goals, or current hypotheses."
+                        : activeStudioTool === "self-healing"
+                        ? "Mention recent issues, risky areas, or release cadence."
+                        : "Mention priority regions, pricing, positioning, or expansion constraints."
+                    }
+                  />
+                </label>
+              </div>
+
+              {studioResult ? (
+                <div className="pd-studio-result">
+                  <div className="pd-studio-head">
+                    <div>
+                      <div className="pd-studio-kicker">Latest run</div>
+                      <div className="pd-studio-title">{studioResult.headline}</div>
+                    </div>
+                    <div className="pd-studio-pill">{studioResult.audit?.url?.replace(/^https?:\/\//, "")}</div>
+                  </div>
+                  <div className="pd-studio-summary">{studioResult.summary}</div>
+
+                  {studioResult.audit ? (
+                    <div className="pd-studio-score-grid">
+                      <div className="pd-studio-score-card">
+                        <span className="pd-studio-score-label">Performance</span>
+                        <strong>{studioResult.audit.scores.performance}</strong>
+                      </div>
+                      <div className="pd-studio-score-card">
+                        <span className="pd-studio-score-label">Accessibility</span>
+                        <strong>{studioResult.audit.scores.accessibility}</strong>
+                      </div>
+                      <div className="pd-studio-score-card">
+                        <span className="pd-studio-score-label">SEO</span>
+                        <strong>{studioResult.audit.scores.seo}</strong>
+                      </div>
+                      <div className="pd-studio-score-card">
+                        <span className="pd-studio-score-label">Best practices</span>
+                        <strong>{studioResult.audit.scores.bestPractices}</strong>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {studioResult.sections.length ? (
+                    <div className="pd-studio-section-grid">
+                      {studioResult.sections.map(section => (
+                        <section key={section.label} className="pd-studio-section">
+                          <div className="pd-studio-section-title">{section.label}</div>
+                          <div className="pd-studio-bullet-list">
+                            {section.items.map(item => (
+                              <div key={item} className="pd-studio-bullet-item">
+                                <span className="pd-studio-bullet-dot" />
+                                <span>{item}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {studioResult.markets?.length ? (
+                    <div className="pd-studio-market-grid">
+                      {studioResult.markets.map(market => (
+                        <article key={`${market.market}-${market.language}`} className="pd-studio-market-card">
+                          <div className="pd-studio-market-top">
+                            <strong>{market.market}</strong>
+                            <span>{market.language}</span>
+                          </div>
+                          <div className="pd-studio-market-copy">{market.angle}</div>
+                          <div className="pd-studio-market-offer">{market.offer}</div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {studioResult.audit?.opportunities?.length ? (
+                    <section className="pd-studio-section">
+                      <div className="pd-studio-section-title">Audit opportunities</div>
+                      <div className="pd-studio-bullet-list">
+                        {studioResult.audit.opportunities.map(opportunity => (
+                          <div key={opportunity.id} className="pd-studio-bullet-item">
+                            <span className="pd-studio-bullet-dot" />
+                            <span>
+                              {opportunity.title}: {opportunity.value}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+            <div className="pd-modal-actions">
+              <button className="pd-btn" type="button" onClick={resetStudioTool}>Close</button>
+              <button className="pd-btn pd-btn-primary" type="button" onClick={runStudioTool} disabled={studioRunning}>
+                {studioRunning ? "Running..." : studioToolMeta.actionLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {showNewProject ? (
         <div className="pd-modal-backdrop" onClick={resetNewProjectForm}>
