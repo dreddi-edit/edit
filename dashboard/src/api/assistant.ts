@@ -26,6 +26,8 @@ export type AssistantContext = {
 type AssistantChatRes = {
   ok: true
   model: string
+  requested_model?: string
+  model_notice?: string
   provider: string
   reply: string
   usage?: {

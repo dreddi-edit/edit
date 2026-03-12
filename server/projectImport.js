@@ -1839,7 +1839,8 @@ async function maybeRunAiImportStructure({ entries, textEntries, analysis, optio
       temperature: 0.2,
     })
     return parseJsonObjectCandidate(generated)
-  } catch {
+  } catch (error) {
+    if (options.requireImportAnalysis) throw error
     return null
   }
 }
@@ -2742,6 +2743,7 @@ export async function buildProjectImportPreview(payload = {}, options = {}) {
       summary: cleanText(payload.summary || ""),
       entryMode: cleanText(payload.entryMode || "auto"),
       userId,
+      requireImportAnalysis: sharedOptions.requireImportAnalysis,
     })
     return maybeApplyUniversalImportAnalysis(preview, payload, sharedOptions)
   }
@@ -2755,6 +2757,7 @@ export async function buildProjectImportPreview(payload = {}, options = {}) {
       summary: "ZIP website imported into project pages",
       entryMode: "zip",
       userId,
+      requireImportAnalysis: sharedOptions.requireImportAnalysis,
     })
     return maybeApplyUniversalImportAnalysis(preview, payload, sharedOptions)
   }
@@ -2778,6 +2781,7 @@ export async function buildProjectImportPreview(payload = {}, options = {}) {
         summary: "Brief imported into one project page",
         entryMode: "single-file",
         userId,
+        requireImportAnalysis: sharedOptions.requireImportAnalysis,
       },
     )
     return maybeApplyUniversalImportAnalysis(preview, payload, sharedOptions)

@@ -243,6 +243,40 @@ function cleanKey(value) {
   return String(value || "").trim()
 }
 
+function providerForAssistantModel(model) {
+  const value = String(model || "")
+  if (value.startsWith("claude-")) return "anthropic"
+  if (value.startsWith("gemini-")) return "gemini"
+  if (value.startsWith("groq:")) return "groq"
+  return ""
+}
+
+function modelHasConfiguredKey(model, userId) {
+  const provider = providerForAssistantModel(model)
+  if (!provider) return false
+  return Boolean(getProviderApiKey(provider, { userId }))
+}
+
+function resolveAssistantModelForUser(plan, requestedModel, userId) {
+  const allowedModels = ASSISTANT_MODELS_BY_PLAN[plan] || ASSISTANT_MODELS_BY_PLAN.basis
+  if (!allowedModels.includes(requestedModel)) {
+    return { ok: false, error: `Model not available on ${plan}` }
+  }
+  if (modelHasConfiguredKey(requestedModel, userId)) {
+    return { ok: true, model: requestedModel, fallbackFrom: null, allowedModels }
+  }
+  const fallback = allowedModels.find((candidate) => modelHasConfiguredKey(candidate, userId))
+  if (!fallback) {
+    return {
+      ok: false,
+      error: "No AI provider key configured for the assistant. Add an Anthropic, Gemini, or Groq key in Settings > API Keys.",
+      code: "MISSING_PROVIDER_KEY",
+      allowedModels,
+    }
+  }
+  return { ok: true, model: fallback, fallbackFrom: requestedModel, allowedModels }
+}
+
 async function runAssistantModel({ model, messages, system, userId = null }) {
   if (model.startsWith("claude-")) return callAnthropicChat({ model, messages, system, userId })
   if (model.startsWith("gemini-")) return callGeminiChat({ model, messages, system, userId })
@@ -272,19 +306,25 @@ export function registerAssistantRoutes(app, { aiRateLimit }) {
         return res.status(400).json({ ok: false, error: "Missing messages" })
       }
 
-      if (!ASSISTANT_MODELS_BY_PLAN[plan].includes(requestedModel)) {
-        return res.status(403).json({
+      const modelResolution = resolveAssistantModelForUser(plan, requestedModel, req.user.id)
+      if (!modelResolution.ok) {
+        const statusCode = modelResolution.code === "MISSING_PROVIDER_KEY" ? 503 : 403
+        return res.status(statusCode).json({
           ok: false,
-          error: `Model not available on ${plan}`,
+          error: modelResolution.error,
+          code: modelResolution.code || "MODEL_NOT_AVAILABLE",
+          allowed_models: modelResolution.allowedModels || ASSISTANT_MODELS_BY_PLAN[plan] || [],
         })
       }
+      const activeModel = modelResolution.model
+      const fallbackFrom = modelResolution.fallbackFrom
 
       const system = buildSystemPrompt(context, plan)
       const tokenInputEstimate = estimateTokensFromText(
         `${system}\n${messages.map((message) => `${message.role}: ${message.content}`).join("\n")}`
       )
-      const tokenOutputEstimate = requestedModel === "claude-haiku-4-5-20251001" ? 800 : 1200
-      const creditCheck = hasEnoughCredits(req.user.id, requestedModel, tokenInputEstimate, tokenOutputEstimate)
+      const tokenOutputEstimate = activeModel === "claude-haiku-4-5-20251001" ? 800 : 1200
+      const creditCheck = hasEnoughCredits(req.user.id, activeModel, tokenInputEstimate, tokenOutputEstimate)
       if (!creditCheck.ok) {
         return res.status(402).json({
           ok: false,
@@ -296,7 +336,7 @@ export function registerAssistantRoutes(app, { aiRateLimit }) {
       }
 
       const result = await runAssistantModel({
-        model: requestedModel,
+        model: activeModel,
         messages,
         system,
         userId: req.user.id,
@@ -312,7 +352,7 @@ export function registerAssistantRoutes(app, { aiRateLimit }) {
       if (req.user?.id) {
         deducted = deductCredits(
           req.user.id,
-          requestedModel,
+          activeModel,
           Number(usage.input_tokens || 0),
           Number(usage.output_tokens || 0),
           "Assistant widget"
@@ -321,7 +361,12 @@ export function registerAssistantRoutes(app, { aiRateLimit }) {
 
       res.json({
         ok: true,
-        model: requestedModel,
+        model: activeModel,
+        requested_model: requestedModel,
+        model_notice:
+          fallbackFrom && fallbackFrom !== activeModel
+            ? `Requested model ${fallbackFrom} is not available because its provider key is missing. Switched to ${activeModel}.`
+            : undefined,
         provider: result.provider,
         reply: result.reply,
         usage,

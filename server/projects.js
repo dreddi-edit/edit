@@ -369,6 +369,69 @@ function extractSitePagesFromHtml(html, rootUrl) {
   return Array.from(pages.values())
 }
 
+function normalizeManualPagePath(inputPath, fallbackName = "page") {
+  const raw = cleanText(inputPath)
+  const slugBase = raw
+    ? raw
+        .replace(/^https?:\/\/[^/]+/i, "")
+        .replace(/[?#].*$/g, "")
+        .replace(/\.[a-z0-9]{2,8}$/i, "")
+    : fallbackName
+  const slug = cleanText(slugBase)
+    .toLowerCase()
+    .replace(/[^a-z0-9/_-]+/g, "-")
+    .replace(/\/{2,}/g, "/")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/^\/+|\/+$/g, "")
+  if (!slug || slug === "home" || slug === "index") return "/"
+  return `/${slug}`
+}
+
+function buildPageAbsoluteUrl(projectRootUrl, pathOrUrl) {
+  const value = cleanText(pathOrUrl)
+  if (!value) return ""
+  if (/^https?:\/\//i.test(value)) return value
+  if (!projectRootUrl || !/^https?:\/\//i.test(projectRootUrl)) return value.startsWith("/") ? value : `/${value}`
+  try {
+    return new URL(value.startsWith("/") ? value : `/${value}`, projectRootUrl).toString()
+  } catch {
+    return value.startsWith("/") ? value : `/${value}`
+  }
+}
+
+function ensureUniquePagePath(pages, requestedPath, currentPageId = "") {
+  const normalized = normalizeManualPagePath(requestedPath || "/")
+  const used = new Set(
+    (Array.isArray(pages) ? pages : [])
+      .filter((page) => cleanText(page?.id) !== cleanText(currentPageId))
+      .map((page) => cleanText(page?.path)),
+  )
+  if (!used.has(normalized)) return normalized
+  const base = normalized === "/" ? "/page" : normalized
+  for (let index = 2; index <= 500; index += 1) {
+    const candidate = `${base}-${index}`
+    if (!used.has(candidate)) return candidate
+  }
+  return `${base}-${Date.now()}`
+}
+
+function ensureUniquePageId(pages, requestedId, fallbackPath, currentPageId = "") {
+  const seed = cleanText(requestedId) || pageIdFromPath(fallbackPath)
+  const base = seed.replace(/[^\w-]+/g, "-").replace(/^-+|-+$/g, "") || "page"
+  const used = new Set(
+    (Array.isArray(pages) ? pages : [])
+      .filter((page) => cleanText(page?.id) !== cleanText(currentPageId))
+      .map((page) => cleanText(page?.id)),
+  )
+  if (!used.has(base)) return base
+  for (let index = 2; index <= 500; index += 1) {
+    const candidate = `${base}-${index}`
+    if (!used.has(candidate)) return candidate
+  }
+  return `${base}-${Date.now()}`
+}
+
 function getProjectAssigneeMap(projectIds) {
   const ids = Array.from(new Set(projectIds.map(value => Number(value)).filter(value => Number.isInteger(value) && value > 0)))
   const map = new Map(ids.map(id => [id, []]))
@@ -544,9 +607,39 @@ function archiveProjectRecord(projectId, userId) {
 export function registerProjectRoutes(app) {
   app.post("/api/projects/import-preview", authMiddleware, async (req, res) => {
     try {
-      const preview = await buildProjectImportPreview(req.body || {}, { userId: req.user.id })
+      const preview = await buildProjectImportPreview(req.body || {}, {
+        userId: req.user.id,
+        forceAiAnalysis: true,
+        requireImportAnalysis: true,
+      })
+      logAudit({
+        userId: req.user.id,
+        action: "project.import.preview.success",
+        targetType: "project",
+        targetId: null,
+        meta: {
+          kind: cleanText(req.body?.kind || ""),
+          mode: cleanText(req.body?.mode || ""),
+          pageCount: Number(preview?.analysis?.pageCount || preview?.pages?.length || 0),
+        },
+      })
       res.json({ ok: true, preview })
     } catch (error) {
+      try {
+        logAudit({
+          userId: req.user?.id || null,
+          action: "project.import.preview.failed",
+          targetType: "project",
+          targetId: null,
+          meta: {
+            kind: cleanText(req.body?.kind || ""),
+            mode: cleanText(req.body?.mode || ""),
+            error: String(error?.message || error || "Import preview failed"),
+          },
+        })
+      } catch {
+        // ignore audit failures on import preview
+      }
       if (isValidationError(error)) return res.status(400).json({ ok: false, error: error.message })
       res.status(500).json({ ok: false, error: error.message })
     }
@@ -1301,6 +1394,286 @@ export function registerProjectRoutes(app) {
 
       const updated = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, req.user.id)
       res.json({ ok: true, project: mapProjectRow(updated, getProjectAssignees(projectId)), page: updatedPage })
+    } catch (error) {
+      if (isValidationError(error)) return res.status(400).json({ ok: false, error: error.message })
+      res.status(500).json({ ok: false, error: error.message })
+    }
+  })
+
+  app.post("/api/projects/:id/pages", authMiddleware, (req, res) => {
+    try {
+      const projectId = readId(req.params.id, "Projekt")
+      const project = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, req.user.id)
+      if (!project) return res.status(404).json({ ok: false, error: "Projekt nicht gefunden" })
+
+      const pages = parseProjectPages(project.pages_json, project.url || "")
+      const name = readOptionalString(req.body?.name, "Name", { max: 160, empty: "" }) || "New page"
+      const requestedPath = readOptionalString(req.body?.path ?? req.body?.slug, "Path", { max: 400, empty: "" }) || name
+      const nextPath = ensureUniquePagePath(pages, requestedPath)
+      const pageId = ensureUniquePageId(pages, readOptionalString(req.body?.id, "Page ID", { max: 180, empty: "" }), nextPath)
+      const title = readOptionalString(req.body?.title, "Title", { max: 220, empty: "" }) || ""
+      const explicitUrl = readOptionalString(req.body?.url, "URL", { max: 2000, empty: "" }) || ""
+      const html = readOptionalHtml(req.body?.html, "HTML", { max: PROJECT_HTML_MAX }) || ""
+      const seo = normalizePageSeo(req.body?.seo)
+      const now = new Date().toISOString()
+
+      const page = {
+        id: pageId,
+        name,
+        title,
+        path: nextPath,
+        url: buildPageAbsoluteUrl(project.url, explicitUrl || nextPath),
+        html,
+        seo,
+        updatedAt: now,
+        scannedAt: now,
+      }
+      const nextPages = [...pages, page]
+
+      db.prepare(`
+        UPDATE projects SET
+          pages_json = ?,
+          html = CASE WHEN COALESCE(trim(html), '') = '' THEN ? ELSE html END,
+          updated_at = datetime('now'),
+          last_activity_at = datetime('now')
+        WHERE id = ? AND user_id = ?
+      `).run(
+        serializeProjectPages(nextPages, project.url || ""),
+        html || project.html || "",
+        projectId,
+        req.user.id,
+      )
+
+      const workflowStage = project.workflow_stage || project.workflow_status || "draft"
+      db.prepare(
+        "INSERT INTO project_workflow_events (project_id, user_id, from_stage, to_stage, comment) VALUES (?, ?, ?, ?, ?)"
+      ).run(projectId, req.user.id, workflowStage, workflowStage, `Page created: ${name}`)
+      logAudit({
+        userId: req.user.id,
+        action: "project.page.create",
+        targetType: "project",
+        targetId: projectId,
+        meta: { pageId, path: nextPath },
+      })
+
+      const updated = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, req.user.id)
+      res.json({ ok: true, project: mapProjectRow(updated, getProjectAssignees(projectId)), page })
+    } catch (error) {
+      if (isValidationError(error)) return res.status(400).json({ ok: false, error: error.message })
+      res.status(500).json({ ok: false, error: error.message })
+    }
+  })
+
+  app.put("/api/projects/:id/pages/:pageId", authMiddleware, (req, res) => {
+    try {
+      const projectId = readId(req.params.id, "Projekt")
+      const pageId = readRequiredString(req.params.pageId, "Page ID", { max: 180 })
+      const project = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, req.user.id)
+      if (!project) return res.status(404).json({ ok: false, error: "Projekt nicht gefunden" })
+
+      const pages = parseProjectPages(project.pages_json, project.url || "")
+      const index = pages.findIndex((page) => cleanText(page.id) === cleanText(pageId))
+      if (index === -1) return res.status(404).json({ ok: false, error: "Page not found" })
+      const currentPage = pages[index]
+
+      const nextName = req.body?.name === undefined
+        ? currentPage.name
+        : (readOptionalString(req.body?.name, "Name", { max: 160, empty: "" }) || currentPage.name)
+      const nextTitle = req.body?.title === undefined
+        ? currentPage.title || ""
+        : (readOptionalString(req.body?.title, "Title", { max: 220, empty: "" }) || "")
+      const requestedPath = req.body?.path === undefined && req.body?.slug === undefined
+        ? currentPage.path
+        : (readOptionalString(req.body?.path ?? req.body?.slug, "Path", { max: 400, empty: "" }) || currentPage.path || nextName)
+      const nextPath = ensureUniquePagePath(pages, requestedPath, pageId)
+      const requestedId = req.body?.id === undefined
+        ? currentPage.id
+        : (readOptionalString(req.body?.id, "Page ID", { max: 180, empty: "" }) || currentPage.id)
+      const nextId = ensureUniquePageId(pages, requestedId, nextPath, pageId)
+      const explicitUrl = req.body?.url === undefined
+        ? currentPage.url || ""
+        : (readOptionalString(req.body?.url, "URL", { max: 2000, empty: "" }) || "")
+      const nextHtml = req.body?.html === undefined
+        ? currentPage.html || ""
+        : (readOptionalHtml(req.body?.html, "HTML", { max: PROJECT_HTML_MAX }) || "")
+      const nextSeo = req.body?.seo === undefined ? currentPage.seo : normalizePageSeo(req.body?.seo)
+
+      const updatedPage = {
+        ...currentPage,
+        id: nextId,
+        name: nextName,
+        title: nextTitle,
+        path: nextPath,
+        url: buildPageAbsoluteUrl(project.url, explicitUrl || nextPath),
+        html: nextHtml,
+        seo: nextSeo,
+        updatedAt: new Date().toISOString(),
+      }
+
+      const nextPages = [...pages]
+      nextPages[index] = updatedPage
+      const homepage = nextPages.find((page) => page.path === "/") || nextPages[0] || null
+      const nextProjectHtml = homepage?.html || project.html || ""
+      db.prepare(`
+        UPDATE projects SET
+          pages_json = ?,
+          html = ?,
+          updated_at = datetime('now'),
+          last_activity_at = datetime('now')
+        WHERE id = ? AND user_id = ?
+      `).run(
+        serializeProjectPages(nextPages, project.url || ""),
+        nextProjectHtml,
+        projectId,
+        req.user.id,
+      )
+
+      const workflowStage = project.workflow_stage || project.workflow_status || "draft"
+      db.prepare(
+        "INSERT INTO project_workflow_events (project_id, user_id, from_stage, to_stage, comment) VALUES (?, ?, ?, ?, ?)"
+      ).run(projectId, req.user.id, workflowStage, workflowStage, `Page updated: ${updatedPage.name}`)
+      logAudit({
+        userId: req.user.id,
+        action: "project.page.update",
+        targetType: "project",
+        targetId: projectId,
+        meta: { pageId, nextPageId: nextId, path: nextPath },
+      })
+
+      const updated = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, req.user.id)
+      res.json({ ok: true, project: mapProjectRow(updated, getProjectAssignees(projectId)), page: updatedPage })
+    } catch (error) {
+      if (isValidationError(error)) return res.status(400).json({ ok: false, error: error.message })
+      res.status(500).json({ ok: false, error: error.message })
+    }
+  })
+
+  app.delete("/api/projects/:id/pages/:pageId", authMiddleware, (req, res) => {
+    try {
+      const projectId = readId(req.params.id, "Projekt")
+      const pageId = readRequiredString(req.params.pageId, "Page ID", { max: 180 })
+      const project = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, req.user.id)
+      if (!project) return res.status(404).json({ ok: false, error: "Projekt nicht gefunden" })
+
+      const pages = parseProjectPages(project.pages_json, project.url || "")
+      const index = pages.findIndex((page) => cleanText(page.id) === cleanText(pageId))
+      if (index === -1) return res.status(404).json({ ok: false, error: "Page not found" })
+      if (pages.length <= 1) {
+        return res.status(400).json({ ok: false, error: "At least one page must remain in the project." })
+      }
+
+      const removedPage = pages[index]
+      const nextPages = pages.filter((page) => cleanText(page.id) !== cleanText(pageId))
+      const homepage = nextPages.find((page) => page.path === "/") || nextPages[0] || null
+      const nextProjectHtml = homepage?.html || project.html || ""
+
+      db.prepare(`
+        UPDATE projects SET
+          pages_json = ?,
+          html = ?,
+          updated_at = datetime('now'),
+          last_activity_at = datetime('now')
+        WHERE id = ? AND user_id = ?
+      `).run(
+        serializeProjectPages(nextPages, project.url || ""),
+        nextProjectHtml,
+        projectId,
+        req.user.id,
+      )
+
+      const workflowStage = project.workflow_stage || project.workflow_status || "draft"
+      db.prepare(
+        "INSERT INTO project_workflow_events (project_id, user_id, from_stage, to_stage, comment) VALUES (?, ?, ?, ?, ?)"
+      ).run(projectId, req.user.id, workflowStage, workflowStage, `Page deleted: ${removedPage.name}`)
+      logAudit({
+        userId: req.user.id,
+        action: "project.page.delete",
+        targetType: "project",
+        targetId: projectId,
+        meta: { pageId, path: removedPage.path },
+      })
+
+      const updated = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, req.user.id)
+      res.json({ ok: true, project: mapProjectRow(updated, getProjectAssignees(projectId)), deletedPageId: pageId })
+    } catch (error) {
+      if (isValidationError(error)) return res.status(400).json({ ok: false, error: error.message })
+      res.status(500).json({ ok: false, error: error.message })
+    }
+  })
+
+  app.get("/api/projects/:id/activity", authMiddleware, (req, res) => {
+    try {
+      const projectId = readId(req.params.id, "Projekt")
+      const project = db.prepare("SELECT id FROM projects WHERE id = ? AND user_id = ?").get(projectId, req.user.id)
+      if (!project) return res.status(404).json({ ok: false, error: "Projekt nicht gefunden" })
+
+      const workflowRows = db.prepare(
+        `SELECT id, to_stage, comment, created_at
+         FROM project_workflow_events
+         WHERE project_id = ?
+         ORDER BY datetime(created_at) DESC
+         LIMIT 80`,
+      ).all(projectId)
+      const versionRows = db.prepare(
+        `SELECT id, label, source, page_id, created_at
+         FROM project_versions
+         WHERE project_id = ?
+         ORDER BY datetime(created_at) DESC
+         LIMIT 80`,
+      ).all(projectId)
+      const exportRows = db.prepare(
+        `SELECT id, export_mode, platform, readiness, warning_count, outcome, created_at
+         FROM project_exports
+         WHERE project_id = ?
+         ORDER BY datetime(created_at) DESC
+         LIMIT 80`,
+      ).all(projectId)
+      const shareRows = db.prepare(
+        `SELECT id, page_id, language_variant, created_at
+         FROM project_shares
+         WHERE project_id = ?
+         ORDER BY datetime(created_at) DESC
+         LIMIT 80`,
+      ).all(projectId)
+
+      const activity = [
+        ...workflowRows.map((row) => ({
+          id: `wf-${row.id}`,
+          type: "workflow",
+          label: `Workflow: ${cleanText(row.to_stage || "draft").replace(/_/g, " ")}`,
+          detail: cleanText(row.comment || ""),
+          pageId: "",
+          created_at: row.created_at || "",
+        })),
+        ...versionRows.map((row) => ({
+          id: `version-${row.id}`,
+          type: "version",
+          label: row.label ? `Snapshot: ${row.label}` : `Snapshot: ${cleanText(row.source || "manual")}`,
+          detail: row.page_id ? `Page ${row.page_id}` : "",
+          pageId: cleanText(row.page_id),
+          created_at: row.created_at || "",
+        })),
+        ...exportRows.map((row) => ({
+          id: `export-${row.id}`,
+          type: "export",
+          label: `Export: ${cleanText(row.export_mode || "html-clean")}`,
+          detail: `${cleanText(row.outcome || "success")} · ${cleanText(row.platform || "unknown")} · ${cleanText(row.readiness || "ready")} · ${Number(row.warning_count || 0)} warnings`,
+          pageId: "",
+          created_at: row.created_at || "",
+        })),
+        ...shareRows.map((row) => ({
+          id: `share-${row.id}`,
+          type: "share",
+          label: "Share preview created",
+          detail: [cleanText(row.page_id), cleanText(row.language_variant)].filter(Boolean).join(" · "),
+          pageId: cleanText(row.page_id),
+          created_at: row.created_at || "",
+        })),
+      ]
+        .sort((left, right) => String(right.created_at).localeCompare(String(left.created_at)))
+        .slice(0, 120)
+
+      res.json({ ok: true, activity })
     } catch (error) {
       if (isValidationError(error)) return res.status(400).json({ ok: false, error: error.message })
       res.status(500).json({ ok: false, error: error.message })

@@ -19,6 +19,7 @@ const PLAN_META_LABEL: Record<Plan, string> = {
 }
 
 type WidgetMessage = AssistantMessage & { id: string }
+const ASSISTANT_MESSAGE_STORAGE_PREFIX = "se_assistant_messages_v1"
 
 function readTheme() {
   if (typeof document === "undefined") return "dark"
@@ -56,6 +57,20 @@ function getQuickPrompts(context: AssistantContext) {
   ]
 }
 
+function normalizeStoredMessages(raw: unknown): WidgetMessage[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((entry, index) => {
+      const role = entry?.role === "assistant" ? "assistant" : "user"
+      const content = String(entry?.content || "").trim()
+      if (!content) return null
+      const id = String(entry?.id || `${role}_${Date.now()}_${index}`)
+      return { id, role, content }
+    })
+    .filter(Boolean)
+    .slice(-80) as WidgetMessage[]
+}
+
 export default function AssistantWidget({
   plan,
   context,
@@ -76,6 +91,22 @@ export default function AssistantWidget({
   const [loading, setLoading] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const allowedModels = useMemo(() => getAllowedAssistantModels(plan), [plan])
+  const contextResetKey = useMemo(
+    () =>
+      JSON.stringify({
+        surface: context.surface,
+        workspace: context.workspace || "",
+        projectId: context.projectId || "",
+        projectName: context.projectName || "",
+        projectUrl: context.projectUrl || "",
+      }),
+    [context.projectId, context.projectName, context.projectUrl, context.surface, context.workspace],
+  )
+  const welcomeMessage = useMemo(() => buildWelcomeMessage(context), [contextResetKey])
+  const messageStorageKey = useMemo(
+    () => `${ASSISTANT_MESSAGE_STORAGE_PREFIX}:${contextResetKey}`,
+    [contextResetKey],
+  )
   const [model, setModel] = useState<AssistantModelId>(getDefaultAssistantModel(plan).id)
   const [messages, setMessages] = useState<WidgetMessage[]>(() => [buildWelcomeMessage(context)])
 
@@ -84,11 +115,29 @@ export default function AssistantWidget({
   }, [allowedModels])
 
   useEffect(() => {
-    setMessages((previous) => {
-      if (previous.length > 1) return previous
-      return [buildWelcomeMessage(context)]
-    })
-  }, [context])
+    if (typeof window === "undefined") return
+    try {
+      const raw = window.sessionStorage.getItem(messageStorageKey)
+      if (!raw) {
+        setMessages([welcomeMessage])
+        return
+      }
+      const parsed = JSON.parse(raw)
+      const normalized = normalizeStoredMessages(parsed)
+      setMessages(normalized.length ? normalized : [welcomeMessage])
+    } catch {
+      setMessages([welcomeMessage])
+    }
+  }, [messageStorageKey, welcomeMessage])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    try {
+      window.sessionStorage.setItem(messageStorageKey, JSON.stringify(messages.slice(-80)))
+    } catch {
+      // Ignore storage write failures (private mode / quota).
+    }
+  }, [messageStorageKey, messages])
 
   useEffect(() => {
     if (typeof document === "undefined") return
@@ -151,8 +200,16 @@ export default function AssistantWidget({
           return
         }
         if (text.startsWith("/")) {
-          toast.error(t("Unknown action. Try /preview, /share, /audit seo, /translate de, or /export html-clean."))
-          setMessages((previous) => previous.filter((message) => message.id !== nextUserMessage.id))
+          const unknownActionMessage = t("Unknown action. Try /preview, /share, /audit seo, /translate de, or /export html-clean.")
+          toast.error(unknownActionMessage)
+          setMessages((previous) => [
+            ...previous,
+            {
+              id: `assistant_${Date.now()}`,
+              role: "assistant",
+              content: unknownActionMessage,
+            },
+          ])
           return
         }
       }
@@ -162,6 +219,17 @@ export default function AssistantWidget({
         messages: nextMessages.map(({ role, content }) => ({ role, content })),
         context,
       })
+
+      if (response.model_notice) {
+        toast.warning(response.model_notice)
+      }
+      if (
+        typeof response.model === "string" &&
+        response.model !== model &&
+        allowedModels.some((item) => item.id === response.model)
+      ) {
+        setModel(response.model as AssistantModelId)
+      }
 
       setMessages((previous) => [
         ...previous,
@@ -178,8 +246,16 @@ export default function AssistantWidget({
         cost_eur: response.cost_eur,
       })
     } catch (error) {
-      toast.error(errMsg(error))
-      setMessages((previous) => previous.filter((message) => message.id !== nextUserMessage.id))
+      const message = errMsg(error)
+      toast.error(message)
+      setMessages((previous) => [
+        ...previous,
+        {
+          id: `assistant_${Date.now()}`,
+          role: "assistant",
+          content: `I couldn't complete that request: ${message}`,
+        },
+      ])
     } finally {
       setLoading(false)
     }
@@ -204,7 +280,13 @@ export default function AssistantWidget({
                 <button
                   type="button"
                   className="assistant-widget__icon-button"
-                  onClick={() => setMessages([buildWelcomeMessage(context)])}
+                  onClick={() => {
+                    const cleared = [buildWelcomeMessage(context)]
+                    setMessages(cleared)
+                    if (typeof window !== "undefined") {
+                      try { window.sessionStorage.removeItem(messageStorageKey) } catch {}
+                    }
+                  }}
                   title={t("Clear chat")}
                 >
                   ↺
@@ -356,4 +438,3 @@ export default function AssistantWidget({
     </div>
   )
 }
-
