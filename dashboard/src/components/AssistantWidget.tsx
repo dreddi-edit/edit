@@ -11,6 +11,13 @@ import {
 import { useTranslation } from "../i18n/useTranslation"
 import "./assistant-widget.css"
 
+const PLAN_META_LABEL: Record<Plan, string> = {
+  basis: "Basis",
+  starter: "Starter",
+  pro: "Pro",
+  scale: "Scale",
+}
+
 type WidgetMessage = AssistantMessage & { id: string }
 
 function readTheme() {
@@ -25,7 +32,7 @@ function buildWelcomeMessage(context: AssistantContext): WidgetMessage {
       : context.workspace || "the dashboard"
 
   return {
-    id: "welcome",
+    id: `welcome_${Date.now()}`,
     role: "assistant",
     content: `I’m your AI assistant for ${focus}. Ask me about imports, exports, AI Studio, edits, translations, or the next best move.`,
   }
@@ -350,9 +357,3 @@ export default function AssistantWidget({
   )
 }
 
-const PLAN_META_LABEL: Record<Plan, string> = {
-  basis: "Basis",
-  starter: "Starter",
-  pro: "Pro",
-  scale: "Scale",
-}

@@ -1575,3 +1575,31 @@ body[data-theme="light"] .draft-settings-api-button:hover {
     width: 100%;
   }
 }
+
+/* UI Recovery Mode Styles */
+.error-boundary-container {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(circle at top, rgba(99,102,241,0.16), transparent 40%), #0c0c10;
+  color: #f8fafc;
+  padding: 32px;
+  font-family: "JetBrains Mono", monospace;
+}
+.error-card {
+  width: min(560px, 100%);
+  border-radius: 24px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(15,23,42,0.92);
+  box-shadow: 0 30px 80px rgba(0,0,0,0.35);
+  padding: 28px;
+}
+.error-card button {
+  border: 1px solid rgba(99,102,241,0.35);
+  background: linear-gradient(135deg, rgba(99,102,241,0.95), rgba(16,185,129,0.92));
+  color: #fff;
+  border-radius: 999px;
+  padding: 12px 18px;
+  font-weight: 700;
+  cursor: pointer;
+}

@@ -1,6 +1,17 @@
+import { Header } from "./components/Header";
+import { MainView } from "./components/MainView";
+import { AssistantContainer } from "./components/AssistantContainer";
+import { shortenText, sleep, isValidUrl } from "./editorHelpers";
+import { calculateCost, processAIResponse } from "./assistantLogic";
+import { EditorView } from "./components/EditorView";
+import { useAdmin } from "./hooks/useAdmin";
+import { EditorAudits } from "./components/EditorAudits";
+import { EditorOverlay } from "./components/EditorOverlay";
 import { apiMe, type User } from "./api/auth"
 import { apiGetPlan } from "./api/credits"
 import { apiFetch, fetchWithAuth } from "./api/client"
+import { EditorSidebar } from "./components/EditorSidebar";
+import { EditorModals } from "./components/EditorModals";
 import {
   apiCreateProjectShare,
   apiCreatePublishPreview,
@@ -125,446 +136,9 @@ type GlobalStyleOverrides = {
   accentColor: string
 }
 
-const BLOCK_FILTER_OPTIONS: Array<{ value: BlockFilter; label: string }> = [
-  { value: "all", label: "All blocks" },
-  { value: "button", label: "Buttons" },
-  { value: "heading", label: "Headings" },
-  { value: "image", label: "Images" },
-  { value: "form", label: "Forms" },
-  { value: "navigation", label: "Navigation" },
-  { value: "container", label: "Containers" },
-  { value: "list", label: "Lists" },
-  { value: "content", label: "Content" },
-]
-
-const EDIT_RAIL_EXPANDED_WIDTH = 272
-const EDIT_RAIL_COLLAPSED_WIDTH = 72
-const DEFAULT_CHROME_BACKGROUND = "rgba(5, 12, 24, 0.96)"
-const DEFAULT_CHROME_BORDER = "rgba(96, 165, 250, 0.18)"
-const EXPORT_FILENAME_MAP: Record<ExportMode, string> = {
-  "wp-placeholder": "site_wp_placeholders.zip",
-  "html-clean": "site_html_clean.zip",
-  "html-raw": "site_html_raw.zip",
-  "shopify-section": "shopify_section.zip",
-  "wp-theme": "wordpress_theme.zip",
-  "wp-block": "wordpress_block_plugin.zip",
-  "web-component": "web_component_embed.zip",
-  "react-component": "react_component.zip",
-  "webflow-json": "webflow_import.zip",
-  "email-newsletter": "email_newsletter.zip",
-  "markdown-content": "content_markdown.zip",
-  "pdf-print": "design_preview.pdf",
-}
-const EXPORT_MODE_OPTIONS: Array<{ value: ExportMode; label: string }> = [
-  { value: "wp-placeholder", label: "WP Placeholder" },
-  { value: "html-clean", label: "HTML Clean" },
-  { value: "html-raw", label: "HTML Raw" },
-  { value: "shopify-section", label: "Shopify Section" },
-  { value: "wp-theme", label: "WordPress Theme" },
-  { value: "wp-block", label: "WordPress Block" },
-  { value: "web-component", label: "Web Component" },
-  { value: "react-component", label: "React Component" },
-  { value: "webflow-json", label: "Webflow JSON" },
-  { value: "email-newsletter", label: "Email Newsletter" },
-  { value: "markdown-content", label: "Markdown" },
-  { value: "pdf-print", label: "PDF Print" },
-]
-const WORKFLOW_STAGE_OPTIONS: Array<{ value: WorkflowStage; label: string }> = [
-  { value: "draft", label: "Draft" },
-  { value: "internal_review", label: "Internal review" },
-  { value: "client_review", label: "Client review" },
-  { value: "approved", label: "Approved" },
-  { value: "shipped", label: "Shipped" },
-]
-const PROJECT_VERSION_SOURCE_LABELS: Record<ProjectVersionSource, string> = {
-  autosave: "Autosave",
-  manual: "Manual snapshot",
-  translate: "Before translation",
-  ai_block: "Before AI block",
-  ai_page: "Before AI page",
-  ai_prompt: "Before AI prompt",
-  restore: "Restore backup",
-  export: "Before export",
-}
-const VIEWPORT_PRESETS: Record<ViewportPreset, { label: string; width: number | null }> = {
-  desktop: { label: "Desktop", width: null },
-  tablet: { label: "Tablet", width: 820 },
-  mobile: { label: "Mobile", width: 390 },
-}
-const DEFAULT_GLOBAL_STYLE_OVERRIDES: GlobalStyleOverrides = {
-  fontFamily: "",
-  textColor: "",
-  backgroundColor: "",
-  accentColor: "",
-}
-
-function titleCaseFallback(value: string): string {
-  return String(value || "")
-    .replace(/[-_]+/g, " ")
-    .replace(/\b\w/g, (match) => match.toUpperCase())
-}
-
-function shortenText(value: string, max = 92): string {
-  const normalized = String(value || "").replace(/\s+/g, " ").trim()
-  if (normalized.length <= max) return normalized
-  return `${normalized.slice(0, max - 1).trimEnd()}…`
-}
-
-function formatEditorDateTime(value: string): string {
-  if (!value) return "Unknown date"
-  const parsed = new Date(value)
-  if (Number.isNaN(parsed.getTime())) return value
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(parsed)
-}
-
-function parseRgbChannels(color: string): [number, number, number] | null {
-  const match = String(color || "").match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i)
-  if (!match) return null
-  return [Number(match[1]), Number(match[2]), Number(match[3])]
-}
-
-function getColorBrightness(color: string): number | null {
-  const channels = parseRgbChannels(color)
-  if (!channels) return null
-  const [r, g, b] = channels
-  return (r * 299 + g * 587 + b * 114) / 1000
-}
-
-function pickEditorChromeFromDocument(doc: Document | null): { background: string; border: string } {
-  if (!doc) return { background: DEFAULT_CHROME_BACKGROUND, border: DEFAULT_CHROME_BORDER }
-  const candidates = Array.from(
-    doc.querySelectorAll("header, nav, [role='banner'], .site-header, .navbar, .header, .topbar, body")
-  ) as HTMLElement[]
-
-  for (const el of candidates) {
-    const style = doc.defaultView?.getComputedStyle(el)
-    const color = style?.backgroundColor || ""
-    if (!color || color === "transparent" || color === "rgba(0, 0, 0, 0)") continue
-    const brightness = getColorBrightness(color)
-    if (brightness == null || brightness > 192) continue
-    return {
-      background: color.replace("rgb(", "rgba(").replace(")", ", 0.96)"),
-      border: "rgba(255,255,255,0.08)",
-    }
-  }
-
-  return { background: DEFAULT_CHROME_BACKGROUND, border: DEFAULT_CHROME_BORDER }
-}
-
-function getDownloadFilename(response: Response, mode: ExportMode): string {
-  const disposition = response.headers.get("Content-Disposition") || ""
-  const match = disposition.match(/filename="?([^"]+)"?/i)
-  if (match?.[1]) return match[1]
-  return EXPORT_FILENAME_MAP[mode]
-}
-
-function readSavedTheme(): "dark" | "light" {
-  if (typeof window === "undefined") return "dark"
-  const bodyTheme = document.body.getAttribute("data-theme")
-  if (bodyTheme === "light" || bodyTheme === "dark") return bodyTheme
-  return localStorage.getItem("se_theme") === "light" ? "light" : "dark"
-}
-
-function serializeEditorHtml(doc: Document, inputIsDocument: boolean) {
-  const doctype = doc.doctype
-    ? `<!DOCTYPE ${doc.doctype.name}${doc.doctype.publicId ? ` PUBLIC "${doc.doctype.publicId}"` : ""}${
-        doc.doctype.systemId ? ` "${doc.doctype.systemId}"` : ""
-      }>`
-    : ""
-  return inputIsDocument
-    ? `${doctype ? `${doctype}\n` : ""}${doc.documentElement.outerHTML}`
-    : doc.body.innerHTML
-}
-
-function stripHtmlForPreview(value: string) {
-  return String(value || "")
-    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
-    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-}
-
-function buildDiffPreview(value: string, max = 420) {
-  return shortenText(stripHtmlForPreview(value), max)
-}
-
-function collectProjectAssets(currentHtml: string, pages: ProjectPage[]) {
-  const parser = new DOMParser()
-  const seen = new Set<string>()
-  const assets: AssetEntry[] = []
-  const documents = [String(currentHtml || ""), ...pages.map((page) => String(page.html || ""))]
-
-  for (const html of documents) {
-    if (!html.trim()) continue
-    const doc = parser.parseFromString(
-      /<html[\s>]/i.test(html) ? html : `<!doctype html><html><body>${html}</body></html>`,
-      "text/html",
-    )
-    doc.querySelectorAll("img[src], source[src], img[data-bo-local-src], link[href]").forEach((element) => {
-      const tag = element.tagName.toLowerCase()
-      const url = String(element.getAttribute(tag === "link" ? "href" : "src") || "").trim()
-      if (!url || seen.has(url)) return
-      const lower = url.toLowerCase()
-      const isFont = tag === "link" || /\.(woff2?|ttf|otf|eot)(\?|#|$)/i.test(lower)
-      const isImage = tag !== "link" || /\.(png|jpe?g|gif|webp|svg|avif)(\?|#|$)/i.test(lower)
-      if (!isFont && !isImage) return
-      seen.add(url)
-      assets.push({
-        id: `${isFont ? "font" : "image"}:${url}`,
-        type: isFont ? "font" : "image",
-        url,
-        label: url.split("/").pop() || url,
-      })
-    })
-  }
-
-  return assets.slice(0, 80)
-}
-
-function mergeAssetLibraries(primary: AssetEntry[], secondary: AssetEntry[]) {
-  const seen = new Set<string>()
-  return [...primary, ...secondary].filter((asset, index) => {
-    const key = `${asset.type}:${asset.url || asset.id || index}`
-    if (!asset.url || seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-}
-
-function readFileAsDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onerror = () => reject(reader.error || new Error("File read failed"))
-    reader.onload = () => resolve(String(reader.result || ""))
-    reader.readAsDataURL(file)
-  })
-}
-
-function collectCssVariables(html: string) {
-  const seen = new Set<string>()
-  const vars: string[] = []
-  for (const match of String(html || "").matchAll(/(--[A-Za-z0-9_-]+)\s*:/g)) {
-    const name = match[1]
-    if (!name || seen.has(name)) continue
-    seen.add(name)
-    vars.push(name)
-  }
-  return vars.slice(0, 40)
-}
-
-function applyGlobalStylesToHtml(
-  html: string,
-  overrides: GlobalStyleOverrides,
-  cssVariables: Record<string, string>,
-  fontAsset?: AssetEntry | null,
-) {
-  const source = String(html || "")
-  if (!source.trim()) return source
-  const parser = new DOMParser()
-  const inputIsDocument = /<html[\s>]/i.test(source) || /<!doctype/i.test(source)
-  const doc = parser.parseFromString(
-    inputIsDocument ? source : `<!doctype html><html><head></head><body>${source}</body></html>`,
-    "text/html",
-  )
-  const head = doc.head || doc.documentElement.insertBefore(doc.createElement("head"), doc.body || null)
-  const styleId = "se-global-style-overrides"
-  doc.getElementById(styleId)?.remove()
-
-  const rootLines = Object.entries(cssVariables)
-    .filter(([, value]) => String(value || "").trim())
-    .map(([name, value]) => `${name}: ${String(value).trim()};`)
-  if (overrides.textColor.trim()) rootLines.push(`--se-editor-text-color: ${overrides.textColor.trim()};`)
-  if (overrides.backgroundColor.trim()) rootLines.push(`--se-editor-surface-color: ${overrides.backgroundColor.trim()};`)
-  if (overrides.accentColor.trim()) rootLines.push(`--se-editor-accent-color: ${overrides.accentColor.trim()};`)
-
-  const bodyRules = [
-    overrides.fontFamily.trim() ? `font-family: ${overrides.fontFamily.trim()} !important;` : "",
-    overrides.textColor.trim() ? `color: var(--se-editor-text-color) !important;` : "",
-    overrides.backgroundColor.trim() ? `background: var(--se-editor-surface-color) !important;` : "",
-  ].filter(Boolean)
-
-  const accentRules = overrides.accentColor.trim()
-    ? `
-      a { color: var(--se-editor-accent-color) !important; }
-      button, .button, [class*="button"], [type="submit"] {
-        border-color: var(--se-editor-accent-color) !important;
-      }
-    `
-    : ""
-
-  const fontFaceCss =
-    fontAsset?.type === "font" && fontAsset.url
-      ? `
-        @font-face {
-          font-family: '${String(fontAsset.label || "ProjectFont").replace(/\.[A-Za-z0-9]+$/, "")}';
-          src: url('${fontAsset.url}') format('${/woff2/i.test(fontAsset.mimeType || fontAsset.url) ? "woff2" : /woff/i.test(fontAsset.mimeType || fontAsset.url) ? "woff" : /otf/i.test(fontAsset.mimeType || fontAsset.url) ? "opentype" : "truetype"}');
-          font-display: swap;
-        }
-      `
-      : ""
-
-  const css = `
-    ${fontFaceCss}
-    :root {
-      ${rootLines.join("\n")}
-    }
-    ${bodyRules.length ? `body { ${bodyRules.join(" ")} }` : ""}
-    ${accentRules}
-  `.trim()
-
-  if (!css) return serializeEditorHtml(doc, inputIsDocument)
-
-  const style = doc.createElement("style")
-  style.id = styleId
-  style.textContent = css
-  head.appendChild(style)
-
-  return serializeEditorHtml(doc, inputIsDocument)
-}
-
-function applyTranslationOverrideToHtml(
-  html: string,
-  segment: WebsiteTranslationSegment,
-  nextValue: string,
-) {
-  const source = String(html || "")
-  if (!source.trim()) return source
-  const parser = new DOMParser()
-  const inputIsDocument = /<html[\s>]/i.test(source) || /<!doctype/i.test(source)
-  const doc = parser.parseFromString(
-    inputIsDocument ? source : `<!doctype html><html><body>${source}</body></html>`,
-    "text/html",
-  )
-  const element = doc.querySelector(segment.selector)
-  if (!element) return source
-
-  if (segment.kind === "attr" && segment.attr) {
-    element.setAttribute(segment.attr, nextValue)
-  } else {
-    const textNodes = Array.from(element.childNodes).filter((node) => node.nodeType === Node.TEXT_NODE) as Text[]
-    const targetNode = textNodes[Math.max(0, Number(segment.textIndex || 0))]
-    if (!targetNode) return source
-    const leading = targetNode.nodeValue?.match(/^\s*/)?.[0] || ""
-    const trailing = targetNode.nodeValue?.match(/\s*$/)?.[0] || ""
-    targetNode.nodeValue = `${leading}${nextValue}${trailing}`
-  }
-
-  return serializeEditorHtml(doc, inputIsDocument)
-}
-
-function buildTranslationSegmentsWithOverrides(
-  segments: WebsiteTranslationSegment[],
-  overrides: Record<string, string> = {},
-) {
-  return segments.map((segment) => ({
-    ...segment,
-    translatedText: overrides[segment.id]?.trim() || segment.translatedText,
-  }))
-}
-
-function applyTranslationOverridesToHtml(
-  html: string,
-  segments: WebsiteTranslationSegment[],
-  overrides: Record<string, string> = {},
-) {
-  return buildTranslationSegmentsWithOverrides(segments, overrides).reduce((acc, segment) => {
-    const nextValue = overrides[segment.id]?.trim()
-    return nextValue ? applyTranslationOverrideToHtml(acc, segment, nextValue) : acc
-  }, String(html || ""))
-}
-
-function getLanguageVariantEffectiveHtml(variant?: ProjectLanguageVariant | null) {
-  if (!variant) return ""
-  if (variant.baseHtml && variant.segments?.length && variant.overrides && Object.keys(variant.overrides).length) {
-    return applyTranslationOverridesToHtml(variant.baseHtml, variant.segments as WebsiteTranslationSegment[], variant.overrides)
-  }
-  return String(variant.html || variant.baseHtml || "")
-}
-
-function buildLocalAudit(html: string, loadedUrl: string, source: EditorAudit["source"], remoteAudit?: {
-  scores?: Record<string, number>
-  metrics?: Record<string, string>
-  opportunities?: Array<{ title: string; value: string }>
-}) {
-  const parser = new DOMParser()
-  const doc = parser.parseFromString(
-    /<html[\s>]/i.test(html) ? html : `<!doctype html><html><body>${html}</body></html>`,
-    "text/html",
-  )
-  if (source === "seo") {
-    const title = doc.querySelector("title")?.textContent?.trim() || ""
-    const description = doc.querySelector("meta[name='description']")?.getAttribute("content")?.trim() || ""
-    const h1Count = doc.querySelectorAll("h1").length
-    const missingAlt = Array.from(doc.querySelectorAll("img")).filter((img) => !(img.getAttribute("alt") || "").trim()).length
-    const items = [
-      !title ? "Add a page title." : title.length > 70 ? "Shorten the title below 70 characters." : `Title looks present (${title.length} chars).`,
-      !description ? "Add a meta description." : description.length > 160 ? "Shorten the meta description below 160 characters." : `Meta description looks present (${description.length} chars).`,
-      h1Count === 0 ? "Add a single H1 heading on the page." : h1Count > 1 ? "Reduce multiple H1 headings to one clear primary headline." : "Primary H1 structure looks valid.",
-      missingAlt > 0 ? `${missingAlt} image${missingAlt === 1 ? "" : "s"} still need alt text.` : "All detected images have alt text.",
-    ]
-    const scoreBadges = remoteAudit?.scores
-      ? Object.entries(remoteAudit.scores).map(([key, value]) => `${titleCaseFallback(key)} ${value}`)
-      : []
-    const summary = loadedUrl
-      ? `SEO review for ${loadedUrl.replace(/^https?:\/\//, "")}`
-      : "SEO review for the current page"
-    if (remoteAudit?.opportunities?.length) {
-      items.push(...remoteAudit.opportunities.slice(0, 3).map((item) => `${item.title}: ${item.value}`))
-    }
-    return {
-      source,
-      headline: "SEO audit",
-      summary,
-      items,
-      scoreBadges,
-    } satisfies EditorAudit
-  }
-
-  if (source === "accessibility") {
-    const missingAlt = Array.from(doc.querySelectorAll("img")).filter((img) => !(img.getAttribute("alt") || "").trim()).length
-    const unlabeledFields = Array.from(doc.querySelectorAll("input, textarea, select")).filter((field) => {
-      if ((field.getAttribute("type") || "").toLowerCase() === "hidden") return false
-      const id = field.getAttribute("id")
-      if (id && doc.querySelector(`label[for="${id}"]`)) return false
-      return !(field.getAttribute("aria-label") || field.getAttribute("placeholder") || "").trim()
-    }).length
-    const buttonIssues = Array.from(doc.querySelectorAll("button, a")).filter((node) => {
-      const text = (node.textContent || "").replace(/\s+/g, " ").trim()
-      return !text && !node.querySelector("img[alt]")
-    }).length
-    return {
-      source,
-      headline: "Accessibility audit",
-      summary: "Quick structural review of alt text, labels, and interactive copy.",
-      items: [
-        missingAlt > 0 ? `${missingAlt} image${missingAlt === 1 ? "" : "s"} are missing alt text.` : "Image alt text coverage looks complete.",
-        unlabeledFields > 0 ? `${unlabeledFields} form field${unlabeledFields === 1 ? "" : "s"} need labels or aria-labels.` : "Form fields look labelled.",
-        buttonIssues > 0 ? `${buttonIssues} interactive element${buttonIssues === 1 ? "" : "s"} need visible or accessible text.` : "Interactive elements look labelled.",
-      ],
-    } satisfies EditorAudit
-  }
-
-  const ctas = Array.from(doc.querySelectorAll("a, button")).filter((node) =>
-    /(start|get|book|buy|contact|talk|demo|trial|quote|apply|join|learn)/i.test((node.textContent || "").trim()),
-  ).length
-  const headings = Array.from(doc.querySelectorAll("h1, h2")).map((node) => (node.textContent || "").trim()).filter(Boolean)
-  return {
-    source,
-    headline: "CRO audit",
-    summary: "Checks for a clear headline, CTA coverage, and section flow.",
-    items: [
-      headings[0] ? `Primary headline: "${shortenText(headings[0], 82)}".` : "Add a stronger primary headline above the fold.",
-      ctas === 0 ? "No clear CTA found. Add a primary CTA near the top of the page." : `${ctas} CTA element${ctas === 1 ? "" : "s"} detected across the page.`,
-      headings.length < 3 ? "Add clearer section hierarchy to guide the visitor through the offer." : "Section hierarchy looks present.",
-    ],
-  } satisfies EditorAudit
-}
-
 export default function App() {
+  const { adminUsers, adminUserPlans, adminLoading, loadAdminUsers, deleteUser, addCredits, resetPassword, assignPlan, createUser } = useAdmin();
+
   const { t } = useTranslation();
   const resolvePlatform = (platform?: string | null, pageUrl?: string, html?: string): SitePlatform => {
     const normalized = normalizePlatform(platform)
@@ -615,10 +189,8 @@ export default function App() {
   const [creatingPublishPreview, setCreatingPublishPreview] = useState(false)
   const [publishingTarget, setPublishingTarget] = useState<PublishTarget | null>(null)
   const [rollingBackDeploymentId, setRollingBackDeploymentId] = useState<number | null>(null)
-  const [activeVersionActionId, setActiveVersionActionId] = useState<number | null>(null)
-  const [versionPreview, setVersionPreview] = useState<ProjectVersionDetail | null>(null)
   const [versionCompare, setVersionCompare] = useState<ProjectVersionDetail | null>(null)
-  const [aiScanLoading, setAiScanLoading] = useState(false)
+  const [aiState, setAiState] = useState({ loading: false, prompt: "", model: "auto", tone: "neutral", running: false, batchRunning: false, diff: null, approvalQueue: [] })
   const [sessionCost, setSessionCost] = useState(0)
   const [sessionTokens, setSessionTokens] = useState({input: 0, output: 0})
   const [editorChrome, setEditorChrome] = useState({
@@ -725,7 +297,6 @@ export default function App() {
   
   // AI approval queue
   type AiApprovalItem = { id: string; model: string; scope: string; estInputTokens: number; estOutputTokens: number; prompt: string }
-  const [aiApprovalQueue, setAiApprovalQueue] = useState<AiApprovalItem[]>([])
   
   const enqueue = (item: AiApprovalItem) => {
     setAiApprovalQueue((prev: AiApprovalItem[]) => [...prev, item])
@@ -739,9 +310,6 @@ export default function App() {
   const currentAiApproval = aiApprovalQueue.length ? aiApprovalQueue[0] : aiApproval
 
 type AdminUser = { id: number; email: string; name?: string; credits?: number; created_at?: string }
-const [adminUsers, setAdminUsers] = useState<AdminUser[]>([])
-const [adminUserPlans, setAdminUserPlans] = useState<Record<number, "basis" | "starter" | "pro" | "scale">>({})
-const [adminLoading, setAdminLoading] = useState(false)
   const [showCreateUser, setShowCreateUser] = useState(false)
   const [newUser, setNewUser] = useState({ email: "", password: "", name: "", credits: 0 })
   const [demoPlan, setDemoPlan] = useState<"basis" | "starter" | "pro" | "scale">("basis")
@@ -767,11 +335,7 @@ const [adminLoading, setAdminLoading] = useState(false)
 
   const [exportMode, setExportMode] = useState<ExportMode>("wp-placeholder")
   const [exporting, setExporting] = useState(false)
-  const [leftAiPrompt, setLeftAiPrompt] = useState("")
-  const [leftAiModel, setLeftAiModel] = useState("auto")
-  const [leftAiTone, setLeftAiTone] = useState("neutral")
-  const [leftAiRunning, setLeftAiRunning] = useState(false)
-  const [batchAiRunning, setBatchAiRunning] = useState(false)
+  const [aiConfig, setAiConfig] = useState({ prompt: "", model: "auto", tone: "neutral", running: false, batchRunning: false })
   const [editorAudit, setEditorAudit] = useState<EditorAudit | null>(null)
   const [runningAudit, setRunningAudit] = useState<EditorAudit["source"] | null>(null)
   const [shareEmail, setShareEmail] = useState("")
@@ -814,7 +378,6 @@ const [adminLoading, setAdminLoading] = useState(false)
     target: string
     guide: { steps: string[]; recordType: string; recordValue: string }
   } | null>(null)
-  const [aiDiff, setAiDiff] = useState<AiDiffState | null>(null)
   const [globalStyleOverrides, setGlobalStyleOverrides] = useState<GlobalStyleOverrides>(DEFAULT_GLOBAL_STYLE_OVERRIDES)
   const [cssVariableOverrides, setCssVariableOverrides] = useState<Record<string, string>>({})
   const [selectedFontAssetId, setSelectedFontAssetId] = useState<string | null>(null)
@@ -822,147 +385,6 @@ const [adminLoading, setAdminLoading] = useState(false)
   const lastSignificantSnapshotRef = useRef<{ html: string; createdAt: number }>({ html: "", createdAt: 0 })
   // Auto-save Projekt
   
-const loadAdminUsers = async () => {
-  setAdminLoading(true)
-  try {
-    const r = await fetchWithAuth("/api/admin/users")
-    const d = await r.json()
-    if (d.ok) {
-      setAdminUsers(d.users || [])
-      const plans: Record<number, "basis" | "starter" | "pro" | "scale"> = {}
-      for (const u of d.users || []) { plans[u.id] = u.plan || "basis" }
-      setAdminUserPlans(plans)
-    } else alert(d.error || t("Admin load failed"))
-  } catch { alert(t("Admin load failed")) } finally { setAdminLoading(false) }
-}
-const deleteUser = async (userId: number, userEmail: string) => {
-  if (!confirm(`Are you sure you want to delete user "${userEmail}"? This will also delete all their projects.`)) {
-    return
-  }
-  
-  try {
-    const r = await fetchWithAuth(`/api/admin/users/${userId}`, { 
-      method: "DELETE", 
-    })
-    const d = await r.json()
-    if (d.ok) {
-      alert("User deleted successfully")
-      loadAdminUsers()
-    } else {
-      alert(d.error || t("Delete failed"))
-    }
-  } catch {
-    alert(t("Delete failed"))
-  }
-}
-
-const addCredits = async (userId: number, userEmail: string) => {
-  const credits = prompt(`How many dollars in credits to add to "${userEmail}"?\n\nExample: 25 = $25.00 credits`)
-  if (!credits || isNaN(Number(credits)) || Number(credits) <= 0) {
-    if (credits !== null) alert(t("Please enter a valid positive number"))
-    return
-  }
-  
-  try {
-    const r = await fetchWithAuth(`/api/admin/users/${userId}/add-credits`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ credits: Number(Number(credits) * 100) }), // Convert dollars to cents
-    })
-    const d = await r.json()
-    if (d.ok) {
-      alert(`✅ Successfully added $${Number(credits).toFixed(2)} credits to ${userEmail}`)
-      loadAdminUsers()
-    } else {
-      alert(`❌ Failed to add credits: ${d.error || "Unknown error"}`)
-    }
-  } catch {
-    alert("❌ Failed to add credits - network error")
-  }
-}
-
-const resetPassword = async (userId: number, userEmail: string) => {
-  if (!confirm(`Send password reset link to "${userEmail}"?`)) {
-    return
-  }
-  
-  try {
-    const r = await fetchWithAuth("/api/admin/send-reset", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ userId }),
-    })
-    const d = await r.json()
-    if (d.ok) {
-      alert(`Password reset link sent to ${userEmail}`)
-    } else {
-      alert(`Failed to send reset: ${d.error || "Unknown error"}`)
-    }
-  } catch {
-    alert("Failed to send reset - network error")
-  }
-}
-const assignPlan = async (userId: number, userEmail: string) => {
-  const current = adminUserPlans[userId] || "basis"
-  const next = prompt(`Assign plan to "${userEmail}"\n\nOptions: basis, starter, pro, scale`, current)
-  if (!next) return
-  const normalized = String(next).trim().toLowerCase()
-  if (!["basis", "starter", "pro", "scale"].includes(normalized)) { alert("Invalid plan"); return }
-  const plan = normalized as "basis" | "starter" | "pro" | "scale"
-  setAdminUserPlans(prev => ({ ...prev, [userId]: plan }))
-  try {
-    const response = await fetchWithAuth(`/api/admin/users/${userId}/set-plan`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ plan }),
-    })
-    const data = await response.json()
-    if (!data.ok) {
-      setAdminUserPlans(prev => ({ ...prev, [userId]: current }))
-      alert("Failed: " + data.error)
-      return
-    }
-
-    await loadAdminUsers()
-
-    if (authUser && authUser !== "loading" && authUser.id === userId) {
-      const refreshedPlan = await apiGetPlan().catch(() => null)
-      setDemoPlan(refreshedPlan || plan)
-    }
-
-    alert(`✅ Plan "${plan}" saved`)
-  } catch {
-    setAdminUserPlans(prev => ({ ...prev, [userId]: current }))
-    alert("Network error")
-  }
-}
-
-const createUser = async () => {
-  if (!newUser.email || !newUser.password) {
-    alert("Email and password required")
-    return
-  }
-  
-  try {
-    const r = await fetchWithAuth("/api/admin/users", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({...newUser, credits: Number(newUser.credits * 100)}), // Convert dollars to cents
-    })
-    const d = await r.json()
-    if (d.ok) {
-      alert("User created successfully")
-      setShowCreateUser(false)
-      setNewUser({ email: "", password: "", name: "", credits: 0 })
-      loadAdminUsers()
-    } else {
-      alert(d.error || "Create user failed")
-    }
-  } catch {
-    alert("Create user failed")
-  }
-}
-
 const autoSave = async (html: string) => {
     if (!currentProject) return
     const nowIso = new Date().toISOString()
@@ -2829,8 +2251,14 @@ useEffect(() => {
       }}>
         <span style={{ animation: "spin 0.8s linear infinite" }}>⟳</span>
         Laden…
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
       </div>
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
     </div>
   )
 
@@ -2854,7 +2282,7 @@ useEffect(() => {
         onLogout={() => { setAuthUser(null); setView("auth") }}
       />
 
-      {view === "dashboard" && authUser?.email === "edgar@mailbaumann.de" && (
+      {view === "dashboard" && (authUser?.email === "edgar@mailbaumann.de" || authUser?.role === "admin") && (
         <button
           onClick={() => setView("admin")}
           style={{
@@ -2887,78 +2315,115 @@ useEffect(() => {
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32 }}>
             <div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
               <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5 }}>Admin Console</div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
               <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>{adminUsers.length} users · internal only</div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => setShowCreateUser(true)} style={{ height: 36, padding: "0 16px", borderRadius: 8, border: "1px solid #1e293b", background: "#0f172a", color: "white", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>+ New User</button>
               <button onClick={loadAdminUsers} style={{ height: 36, padding: "0 16px", borderRadius: 8, border: "1px solid #1e293b", background: "#0f172a", color: "#94a3b8", cursor: "pointer", fontSize: 13 }}>{adminLoading ? "Loading…" : t("↻ Refresh")}</button>
               <button onClick={() => setView("dashboard")} style={{ height: 36, padding: "0 16px", borderRadius: 8, border: "1px solid #1e293b", background: "#0f172a", color: "#94a3b8", cursor: "pointer", fontSize: 13 }}>← Back</button>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             </div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
           <div style={{ background: "#0d1525", border: "1px solid #1e293b", borderRadius: 14, overflow: "hidden" }}>
             <div style={{ display: "grid", gridTemplateColumns: "48px 1fr 140px 100px 100px 160px", padding: "10px 20px", background: "#0f172a", borderBottom: "1px solid #1e293b", fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: 0.8 }}>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
               <div>ID</div><div>User</div><div>Plan</div><div>Credits</div><div>Joined</div><div style={{ textAlign: "right" }}>Actions</div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             </div>
             {adminUsers.map((u: AdminUser) => {
               const plan = adminUserPlans[u.id] || "basis"
               const color = planColors[plan] || "#6366f1"
               return (
                 <div key={u.id} style={{ display: "grid", gridTemplateColumns: "48px 1fr 140px 100px 100px 160px", padding: "14px 20px", borderBottom: "1px solid #0f172a", alignItems: "center" }}>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
                   <div style={{ fontSize: 12, color: "#334155", fontWeight: 700 }}>#{u.id}</div>
                   <div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{u.email}</div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
                     <div style={{ fontSize: 11, color: "#475569", marginTop: 2 }}>{u.name || "—"}</div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
                   </div>
                   <div>
                     <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: `${color}18`, border: `1px solid ${color}40`, color }}>
                       {plan.charAt(0).toUpperCase() + plan.slice(1)}
                     </span>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
                   </div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
                   <div style={{ fontSize: 13, color: "#94a3b8" }}>€{Number(u.credits || 0).toFixed(2)}</div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
                   <div style={{ fontSize: 11, color: "#475569" }}>{(u.created_at || "").slice(0, 10)}</div>
                   <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                     <button onClick={() => addCredits(u.id, u.email)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #10b98130", background: "#10b98115", color: "#10b981", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Credits</button>
                     <button onClick={() => assignPlan(u.id, u.email)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #6366f130", background: "#6366f115", color: "#818cf8", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Plan</button>
                     <button onClick={() => resetPassword(u.id, u.email)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #f59e0b30", background: "#f59e0b15", color: "#fbbf24", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>PW</button>
                     <button onClick={() => deleteUser(u.id, u.email)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #ef444430", background: "#ef444415", color: "#f87171", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Del</button>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
                   </div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
                 </div>
               )
             })}
             {!adminLoading && adminUsers.length === 0 && (
               <div style={{ padding: 32, color: "#334155", textAlign: "center", fontSize: 13 }}>No users yet. Click Refresh.</div>
             )}
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
         </div>
         {showCreateUser && (
           <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
             <div style={{ background: "#0d1525", padding: 28, borderRadius: 14, border: "1px solid #1e293b", width: 400 }}>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
               <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 20 }}>Create User</div>
               {(["email","password","name"] as const).map(f => (<input key={f} placeholder={f} type={f==="password"?"password":"text"} value={newUser[f]} onChange={e => setNewUser(p => ({...p,[f]:e.target.value}))} style={{ display:"block", width:"100%", marginBottom:10, padding:"9px 12px", borderRadius:8, border:"1px solid #1e293b", background:"#060b14", color:"white", fontSize:13, boxSizing:"border-box" }} />))}
               <input placeholder={t("credits (€)")} type="number" value={newUser.credits} onChange={e => setNewUser(p => ({...p,credits:Number(e.target.value)}))} style={{ display:"block", width:"100%", marginBottom:16, padding:"9px 12px", borderRadius:8, border:"1px solid #1e293b", background:"#060b14", color:"white", fontSize:13, boxSizing:"border-box" }} />
               <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
                 <button onClick={() => setShowCreateUser(false)} style={{ padding:"8px 16px", borderRadius:8, border:"1px solid #1e293b", background:"transparent", color:"#94a3b8", cursor:"pointer", fontSize:13 }}>Cancel</button>
                 <button onClick={createUser} style={{ padding:"8px 16px", borderRadius:8, border:"none", background:"#6366f1", color:"white", cursor:"pointer", fontSize:13, fontWeight:700 }}>Create</button>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
               </div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             </div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
         )}
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
       </div>
     )
   }
 
   return (
-    <div className={`editor-shell theme-${theme}`} style={editorShellStyle}>
-      {isEdit && isDraggingBlock && (
-        <div
-          data-bo-grid-overlay="1"
-          className="editor-shell__drag-grid"
-          style={{ left: editRailWidth }}
-        >
-          <div className="editor-shell__drag-grid-label">Drop grid active</div>
-        </div>
-      )}
+    <div className="editor-shell">
 
       <div className="editor-toolbar">
         <div className="editor-toolbar__cluster editor-toolbar__cluster--tight">
@@ -2971,8 +2436,14 @@ useEffect(() => {
           </button>
 
           <div className="editor-toolbar__identity">
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             <div className="editor-toolbar__label">Site Editor</div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
         </div>
 
         <div className="editor-toolbar__divider" />
@@ -2993,7 +2464,11 @@ useEffect(() => {
             >
               {isLoading ? "..." : "Load"}
             </button>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
         </div>
 
         <div className="editor-toolbar__divider editor-toolbar__divider--hide-mobile" />
@@ -3006,6 +2481,8 @@ useEffect(() => {
               : status === "ok" && /^https?:\/\//i.test(loadedUrl || url)
               ? t("Online")
               : t("Offline")}
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
 
           <div
@@ -3019,6 +2496,8 @@ useEffect(() => {
           >
             <span className="editor-pill__dot" style={{ background: currentPlatformMeta.accent }} />
             {currentPlatformMeta.label}
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
 
           {currentProject && (
@@ -3049,6 +2528,8 @@ useEffect(() => {
             >
               <span className="editor-pill__dot" style={{ background: "#fbbf24" }} />
               Snapshot preview
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             </div>
           )}
 
@@ -3063,6 +2544,8 @@ useEffect(() => {
                 {VIEWPORT_PRESETS[preset].label}
               </button>
             ))}
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
 
           <button
@@ -3090,6 +2573,8 @@ useEffect(() => {
           >
             Redo
           </button>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
         </div>
 
         <div className="editor-toolbar__spacer" />
@@ -3110,6 +2595,8 @@ useEffect(() => {
               <span className="editor-cost-chip__sep" />
               <span>{sessionTokens.input.toLocaleString()} in</span>
               <span>{sessionTokens.output.toLocaleString()} out</span>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             </div>
           )}
 
@@ -3162,9 +2649,15 @@ useEffect(() => {
             >
               {exporting ? "Exporting..." : "Export"}
             </button>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
 
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
         </div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
       </div>
 
       <style>{`
@@ -3175,6 +2668,8 @@ useEffect(() => {
 
       <div className={`editor-progress ${isLoading ? "is-visible" : ""}`}>
         <div className="editor-progress__bar" />
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
       </div>
 
       {currentAiApproval && (
@@ -3196,13 +2691,25 @@ useEffect(() => {
         }}>
           <div style={{ fontSize:12, fontWeight:900, letterSpacing:0.3, color: theme === "light" ? "#111827" : "rgba(255,255,255,0.95)" }}>
             Cloud Request Approval
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
 
           <div style={{ display:"grid", gridTemplateColumns:"92px 1fr", gap:6, fontSize:12, color: theme === "light" ? "#334155" : "rgba(255,255,255,0.82)" }}>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             <div style={{ opacity:0.7 }}>Model</div><div style={{ fontWeight:700 }}>{currentAiApproval.model}</div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             <div style={{ opacity:0.7 }}>Scope</div><div style={{ fontWeight:700 }}>{currentAiApproval.scope}</div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             <div style={{ opacity:0.7 }}>Input est.</div><div style={{ fontWeight:700 }}>~{currentAiApproval.estInputTokens.toLocaleString()} tokens</div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             <div style={{ opacity:0.7 }}>Output est.</div><div style={{ fontWeight:700 }}>~{currentAiApproval.estOutputTokens.toLocaleString()} tokens</div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
 
           <div style={{
@@ -3217,6 +2724,8 @@ useEffect(() => {
             overflow:"auto"
           }}>
             {currentAiApproval.prompt}
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
 
           <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
@@ -3259,1309 +2768,18 @@ useEffect(() => {
             >
               Allow Cloud Request
             </button>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
         </div>
       )}
-
-      {aiDiff && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(2, 6, 23, 0.72)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 150,
-            padding: 18,
-          }}
-        >
-          <div
-            style={{
-              width: "min(1080px, 100%)",
-              maxHeight: "calc(100vh - 48px)",
-              overflow: "auto",
-              borderRadius: 18,
-              border: theme === "light" ? "1px solid rgba(148,163,184,0.28)" : "1px solid rgba(148,163,184,0.18)",
-              background: theme === "light" ? "rgba(255,255,255,0.98)" : "rgba(8,12,24,0.98)",
-              boxShadow: theme === "light" ? "0 24px 60px rgba(15,23,42,0.2)" : "0 24px 80px rgba(0,0,0,0.55)",
-              padding: 18,
-              display: "flex",
-              flexDirection: "column",
-              gap: 14,
-            }}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 900, color: theme === "light" ? "#0f172a" : "white" }}>
-                  AI diff review
-                </div>
-                <div style={{ fontSize: 12, color: theme === "light" ? "#64748b" : "rgba(148,163,184,0.86)" }}>
-                  {aiDiff.scope === "block" ? "Block-level change" : "Page-level change"} ready for accept or rollback.
-                </div>
-              </div>
-              <button
-                className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
-                onClick={acceptAiDiff}
-              >
-                Close
-              </button>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <div
-                style={{
-                  borderRadius: 14,
-                  border: theme === "light" ? "1px solid rgba(148,163,184,0.22)" : "1px solid rgba(148,163,184,0.16)",
-                  padding: 12,
-                  background: theme === "light" ? "rgba(248,250,252,0.96)" : "rgba(255,255,255,0.03)",
-                }}
-              >
-                <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 8, color: theme === "light" ? "#334155" : "#cbd5e1" }}>
-                  Before
-                </div>
-                <pre style={{ whiteSpace: "pre-wrap", margin: 0, fontSize: 12, lineHeight: 1.5, color: theme === "light" ? "#0f172a" : "#f8fafc" }}>
-                  {buildDiffPreview(aiDiff.beforeHtml || aiDiff.beforeDocumentHtml)}
-                </pre>
-              </div>
-              <div
-                style={{
-                  borderRadius: 14,
-                  border: "1px solid rgba(34,197,94,0.24)",
-                  padding: 12,
-                  background: theme === "light" ? "rgba(240,253,244,0.96)" : "rgba(34,197,94,0.08)",
-                }}
-              >
-                <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 8, color: theme === "light" ? "#166534" : "#86efac" }}>
-                  After
-                </div>
-                <pre style={{ whiteSpace: "pre-wrap", margin: 0, fontSize: 12, lineHeight: 1.5, color: theme === "light" ? "#14532d" : "#dcfce7" }}>
-                  {buildDiffPreview(aiDiff.afterHtml)}
-                </pre>
-              </div>
-            </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button className="editor-btn editor-btn--panel editor-btn--panel-muted" onClick={rejectAiDiff}>
-                Reject and revert
-              </button>
-              <button className="editor-btn editor-btn--panel editor-btn--success" onClick={acceptAiDiff}>
-                Accept change
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {isLoading && (
-        <div style={{ position:"fixed", top:58, left:0, right:0, bottom:0, background: theme === "light" ? "rgba(240,244,248,0.97)" : "rgba(11,18,32,0.97)", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", zIndex:100 }}>
-          <div style={{ width:64, height:64, border:"3px solid rgba(99,102,241,0.2)", borderTop:"3px solid #6366f1", borderRadius:"50%", animation:"spin 0.8s linear infinite", marginBottom:20 }} />
-          <div style={{ color: theme === "light" ? "#111827" : "white", fontSize:17, fontWeight:700, marginBottom:8 }}>Website wird geladen...</div>
-          <div style={{ color: theme === "light" ? "#64748b" : "rgba(148,163,184,0.7)", fontSize:13, textAlign:"center", maxWidth:280 }}>Seite wird ueber den Proxy geladen.</div>
-        </div>
-      )}
-
-      {isEdit && (
-        <aside className={`editor-panel ${isEditRailCollapsed ? "is-collapsed" : ""}`}>
-          <button
-            className="editor-panel__collapse"
-            onClick={() => setIsEditRailCollapsed(prev => !prev)}
-            title={isEditRailCollapsed ? "Expand tools" : "Collapse tools"}
-          >
-            {isEditRailCollapsed ? ">" : "<"}
-          </button>
-
-          {isEditRailCollapsed ? (
-            <div className="editor-panel__collapsed-stack">
-              <div
-                className="editor-panel__mini-platform"
-                style={{
-                  borderColor: currentPlatformMeta.border,
-                  background: currentPlatformMeta.background,
-                  color: currentPlatformMeta.accent,
-                }}
-              >
-                {currentPlatformMeta.shortLabel}
-              </div>
-
-              <button
-                className="editor-panel__mini-action"
-                onClick={() => handleAiRescan("block")}
-                disabled={aiScanLoading}
-                title="AI Block"
-              >
-                AI
-              </button>
-
-              <button
-                className="editor-panel__mini-action"
-                onClick={() => handleAiRescan("page")}
-                disabled={aiScanLoading}
-                title="AI Page"
-              >
-                Page
-              </button>
-
-              <div className={`editor-panel__mini-readiness ${exportReadiness}`}>
-                {exportReadiness === "guarded" ? "!" : "OK"}
-              </div>
-            </div>
-          ) : (
-            <div className="editor-panel__scroll">
-              <section className="editor-panel__section">
-                <div className="editor-panel__label">Page</div>
-                <div className="editor-panel__site-card">
-                  <div
-                    className="editor-panel__site-icon"
-                    style={{
-                      borderColor: currentPlatformMeta.border,
-                      background: currentPlatformMeta.background,
-                      color: currentPlatformMeta.accent,
-                    }}
-                  >
-                    {currentPlatformMeta.shortLabel}
-                  </div>
-
-                  <div className="editor-panel__site-copy">
-                    <div className="editor-panel__site-name">
-                      {currentProject?.name || loadedUrl.replace(/^https?:\/\//, "") || "No site loaded"}
-                    </div>
-                    <div className="editor-panel__site-meta">
-                      <span className="editor-panel__site-dot" style={{ background: currentPlatformMeta.accent }} />
-                      {currentPlatformMeta.label}
-                      {currentProject ? ` · ${titleCaseFallback(currentProject.workflowStage || "draft")}` : ""}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="editor-panel__url">
-                  {loadedUrl ? loadedUrl.replace(/^https?:\/\//, "") : "Load a site or open a project"}
-                </div>
-
-                <div className="editor-panel__note">
-                  {currentPlatformGuide?.safeEditScope || "Live block editing stays inside the current overlay scope."}
-                </div>
-              </section>
-
-              <div className="editor-panel__divider" />
-
-              <section className="editor-panel__section">
-                <div className="editor-panel__label">Block Types</div>
-                <div className="editor-panel__chips">
-                  {blockFamilyChips.map(chip => {
-                    const isActive = chip.value === "all" ? blockFilter === "all" : blockFilter === chip.value
-                    return (
-                      <button
-                        key={`${chip.label}-${chip.value}`}
-                        className={`editor-chip ${isActive ? "is-active" : ""}`}
-                        onClick={() => setBlockFilter(chip.value)}
-                        style={{
-                          borderColor: isActive ? chip.tint : "rgba(148,163,184,0.18)",
-                          background: isActive ? chip.background : "rgba(255,255,255,0.03)",
-                          color: isActive ? chip.tint : "rgba(226,232,240,0.8)",
-                        }}
-                      >
-                        {chip.label}
-                      </button>
-                    )
-                  })}
-                </div>
-              </section>
-
-              <div className="editor-panel__divider" />
-
-              <section className="editor-panel__section">
-                <div className="editor-panel__label">Delivery</div>
-                <div className="editor-panel__delivery">
-                  <div className={`editor-panel__delivery-pill ${exportReadiness}`}>
-                    {exportReadiness === "guarded" ? "Guarded export" : "Ready export"}
-                  </div>
-                  <div className="editor-panel__delivery-mode">{selectedExportMode.label}</div>
-                </div>
-                {exportWarnings.length > 0 ? (
-                  <>
-                    <button
-                      type="button"
-                      className={`editor-panel__warning-toggle ${showExportWarnings ? "is-open" : ""}`}
-                      onClick={() => setShowExportWarnings(previous => !previous)}
-                    >
-                      <span className="editor-panel__warning">
-                        {exportWarnings.length} warning{exportWarnings.length === 1 ? "" : "s"} will be written into the manifest.
-                      </span>
-                      <span className="editor-panel__warning-arrow">{showExportWarnings ? "−" : "+"}</span>
-                    </button>
-                    {showExportWarnings ? (
-                      <div className="editor-panel__warning-list">
-                        {exportWarnings.map((warning, index) => (
-                          <div key={`${warning.code}-${index}`} className="editor-panel__warning-item" title={warning.detail || warning.message}>
-                            <span className="editor-panel__warning-item-code">{warning.level === "warning" ? "!" : "i"}</span>
-                            <span className="editor-panel__warning-item-copy">
-                              {shortenText(warning.detail || warning.message, 88)}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-                  </>
-                ) : (
-                  <div className="editor-panel__note">No delivery warnings right now.</div>
-                )}
-              </section>
-
-              <div className="editor-panel__divider" />
-
-              <section className="editor-panel__section">
-                <div className="editor-panel__label">Preview</div>
-                <div className="editor-panel__note">
-                  Clean previews open without editor chrome. Share previews use the saved project state.
-                </div>
-                <div className="editor-panel__two-up">
-                  <button
-                    className="editor-btn editor-btn--panel"
-                    onClick={openFullPreview}
-                    disabled={!currentHtml}
-                  >
-                    Clean preview
-                  </button>
-                  <button
-                    className="editor-btn editor-btn--panel editor-btn--panel-muted"
-                    onClick={createSharePreview}
-                    disabled={sharingPreview || !currentProject || Boolean(versionPreview)}
-                  >
-                    {sharingPreview ? "Sharing..." : "Share link"}
-                  </button>
-                </div>
-                <input
-                  className="editor-select editor-select--full"
-                  value={shareEmail}
-                  onChange={(event) => setShareEmail(event.target.value)}
-                  placeholder="Optional client email"
-                />
-                {currentProject ? (
-                  projectShares.length ? (
-                    <div className="editor-panel__warning-list">
-                      {projectShares.slice(0, 4).map((share) => (
-                        <div key={share.url} className="editor-panel__warning-item">
-                          <span className="editor-panel__warning-item-code">↗</span>
-                          <span className="editor-panel__warning-item-copy">
-                            {shortenText(
-                              [
-                                share.pageId ? versionPageLabelFor(share.pageId) : "",
-                                share.languageVariant ? share.languageVariant.toUpperCase() : "",
-                                share.url.replace(/^https?:\/\//, ""),
-                              ]
-                                .filter(Boolean)
-                                .join(" · "),
-                              56,
-                            )}
-                          </span>
-                          <button
-                            className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
-                            onClick={() => window.open(share.url, "_blank", "noopener,noreferrer")}
-                          >
-                            Open
-                          </button>
-                          <button
-                            className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
-                            onClick={() => void copySharePreviewUrl(share.url)}
-                          >
-                            Copy
-                          </button>
-                          <button
-                            className="editor-btn editor-btn--panel editor-btn--compact"
-                            onClick={() => void revokeSharePreview(share.id)}
-                          >
-                            Revoke
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="editor-panel__note">
-                      {loadingShares ? "Loading share previews..." : "No share previews yet."}
-                    </div>
-                  )
-                ) : (
-                  <div className="editor-panel__note">Share previews require a saved project.</div>
-                )}
-              </section>
-
-              <div className="editor-panel__divider" />
-
-              <section className="editor-panel__section">
-                <div className="editor-panel__label">Publish</div>
-                <div className="editor-panel__note">
-                  Publishes the current editor state. The active page is autosaved before preview or deployment.
-                </div>
-                <div className="editor-panel__publish-target">
-                  <select
-                    className="editor-select editor-select--full"
-                    value={publishDraft.target}
-                    onChange={(event) => {
-                      updatePublishDraft("target", event.target.value as PublishTarget)
-                      setCustomDomainGuide(null)
-                    }}
-                    disabled={loadingPublishTargets}
-                    title="Publish target"
-                  >
-                    {(["firebase", "netlify", "vercel", "wordpress", "shopify"] as PublishTarget[]).map((target) => (
-                      <option key={target} value={target}>
-                        {publishTargets.find((entry) => entry.id === target)?.label || titleCaseFallback(target)}
-                      </option>
-                    ))}
-                  </select>
-                  {selectedPublishTargetInfo ? (
-                    <div className={`editor-panel__publish-badge ${selectedPublishTargetInfo.configured ? "is-ready" : "is-manual"}`}>
-                      {selectedPublishTargetInfo.configured ? "Server ready" : "Needs inline credentials"}
-                    </div>
-                  ) : null}
-                </div>
-                {selectedPublishTargetInfo ? (
-                  <div className="editor-panel__note">
-                    {selectedPublishTargetInfo.configured
-                      ? `${selectedPublishTargetInfo.label} can publish with the server environment as-is.`
-                      : `${selectedPublishTargetInfo.label} needs values from the fields below unless the server environment is configured.`}
-                  </div>
-                ) : (
-                  <div className="editor-panel__note">
-                    {loadingPublishTargets ? "Loading publish targets..." : "Publish targets could not be loaded."}
-                  </div>
-                )}
-
-                {publishDraft.target === "firebase" ? (
-                  <input
-                    className="editor-select editor-select--full"
-                    value={publishDraft.firebaseSiteId}
-                    onChange={(event) => updatePublishDraft("firebaseSiteId", event.target.value)}
-                    placeholder="Optional Firebase site id"
-                  />
-                ) : null}
-
-                {publishDraft.target === "netlify" ? (
-                  <div className="editor-panel__publish-grid">
-                    <input
-                      className="editor-select editor-select--full"
-                      value={publishDraft.netlifySiteId}
-                      onChange={(event) => updatePublishDraft("netlifySiteId", event.target.value)}
-                      placeholder="Optional Netlify site id"
-                    />
-                    <input
-                      className="editor-select editor-select--full"
-                      value={publishDraft.netlifyToken}
-                      onChange={(event) => updatePublishDraft("netlifyToken", event.target.value)}
-                      placeholder="Optional Netlify token"
-                      type="password"
-                    />
-                  </div>
-                ) : null}
-
-                {publishDraft.target === "vercel" ? (
-                  <input
-                    className="editor-select editor-select--full"
-                    value={publishDraft.vercelToken}
-                    onChange={(event) => updatePublishDraft("vercelToken", event.target.value)}
-                    placeholder="Optional Vercel token"
-                    type="password"
-                  />
-                ) : null}
-
-                {publishDraft.target === "wordpress" ? (
-                  <>
-                    <div className="editor-panel__publish-grid">
-                      <input
-                        className="editor-select editor-select--full"
-                        value={publishDraft.wpUrl}
-                        onChange={(event) => updatePublishDraft("wpUrl", event.target.value)}
-                        placeholder="WordPress site URL"
-                      />
-                      <input
-                        className="editor-select editor-select--full"
-                        value={publishDraft.wpUser}
-                        onChange={(event) => updatePublishDraft("wpUser", event.target.value)}
-                        placeholder="WP username"
-                      />
-                    </div>
-                    <div className="editor-panel__publish-grid">
-                      <input
-                        className="editor-select editor-select--full"
-                        value={publishDraft.wpAppPassword}
-                        onChange={(event) => updatePublishDraft("wpAppPassword", event.target.value)}
-                        placeholder="WP app password"
-                        type="password"
-                      />
-                      <input
-                        className="editor-select editor-select--full"
-                        value={publishDraft.wpPageId}
-                        onChange={(event) => updatePublishDraft("wpPageId", event.target.value)}
-                        placeholder="Optional page id"
-                      />
-                    </div>
-                  </>
-                ) : null}
-
-                {publishDraft.target === "shopify" ? (
-                  <>
-                    <div className="editor-panel__publish-grid">
-                      <input
-                        className="editor-select editor-select--full"
-                        value={publishDraft.shopDomain}
-                        onChange={(event) => updatePublishDraft("shopDomain", event.target.value)}
-                        placeholder="Shopify domain"
-                      />
-                      <input
-                        className="editor-select editor-select--full"
-                        value={publishDraft.shopAccessToken}
-                        onChange={(event) => updatePublishDraft("shopAccessToken", event.target.value)}
-                        placeholder="Shopify access token"
-                        type="password"
-                      />
-                    </div>
-                    <input
-                      className="editor-select editor-select--full"
-                      value={publishDraft.shopThemeId}
-                      onChange={(event) => updatePublishDraft("shopThemeId", event.target.value)}
-                      placeholder="Optional Shopify theme id"
-                    />
-                  </>
-                ) : null}
-
-                <div className="editor-panel__publish-toolbar">
-                  <button
-                    className="editor-btn editor-btn--panel editor-btn--panel-muted"
-                    onClick={() => void createPublishPreview()}
-                    disabled={creatingPublishPreview || !currentProject || Boolean(versionPreview)}
-                  >
-                    {creatingPublishPreview ? "Creating..." : "Preview URL"}
-                  </button>
-                  <button
-                    className="editor-btn editor-btn--panel editor-btn--success"
-                    onClick={() => void publishCurrentProject()}
-                    disabled={!currentProject || !currentHtml || Boolean(versionPreview) || Boolean(publishingTarget)}
-                  >
-                    {publishingTarget === publishDraft.target ? "Publishing..." : `Publish to ${selectedPublishTargetInfo?.label || titleCaseFallback(publishDraft.target)}`}
-                  </button>
-                </div>
-
-                {lastPublishPreview ? (
-                  <div className="editor-panel__publish-preview">
-                    <div className="editor-panel__publish-row">
-                      <strong>Latest preview</strong>
-                      <span>Expires {formatEditorDateTime(lastPublishPreview.expiresAt)}</span>
-                    </div>
-                    <div className="editor-panel__publish-url">
-                      {shortenText(lastPublishPreview.previewUrl.replace(/^https?:\/\//, ""), 60)}
-                    </div>
-                    <div className="editor-panel__publish-actions">
-                      <button
-                        className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
-                        onClick={() => window.open(lastPublishPreview.previewUrl, "_blank", "noopener,noreferrer")}
-                      >
-                        Open
-                      </button>
-                      <button
-                        className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
-                        onClick={() => void copyTextValue(lastPublishPreview.previewUrl, "Preview URL copied", "Copy this preview URL")}
-                      >
-                        Copy
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-
-                <div className="editor-panel__publish-grid">
-                  <input
-                    className="editor-select editor-select--full"
-                    value={publishDraft.customDomain}
-                    onChange={(event) => updatePublishDraft("customDomain", event.target.value)}
-                    placeholder="Custom domain"
-                  />
-                  <button
-                    className="editor-btn editor-btn--panel editor-btn--accent"
-                    onClick={() => void loadCustomDomainGuide()}
-                    disabled={!currentProject}
-                  >
-                    Domain guide
-                  </button>
-                </div>
-
-                {customDomainGuide ? (
-                  <div className="editor-panel__publish-guide">
-                    <div className="editor-panel__publish-row">
-                      <strong>{customDomainGuide.domain}</strong>
-                      <span>{titleCaseFallback(customDomainGuide.target)}</span>
-                    </div>
-                    <div className="editor-panel__note">
-                      {customDomainGuide.guide.recordType} → {customDomainGuide.guide.recordValue}
-                    </div>
-                    <div className="editor-panel__publish-guide-steps">
-                      {customDomainGuide.guide.steps.map((step, index) => (
-                        <div key={`${customDomainGuide.domain}-${index}`} className="editor-panel__publish-guide-step">
-                          <span>{index + 1}</span>
-                          <span>{step}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                <div className="editor-panel__version-toolbar">
-                  <div className="editor-panel__note">
-                    {currentProject
-                      ? recentPublishHistory.length
-                        ? `${publishHistory.length} deployment${publishHistory.length === 1 ? "" : "s"} tracked for this project.`
-                        : "No deployments recorded for this project yet."
-                      : "Open a saved project to publish and track deployment history."}
-                  </div>
-                  <button
-                    className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
-                    onClick={() => currentProject?.id && loadPublishHistory(currentProject.id)}
-                    disabled={!currentProject || loadingPublishHistory}
-                  >
-                    {loadingPublishHistory ? "..." : "Refresh"}
-                  </button>
-                </div>
-
-                {currentProject && recentPublishHistory.length ? (
-                  <div className="editor-panel__publish-history">
-                    {recentPublishHistory.map((deployment) => (
-                      <div
-                        key={deployment.id}
-                        className={`editor-panel__publish-item is-${deployment.status}`}
-                      >
-                        <div className="editor-panel__publish-row">
-                          <strong>{titleCaseFallback(deployment.target)}</strong>
-                          <span>{formatEditorDateTime(deployment.finished_at || deployment.created_at)}</span>
-                        </div>
-                        <div className="editor-panel__publish-row">
-                          <span>{deployment.status === "success" ? "Live" : deployment.status === "failed" ? "Failed" : "Pending"}</span>
-                          <span>{deployment.export_mode || selectedExportMode.label}</span>
-                        </div>
-                        {deployment.deploy_url ? (
-                          <div className="editor-panel__publish-url">
-                            {shortenText(deployment.deploy_url.replace(/^https?:\/\//, ""), 60)}
-                          </div>
-                        ) : null}
-                        {deployment.error_message ? (
-                          <div className="editor-panel__note">{shortenText(deployment.error_message, 120)}</div>
-                        ) : null}
-                        <div className="editor-panel__publish-actions">
-                          <button
-                            className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
-                            onClick={() => deployment.deploy_url && window.open(deployment.deploy_url, "_blank", "noopener,noreferrer")}
-                            disabled={!deployment.deploy_url}
-                          >
-                            Open
-                          </button>
-                          <button
-                            className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
-                            onClick={() => deployment.deploy_url && copyTextValue(deployment.deploy_url, "Publish URL copied", "Copy this publish URL")}
-                            disabled={!deployment.deploy_url}
-                          >
-                            Copy
-                          </button>
-                          <button
-                            className="editor-btn editor-btn--panel editor-btn--compact"
-                            onClick={() => void rollbackPublishedDeployment(deployment)}
-                            disabled={deployment.status !== "success" || rollingBackDeploymentId === deployment.id || Boolean(versionPreview)}
-                          >
-                            {rollingBackDeploymentId === deployment.id ? "Rolling back..." : "Rollback"}
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-              </section>
-
-              <div className="editor-panel__divider" />
-
-              <section className="editor-panel__section">
-                <div className="editor-panel__label">Design System</div>
-                <div className="editor-panel__translation-controls">
-                  <input
-                    className="editor-select editor-select--full"
-                    value={globalStyleOverrides.fontFamily}
-                    onChange={(event) =>
-                      setGlobalStyleOverrides((previous) => ({ ...previous, fontFamily: event.target.value }))
-                    }
-                    placeholder="Site font-family"
-                  />
-                </div>
-                <div className="editor-panel__two-up">
-                  <input
-                    className="editor-select editor-select--full"
-                    value={globalStyleOverrides.textColor}
-                    onChange={(event) =>
-                      setGlobalStyleOverrides((previous) => ({ ...previous, textColor: event.target.value }))
-                    }
-                    placeholder="Text color"
-                  />
-                  <input
-                    className="editor-select editor-select--full"
-                    value={globalStyleOverrides.backgroundColor}
-                    onChange={(event) =>
-                      setGlobalStyleOverrides((previous) => ({ ...previous, backgroundColor: event.target.value }))
-                    }
-                    placeholder="Background"
-                  />
-                </div>
-                <div className="editor-panel__two-up">
-                  <input
-                    className="editor-select editor-select--full"
-                    value={globalStyleOverrides.accentColor}
-                    onChange={(event) =>
-                      setGlobalStyleOverrides((previous) => ({ ...previous, accentColor: event.target.value }))
-                    }
-                    placeholder="Accent color"
-                  />
-                  <button
-                    className="editor-btn editor-btn--panel editor-btn--success"
-                    onClick={applyGlobalStyleOverridesNow}
-                    disabled={!currentHtml}
-                  >
-                    Apply styles
-                  </button>
-                </div>
-                {cssVariableNames.length ? (
-                  <>
-                    <div className="editor-panel__note">CSS variables</div>
-                    <div className="editor-panel__warning-list">
-                      {cssVariableNames.slice(0, 8).map((name) => (
-                        <div key={name} className="editor-panel__warning-item">
-                          <span className="editor-panel__warning-item-code">#</span>
-                          <span className="editor-panel__warning-item-copy">{name}</span>
-                          <input
-                            className="editor-select editor-select--full"
-                            value={cssVariableOverrides[name] || ""}
-                            onChange={(event) =>
-                              setCssVariableOverrides((previous) => ({ ...previous, [name]: event.target.value }))
-                            }
-                            placeholder="override"
-                          />
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                ) : null}
-                <div className="editor-panel__note">
-                  {assetLibrary.length
-                    ? `${assetLibrary.length} project asset${assetLibrary.length === 1 ? "" : "s"} available across this project.`
-                    : "No reusable project assets detected yet."}
-                </div>
-                {assetLibrary.length > 6 ? (
-                  <input
-                    className="editor-select editor-select--full"
-                    value={assetLibraryQuery}
-                    onChange={(event) => setAssetLibraryQuery(event.target.value)}
-                    placeholder="Search project assets"
-                  />
-                ) : null}
-                <input
-                  type="file"
-                  multiple
-                  accept="image/*,.woff,.woff2,.ttf,.otf,.eot"
-                  onChange={(event) => {
-                    void handleAssetLibraryUpload(event.target.files)
-                    event.currentTarget.value = ""
-                  }}
-                />
-                {assetLibrary.length ? (
-                  <div
-                    className="editor-panel__warning-list"
-                    style={{ maxHeight: 320, overflow: "auto", paddingRight: 4 }}
-                  >
-                    {filteredAssetLibrary.map((asset) => (
-                      <div key={asset.id} className="editor-panel__warning-item" title={asset.url}>
-                        <span className="editor-panel__warning-item-code">{asset.type === "image" ? "Img" : "Font"}</span>
-                        <span className="editor-panel__warning-item-copy">{shortenText(asset.label, 52)}</span>
-                        {asset.type === "image" ? (
-                          <button
-                            className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
-                            onClick={() =>
-                              window.dispatchEvent(new CustomEvent("bo:prefill-image-src", { detail: { url: asset.url } }))
-                            }
-                          >
-                            Use
-                          </button>
-                        ) : (
-                          <button
-                            className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
-                            onClick={() => {
-                              const fontName = String(asset.label || "ProjectFont").replace(/\.[A-Za-z0-9]+$/, "")
-                              setSelectedFontAssetId(asset.id)
-                              setGlobalStyleOverrides((previous) => ({
-                                ...previous,
-                                fontFamily: `'${fontName}', system-ui, sans-serif`,
-                              }))
-                            }}
-                          >
-                            Set font
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                {assetLibrary.length && !filteredAssetLibrary.length ? (
-                  <div className="editor-panel__note">No assets match the current filter.</div>
-                ) : null}
-              </section>
-
-              <div className="editor-panel__divider" />
-
-              <section className="editor-panel__section">
-                <div className="editor-panel__label">Localization</div>
-                <div className="editor-panel__translation-card">
-                  <div className="editor-panel__translation-head">
-                    <div className="editor-panel__translation-title">Instant website translation</div>
-                    <div className="editor-panel__translation-language">{selectedTranslationLanguage.label}</div>
-                  </div>
-                  <div className="editor-panel__translation-controls">
-                    <select
-                      className="editor-select editor-select--full"
-                      value={translationTargetLanguage}
-                      onChange={e => setTranslationTargetLanguage(e.target.value)}
-                      title="Translation target language"
-                    >
-                      {TOP_TRANSLATION_LANGUAGES.map((language) => (
-                        <option key={language.code} value={language.code}>
-                          {language.label}
-                        </option>
-                      ))}
-                    </select>
-                    {activePage ? (
-                      <select
-                        className="editor-select editor-select--full"
-                        value={activeLanguageVariant}
-                        onChange={(event) => switchLanguageVariant(event.target.value)}
-                        title="Stored language variants"
-                      >
-                        {availableLanguageVariants.map((variant) => (
-                          <option key={variant.code} value={variant.code}>
-                            {variant.label}
-                          </option>
-                        ))}
-                      </select>
-                    ) : null}
-                    <button
-                      className={`editor-btn editor-btn--panel editor-btn--translate ${isTranslatingSite ? "is-loading" : ""}`}
-                      onClick={handleTranslateSite}
-                      disabled={isTranslatingSite || !currentHtml || Boolean(versionPreview)}
-                    >
-                      {isTranslatingSite ? "Translating..." : "Translate site"}
-                    </button>
-                  </div>
-                  <div className="editor-panel__note">
-                    Translates the loaded page copy while preserving structure, exports, and block overlay markup.
-                  </div>
-                  <div className="editor-panel__two-up">
-                    <button
-                      className="editor-btn editor-btn--panel editor-btn--panel-muted"
-                      onClick={() => void storeCurrentAsLanguageVariant()}
-                      disabled={!currentProject || !activePage || !currentHtml}
-                    >
-                      Save current as {selectedTranslationLanguage.label}
-                    </button>
-                    {activeLanguageVariant !== "base" ? (
-                      <button
-                        className="editor-btn editor-btn--panel editor-btn--panel-muted"
-                        onClick={() => void resetLanguageVariantFromBase()}
-                        disabled={!activePage?.html}
-                      >
-                        Reset variant from base
-                      </button>
-                    ) : (
-                      <button
-                        className="editor-btn editor-btn--panel editor-btn--panel-muted"
-                        onClick={() => switchLanguageVariant("base")}
-                        disabled
-                      >
-                        Base page active
-                      </button>
-                    )}
-                  </div>
-                  {activeLanguageVariant !== "base" ? (
-                    <button
-                      className="editor-btn editor-btn--panel editor-btn--panel-muted"
-                      onClick={() => void deleteLanguageVariant()}
-                    >
-                      Delete current variant
-                    </button>
-                  ) : null}
-                  {translationInfo ? (
-                    <div className="editor-panel__translation-summary">
-                      <strong>{translationInfo.translatedCount}</strong> text blocks translated
-                      {translationInfo.detectedSourceLanguage ? ` from ${translationInfo.detectedSourceLanguage.toUpperCase()}` : ""}
-                    </div>
-                  ) : (
-                    <div className="editor-panel__note">
-                      Choose one of the top 50 languages in the top bar and run Translate site.
-                    </div>
-                  )}
-                  {activeLanguageVariant !== "base" && comparisonBaseHtml ? (
-                    <button
-                      className="editor-btn editor-btn--panel editor-btn--panel-muted"
-                      onClick={() => setShowTranslationSplitView((value) => !value)}
-                    >
-                      {showTranslationSplitView ? "Hide original side-by-side" : "Show original side-by-side"}
-                    </button>
-                  ) : null}
-                  {translationReview?.segments.length ? (
-                    <div className="editor-panel__warning-list">
-                      {translationReview.segments.slice(0, 6).map((segment) => (
-                        <div
-                          key={segment.id}
-                          className={`editor-panel__version-item ${activeTranslationSegmentId === segment.id ? "is-active" : ""}`}
-                        >
-                          <div className="editor-panel__version-copy">
-                            <strong>{shortenText(segment.sourceText, 68)}</strong>
-                            <span>{shortenText(segment.translatedText, 68)}</span>
-                          </div>
-                          <textarea
-                            className="editor-textarea"
-                            value={translationOverrideDrafts[segment.id] ?? segment.translatedText}
-                            onChange={(event) =>
-                              setTranslationOverrideDrafts((previous) => ({
-                                ...previous,
-                                [segment.id]: event.target.value,
-                              }))
-                            }
-                          />
-                          <div className="editor-panel__version-actions">
-                            <button
-                              className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
-                              onClick={() => setActiveTranslationSegmentId(segment.id)}
-                            >
-                              Focus
-                            </button>
-                            <button
-                              className="editor-btn editor-btn--panel editor-btn--compact"
-                              onClick={() => void applyTranslationOverride(segment.id)}
-                            >
-                              Override
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              </section>
-
-              <div className="editor-panel__divider" />
-
-              <section className="editor-panel__section">
-                <div className="editor-panel__label">Versioning</div>
-
-                <div className="editor-panel__version-toolbar">
-                  <button
-                    className="editor-btn editor-btn--panel"
-                    onClick={handleManualSnapshot}
-                    disabled={savingSnapshot || !currentProject || !currentHtml || Boolean(versionPreview)}
-                  >
-                    {savingSnapshot ? "Saving..." : "Save snapshot"}
-                  </button>
-
-                  <button
-                    className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
-                    onClick={() => currentProject?.id && loadProjectVersions(currentProject.id)}
-                    disabled={loadingVersions || !currentProject}
-                  >
-                    {loadingVersions ? "..." : "Refresh"}
-                  </button>
-                </div>
-
-                {currentProject ? (
-                  <div className="editor-panel__note">
-                    {projectVersions.length
-                      ? `${projectVersions.length} project snapshot${projectVersions.length === 1 ? "" : "s"} available.`
-                      : "Create a named snapshot before major editor, AI, or translation work."}
-                  </div>
-                ) : (
-                  <div className="editor-panel__note">
-                    Open a saved project to use project-level snapshots and rollback.
-                  </div>
-                )}
-
-                {versionPreview ? (
-                  <div className="editor-panel__version-preview">
-                    <div className="editor-panel__version-preview-title">{previewVersionTitle}</div>
-                    <div className="editor-panel__version-preview-meta">{versionMetaFor(versionPreview)}</div>
-                  </div>
-                ) : null}
-
-                {projectVersions.length > 0 ? (
-                  <div className="editor-panel__version-list">
-                    {projectVersions.slice(0, 8).map((version) => {
-                      const isPreviewing = versionPreview?.id === version.id
-                      const isBusy = activeVersionActionId === version.id
-                      return (
-                        <div
-                          key={version.id}
-                          className={`editor-panel__version-item ${isPreviewing ? "is-active" : ""}`}
-                        >
-                          <div className="editor-panel__version-copy">
-                            <strong>{versionTitleFor(version)}</strong>
-                            <span>{versionMetaFor(version)}</span>
-                          </div>
-
-                          <div className="editor-panel__version-actions">
-                            <button
-                              className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
-                              onClick={() => {
-                                if (isPreviewing) {
-                                  exitVersionPreview(true)
-                                  return
-                                }
-                                void previewProjectVersion(version.id)
-                              }}
-                              disabled={isBusy}
-                            >
-                              {isPreviewing ? "Exit" : "Preview"}
-                            </button>
-                            <button
-                              className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
-                              onClick={() => void compareProjectVersion(version.id)}
-                              disabled={isBusy}
-                            >
-                              Compare
-                            </button>
-                            <button
-                              className="editor-btn editor-btn--panel editor-btn--compact"
-                              onClick={() => void restoreProjectVersion(version.id)}
-                              disabled={isBusy}
-                            >
-                              {isBusy ? "..." : "Restore"}
-                            </button>
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ) : currentProject ? (
-                  <div className="editor-panel__note">
-                    {loadingVersions ? "Loading project history..." : "No project snapshots yet."}
-                  </div>
-                ) : null}
-                {versionCompare ? (
-                  <div className="editor-panel__version-compare">
-                    <div className="editor-panel__version-preview">
-                      <div className="editor-panel__version-preview-title">
-                        Compare current vs {versionTitleFor(versionCompare)}
-                      </div>
-                      <div className="editor-panel__version-preview-meta">{versionMetaFor(versionCompare)}</div>
-                    </div>
-                    <div className="editor-panel__compare-grid">
-                      <div className="editor-panel__compare-pane">
-                        <div className="editor-panel__compare-label">Current</div>
-                        <iframe title="current-version-compare" srcDoc={currentHtml} className="editor-panel__compare-frame" />
-                      </div>
-                      <div className="editor-panel__compare-pane">
-                        <div className="editor-panel__compare-label">Snapshot</div>
-                        <iframe title="snapshot-version-compare" srcDoc={versionCompare.html} className="editor-panel__compare-frame" />
-                      </div>
-                    </div>
-                    <div className="editor-panel__version-actions">
-                      <button
-                        className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
-                        onClick={clearVersionCompare}
-                      >
-                        Close
-                      </button>
-                      <button
-                        className="editor-btn editor-btn--panel editor-btn--compact"
-                        onClick={() => void restoreProjectVersion(versionCompare.id)}
-                      >
-                        Restore snapshot
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-              </section>
-
-              <div className="editor-panel__divider" />
-
-              <section className="editor-panel__section">
-                <div className="editor-panel__label">Audits</div>
-                <div className="editor-panel__two-up">
-                  <button
-                    className="editor-btn editor-btn--panel"
-                    onClick={() => void runEditorAudit("seo")}
-                    disabled={runningAudit !== null}
-                  >
-                    {runningAudit === "seo" ? "Running..." : "SEO"}
-                  </button>
-                  <button
-                    className="editor-btn editor-btn--panel editor-btn--panel-muted"
-                    onClick={() => void runEditorAudit("cro")}
-                    disabled={runningAudit !== null}
-                  >
-                    {runningAudit === "cro" ? "Running..." : "CRO"}
-                  </button>
-                </div>
-                <button
-                  className="editor-btn editor-btn--panel editor-btn--panel-muted"
-                  onClick={() => void runEditorAudit("accessibility")}
-                  disabled={runningAudit !== null}
-                >
-                  {runningAudit === "accessibility" ? "Running..." : "Accessibility"}
-                </button>
-                {editorAudit ? (
-                  <div className="editor-panel__version-preview">
-                    <div className="editor-panel__version-preview-title">{editorAudit.headline}</div>
-                    <div className="editor-panel__version-preview-meta">{editorAudit.summary}</div>
-                    {editorAudit.scoreBadges?.length ? (
-                      <div className="editor-panel__chips">
-                        {editorAudit.scoreBadges.map((badge) => (
-                          <span key={badge} className="editor-chip is-active">
-                            {badge}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-                    <div className="editor-panel__warning-list">
-                      {editorAudit.items.map((item) => (
-                        <div key={item} className="editor-panel__warning-item">
-                          <span className="editor-panel__warning-item-code">•</span>
-                          <span className="editor-panel__warning-item-copy">{item}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="editor-panel__note">Run an audit to surface page-level SEO, CRO, and accessibility issues here.</div>
-                )}
-              </section>
-
-              <div className="editor-panel__divider" />
-
-              <section className="editor-panel__section">
-                <div className="editor-panel__label">Overlay</div>
-                <select
-                  className="editor-select editor-select--full"
-                  value={blockFilter}
-                  onChange={e => setBlockFilter(e.target.value as BlockFilter)}
-                  title="Visible blocks"
-                >
-                  {BLOCK_FILTER_OPTIONS.map(option => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-
-                <div className="editor-panel__two-up">
-                  <button
-                    className="editor-btn editor-btn--panel"
-                    onClick={() => handleAiRescan("block")}
-                    disabled={aiScanLoading || Boolean(versionPreview)}
-                  >
-                    {aiScanLoading ? "..." : "AI Block"}
-                  </button>
-                  <button
-                    className="editor-btn editor-btn--panel editor-btn--panel-muted"
-                    onClick={() => handleAiRescan("page")}
-                    disabled={aiScanLoading || Boolean(versionPreview)}
-                  >
-                    {aiScanLoading ? "..." : "AI Page"}
-                  </button>
-                </div>
-              </section>
-
-              <div className="editor-panel__divider" />
-
-              <section className="editor-panel__section">
-                <div className="editor-panel__label">Structure</div>
-                <div className="editor-structure">
-                  {structureItems.length === 0 ? (
-                    <div className="editor-panel__note">
-                      Load a site to reorder motherblocks.
-                    </div>
-                  ) : structureItems.map(item => (
-                    <div
-                      key={item.id}
-                      className={`editor-structure__item ${item.isSelected ? "is-selected" : ""}`}
-                    >
-                      <div className="editor-structure__copy">
-                        <div className="editor-structure__title">{item.displayLabel}</div>
-                        <div className="editor-structure__meta">
-                          {item.childCount > 0 ? `${item.childCount} child blocks` : titleCaseFallback(item.kind)}
-                        </div>
-                      </div>
-
-                      <div className="editor-structure__actions">
-                        <button className="editor-structure__move" onClick={() => moveStructureItem(item.rootId, -2)}>↑↑</button>
-                        <button className="editor-structure__move" onClick={() => moveStructureItem(item.rootId, -1)}>↑</button>
-                        <button className="editor-structure__move" onClick={() => moveStructureItem(item.rootId, 1)}>↓</button>
-                        <button className="editor-structure__move" onClick={() => moveStructureItem(item.rootId, 2)}>↓↓</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <div className="editor-panel__divider" />
-
-              <section className="editor-panel__section">
-                <div className="editor-panel__label">Components</div>
-                <select
-                  className="editor-select editor-select--full"
-                  value={selectedComponent || ""}
-                  onChange={e => setSelectedComponent(e.target.value)}
-                  title="Professional components"
-                >
-                  <option value="">Choose component</option>
-                  {Object.entries(COMPONENT_LIBRARY).map(([key, comp]) => (
-                    <option key={key} value={key}>
-                      {COMPONENT_CATEGORIES[comp.category as keyof typeof COMPONENT_CATEGORIES]?.icon} {comp.name}
-                    </option>
-                  ))}
-                </select>
-
-                <button
-                  className={`editor-btn editor-btn--panel editor-btn--success ${selectedComponent ? "" : "is-disabled"}`}
-                  disabled={!selectedComponent}
-                  onClick={addSelectedComponent}
-                >
-                  Add component
-                </button>
-              </section>
-
-              <div className="editor-panel__divider" />
-
-              <section className="editor-panel__section">
-                <div className="editor-panel__label">AI Assistant</div>
-                <select
-                  className="editor-select editor-select--full"
-                  value={leftAiModel}
-                  onChange={e => setLeftAiModel(e.target.value)}
-                  title="AI model"
-                >
-                  {AI_MODELS.map(model => (
-                    <option key={model.value} value={model.value}>
-                      {model.label}
-                    </option>
-                  ))}
-                </select>
-
-                <select
-                  className="editor-select editor-select--full"
-                  value={leftAiTone}
-                  onChange={(event) => setLeftAiTone(event.target.value)}
-                  title="AI tone preset"
-                >
-                  <option value="neutral">Neutral tone</option>
-                  <option value="professional">Professional</option>
-                  <option value="casual">Casual</option>
-                  <option value="persuasive">Persuasive</option>
-                  <option value="luxury">Luxury</option>
-                  <option value="direct">Direct response</option>
-                </select>
-
-                <textarea
-                  className="editor-textarea"
-                  value={leftAiPrompt}
-                  onChange={e => setLeftAiPrompt(e.target.value)}
-                  placeholder={`Prompt ${AI_MODELS.find(model => model.value === leftAiModel)?.label || leftAiModel}...`}
-                />
-
-                <button
-                  data-left-ai-run="1"
-                  className={`editor-btn editor-btn--panel editor-btn--accent ${leftAiRunning ? "is-loading" : ""}`}
-                  onClick={() => void runLeftAiPrompt()}
-                  disabled={leftAiRunning || Boolean(versionPreview)}
-                >
-                  {leftAiRunning ? "Running..." : "Run prompt"}
-                </button>
-
-                <button
-                  className={`editor-btn editor-btn--panel editor-btn--panel-muted ${batchAiRunning ? "is-loading" : ""}`}
-                  onClick={() => void runBatchAiAcrossPages()}
-                  disabled={batchAiRunning || leftAiRunning || Boolean(versionPreview)}
-                >
-                  {batchAiRunning ? "Running..." : "Run across pages"}
-                </button>
-              </section>
-            </div>
-          )}
-        </aside>
-      )}
-
-      <div className="editor-viewport">
-        <div className={`editor-viewport__canvas ${showComparisonViewport ? "editor-viewport__canvas--split" : ""}`}>
-          {showComparisonViewport ? (
-            <div className="editor-viewport__split">
-              <div className={`editor-viewport__device editor-viewport__device--${viewportPreset}`}>
-                <div className="editor-viewport__device-meta">
-                  <span>{viewportConfig.label}</span>
-                  <span>Original</span>
-                </div>
-                <iframe
-                  ref={comparisonIframeRef}
-                  title="original-preview"
-                  className="editor-viewport__frame"
-                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation"
-                />
-              </div>
-              <div className={`editor-viewport__device editor-viewport__device--${viewportPreset}`}>
-                <div className="editor-viewport__device-meta">
-                  <span>{viewportConfig.label}</span>
-                  <span>
-                    {TOP_TRANSLATION_LANGUAGES.find((language) => language.code === activeLanguageVariant)?.label || activeLanguageVariant.toUpperCase()}
-                  </span>
-                </div>
-                <iframe
-                  ref={iframeRef}
-                  title="preview"
-                  className="editor-viewport__frame"
-                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation"
-                />
-              </div>
-            </div>
-          ) : (
-            <div className={`editor-viewport__device editor-viewport__device--${viewportPreset}`}>
-              <div className="editor-viewport__device-meta">
-                <span>{viewportConfig.label}</span>
-                <span>
-                  {activeLanguageVariant === "base"
-                    ? "Original"
-                    : TOP_TRANSLATION_LANGUAGES.find((language) => language.code === activeLanguageVariant)?.label || activeLanguageVariant.toUpperCase()}
-                </span>
-              </div>
-              <iframe
-                ref={iframeRef}
-                title="preview"
-                className="editor-viewport__frame"
-                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation"
-              />
-            </div>
-          )}
-        </div>
-        <BlockOverlay
-          iframeRef={iframeRef}
-          enabled={isEdit && !versionPreview}
-          canvasMode={layoutMode === "canvas"}
-          blockFilter={blockFilter}
-          onStatus={setStatus}
-          onHtmlChange={commitLiveEditorHtml}
-        />
-      </div>
-      <AssistantWidget
-        plan={demoPlan}
-        avoidOverlay={Boolean(currentAiApproval)}
-        onAction={view === "editor" ? handleAssistantEditorAction : undefined}
-        context={{
-          surface: "editor",
-          plan: demoPlan,
-          workspace: "Editor",
-          projectName: currentProject?.name || "",
-          projectUrl: loadedUrl || currentProject?.url || "",
-          platform: currentPlatform,
-          exportMode,
-          selectedBlock: selectedStructureItem?.displayLabel || null,
-          warnings: exportWarnings.map((warning) => shortenText(warning.message, 72)),
-        }}
-        onUsage={trackUsage}
-      />
-      <ToastContainer />
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
+        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
+        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
     </div>
   );
-}
+};
+

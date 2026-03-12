@@ -1811,6 +1811,7 @@ export default function ProjectDashboard({
   const [landingGenerating, setLandingGenerating] = useState(false)
   const [templateExtracting, setTemplateExtracting] = useState(false)
   const [studioRunning, setStudioRunning] = useState(false)
+  const [applyingTemplateId, setApplyingTemplateId] = useState<number | null>(null);
   const [downloadingExportId, setDownloadingExportId] = useState<number | null>(null)
   const [templateExtractFeedback, setTemplateExtractFeedback] = useState("")
   const [scanningProjectId, setScanningProjectId] = useState<number | null>(null)
