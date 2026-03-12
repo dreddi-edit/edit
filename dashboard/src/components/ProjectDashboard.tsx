@@ -1953,7 +1953,7 @@ export default function ProjectDashboard({
   const [landingGenerating, setLandingGenerating] = useState(false)
   const [templateExtracting, setTemplateExtracting] = useState(false)
   const [studioRunning, setStudioRunning] = useState(false)
-  const [applyingTemplateId, setApplyingTemplateId] = useState<number | null>(null);
+  const [, setApplyingTemplateId] = useState<number | null>(null);
   const [downloadingExportId, setDownloadingExportId] = useState<number | null>(null)
   const [templateExtractFeedback, setTemplateExtractFeedback] = useState("")
   const [scanningProjectId, setScanningProjectId] = useState<number | null>(null)
@@ -2822,7 +2822,18 @@ export default function ProjectDashboard({
     setNewUploadPages(preview.pages || [])
     setNewUploadPlatform(preview.platform || "static")
     setNewUploadName(preview.name || "")
-    setNewImportSummary(preview.summary || summarizeImportPreview(preview))
+    setNewImportSummary(
+      preview.summary ||
+        summarizeImportPreview({
+          name: preview.name || "",
+          url: preview.url || "",
+          html: preview.html || "",
+          pages: preview.pages || [],
+          platform: preview.platform || "static",
+          summary: preview.summary,
+          analysis: preview.analysis,
+        })
+    )
     setNewImportAnalysis(preview.analysis || null)
     if (!newName.trim() && preview.name) setNewName(preview.name)
     if (preview.url) setNewUrl(preview.url)

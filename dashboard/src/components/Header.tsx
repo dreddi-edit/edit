@@ -1,7 +1,7 @@
 import React from 'react';
 
 interface HeaderProps {
-  user: any;
+  user: { email?: string } | null;
   onLogout: () => void;
 }
 

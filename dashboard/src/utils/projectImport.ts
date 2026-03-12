@@ -20,6 +20,10 @@ export type AutoImportPayload =
       summary?: string
     }
 
+type DataTransferItemWithEntry = DataTransferItem & {
+  webkitGetAsEntry?: () => FileSystemEntry | null
+}
+
 const TEXT_EXTENSIONS = new Set([".html", ".htm", ".svg", ".md", ".markdown", ".txt", ".php", ".liquid", ".twig", ".njk", ".nunjucks", ".hbs", ".handlebars", ".mustache", ".ejs", ".erb", ".aspx", ".jsp"])
 const BRIEF_EXTENSIONS = new Set([".pdf", ".docx"])
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif"])
@@ -27,7 +31,7 @@ const ASSET_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".av
 const FIGMA_HINT_PATTERN = /(figma|frame|desktop|mobile|tablet|artboard|screen|variant)/i
 
 function extensionOf(name: string) {
-  const match = String(name || "").toLowerCase().match(/(\.[^.\/]+)$/)
+  const match = String(name || "").toLowerCase().match(/(\.[^./]+)$/)
   return match?.[1] || ""
 }
 
@@ -173,18 +177,20 @@ export async function buildAutoImportPayload(items: ImportUploadItem[]): Promise
   }
 }
 
-async function readDirectoryEntry(entry: any, prefix = ""): Promise<ImportUploadItem[]> {
+async function readDirectoryEntry(entry: FileSystemEntry | null, prefix = ""): Promise<ImportUploadItem[]> {
   if (!entry) return []
   if (entry.isFile) {
-    const file = await new Promise<File>((resolve, reject) => entry.file(resolve, reject))
+    const fileEntry = entry as FileSystemFileEntry
+    const file = await new Promise<File>((resolve, reject) => fileEntry.file(resolve, reject))
     return [{ file, relativePath: normalizeEntryName(prefix || entry.fullPath || file.name) }]
   }
   if (!entry.isDirectory) return []
-  const reader = entry.createReader()
-  const children: any[] = await new Promise((resolve, reject) => {
-    const collected: any[] = []
+  const directoryEntry = entry as FileSystemDirectoryEntry
+  const reader = directoryEntry.createReader()
+  const children: FileSystemEntry[] = await new Promise((resolve, reject) => {
+    const collected: FileSystemEntry[] = []
     const readNext = () => {
-      reader.readEntries((entries: any[]) => {
+      reader.readEntries((entries: FileSystemEntry[]) => {
         if (!entries.length) {
           resolve(collected)
           return
@@ -202,8 +208,11 @@ async function readDirectoryEntry(entry: any, prefix = ""): Promise<ImportUpload
 export async function collectDroppedUploadItems(dataTransfer: DataTransfer): Promise<ImportUploadItem[]> {
   const items = Array.from(dataTransfer.items || [])
   const entryItems = items
-    .map((item) => ((item as any).webkitGetAsEntry ? (item as any).webkitGetAsEntry() : null))
-    .filter(Boolean)
+    .map((item) => {
+      const withEntry = item as DataTransferItemWithEntry
+      return withEntry.webkitGetAsEntry ? withEntry.webkitGetAsEntry() : null
+    })
+    .filter((entry): entry is FileSystemEntry => Boolean(entry))
   if (entryItems.length) {
     const nested = await Promise.all(entryItems.map((entry) => readDirectoryEntry(entry, entry.fullPath || "")))
     const results = nested.flat().filter((item) => item?.file)
@@ -212,7 +221,7 @@ export async function collectDroppedUploadItems(dataTransfer: DataTransfer): Pro
   return Array.from(dataTransfer.files || []).map((file) => ({ file }))
 }
 
-export function summarizeImportPreview(preview: ProjectImportPreview) {
+export function summarizeImportPreview(preview: Partial<ProjectImportPreview>) {
   if (preview.analysis?.overview) return preview.analysis.overview
   const pageCount = Array.isArray(preview.pages) ? preview.pages.length : 0
   const pageLabel = `${pageCount} page${pageCount === 1 ? "" : "s"}`

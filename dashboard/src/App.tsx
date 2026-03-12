@@ -1,4 +1,4 @@
-import { readSavedTheme, DEFAULT_CHROME_BACKGROUND, DEFAULT_CHROME_BORDER, VIEWPORT_PRESETS, EXPORT_MODE_OPTIONS, WORKFLOW_STAGE_OPTIONS, PROJECT_VERSION_SOURCE_LABELS, DEFAULT_GLOBAL_STYLE_OVERRIDES, BLOCK_FILTER_OPTIONS, EDIT_RAIL_EXPANDED_WIDTH, EDIT_RAIL_COLLAPSED_WIDTH, titleCaseFallback, formatEditorDateTime, pickEditorChromeFromDocument, getDownloadFilename, collectProjectAssets, mergeAssetLibraries, collectCssVariables, applyGlobalStylesToHtml, applyTranslationOverridesToHtml, getLanguageVariantEffectiveHtml, buildLocalAudit, buildDiffPreview } from "./editorHelpers";
+import { readSavedTheme, DEFAULT_CHROME_BACKGROUND, DEFAULT_CHROME_BORDER, VIEWPORT_PRESETS, EXPORT_MODE_OPTIONS, WORKFLOW_STAGE_OPTIONS, PROJECT_VERSION_SOURCE_LABELS, DEFAULT_GLOBAL_STYLE_OVERRIDES, BLOCK_FILTER_OPTIONS, EDIT_RAIL_EXPANDED_WIDTH, EDIT_RAIL_COLLAPSED_WIDTH, titleCaseFallback, formatEditorDateTime, pickEditorChromeFromDocument, getDownloadFilename, collectProjectAssets, mergeAssetLibraries, collectCssVariables, applyGlobalStylesToHtml, applyTranslationOverridesToHtml, getLanguageVariantEffectiveHtml, buildLocalAudit, buildDiffPreview, readFileAsDataUrl, buildTranslationSegmentsWithOverrides } from "./editorHelpers";
 import { useAdmin } from "./hooks/useAdmin";
 import { apiMe, type User } from "./api/auth"
 import { apiGetPlan } from "./api/credits"
@@ -1287,7 +1287,8 @@ const autoSave = async (html: string) => {
   const resetLanguageVariantFromBase = async () => {
     if (!currentProject?.id || !activePageId || activeLanguageVariant === "base") return
     const activePage = projectPages.find((page) => page.id === activePageId)
-    if (!activePage?.html?.trim()) {
+    const baseHtml = String(activePage?.html || "")
+    if (!baseHtml.trim()) {
       toast.warning("Base page is empty, so there is nothing to restore")
       return
     }
@@ -1299,7 +1300,7 @@ const autoSave = async (html: string) => {
             languageVariants: {
               ...(page.languageVariants || {}),
               [activeLanguageVariant]: {
-                html: activePage.html,
+                html: baseHtml,
                 updatedAt: nowIso,
                 detectedSourceLanguage: "",
                 translatedCount: 0,
@@ -1309,7 +1310,7 @@ const autoSave = async (html: string) => {
           }
         : page
     )
-    await persistProjectPagesState(nextPages, activePage.html)
+    await persistProjectPagesState(nextPages, baseHtml)
     setTranslationInfo({
       targetLanguage: activeLanguageVariant,
       detectedSourceLanguage: "",
@@ -1319,8 +1320,8 @@ const autoSave = async (html: string) => {
     setTranslationOverrideDrafts({})
     setTranslationAppliedOverrides({})
     setActiveTranslationSegmentId(null)
-    applyEditorHtml(activePage.html, { resetHistory: true })
-    renderToIframe(activePage.html)
+    applyEditorHtml(baseHtml, { resetHistory: true })
+    renderToIframe(baseHtml)
     toast.success(`Reset ${activeLanguageVariant.toUpperCase()} to the base page`)
   }
 
@@ -1340,7 +1341,8 @@ const autoSave = async (html: string) => {
         updatedAt: new Date().toISOString(),
       }
     })
-    await persistProjectPagesState(nextPages, activePage.html)
+    const baseHtml = String(activePage.html || "")
+    await persistProjectPagesState(nextPages, baseHtml)
     setActiveLanguageVariant("base")
     setTranslationInfo(null)
     setTranslationReview(null)
@@ -1348,8 +1350,8 @@ const autoSave = async (html: string) => {
     setTranslationAppliedOverrides({})
     setActiveTranslationSegmentId(null)
     setShowTranslationSplitView(false)
-    applyEditorHtml(activePage.html, { resetHistory: true })
-    renderToIframe(activePage.html)
+    applyEditorHtml(baseHtml, { resetHistory: true })
+    renderToIframe(baseHtml)
     toast.success("Language variant deleted")
   }
 
@@ -2575,16 +2577,6 @@ const autoSave = async (html: string) => {
     return `${asset.label} ${asset.type} ${asset.url}`.toLowerCase().includes(query)
   })
   const selectedFontAsset = assetLibrary.find((asset) => asset.id === selectedFontAssetId) || null
-  const cssVariableNames = Object.keys(cssVariableOverrides)
-  const blockFamilyChips = [
-    { label: currentPlatformMeta.label, tint: currentPlatformMeta.accent, background: currentPlatformMeta.background, value: "all" as BlockFilter },
-    { label: "HTML", tint: "rgba(148,163,184,0.92)", background: "rgba(148,163,184,0.12)", value: "content" as BlockFilter },
-    { label: "Layout", tint: "rgba(249,115,22,0.92)", background: "rgba(249,115,22,0.12)", value: "container" as BlockFilter },
-    { label: "Media", tint: "rgba(45,212,191,0.92)", background: "rgba(45,212,191,0.12)", value: "image" as BlockFilter },
-    { label: "Form", tint: "rgba(56,189,248,0.92)", background: "rgba(56,189,248,0.12)", value: "form" as BlockFilter },
-    { label: "CTA", tint: "rgba(168,85,247,0.92)", background: "rgba(168,85,247,0.12)", value: "button" as BlockFilter },
-  ]
-  const selectedExportMode = EXPORT_MODE_OPTIONS.find(option => option.value === exportMode) || EXPORT_MODE_OPTIONS[0]
   const selectedPublishTargetInfo = publishTargets.find((target) => target.id === publishDraft.target) || null
   const recentPublishHistory = publishHistory.slice(0, 4)
   const selectedTranslationLanguage =
@@ -2716,7 +2708,7 @@ useEffect(() => {
         onLogout={() => { setAuthUser(null); setView("auth") }}
       />
 
-      {view === "dashboard" && (authUser?.email === "edgar@mailbaumann.de" || authUser?.role === "admin") && (
+      {view === "dashboard" && authUser?.email === "edgar@mailbaumann.de" && (
         <button
           onClick={() => setView("admin")}
           style={{
@@ -2801,7 +2793,18 @@ useEffect(() => {
               <input placeholder={t("credits (€)")} type="number" value={newUser.credits} onChange={e => setNewUser(p => ({...p,credits:Number(e.target.value)}))} style={{ display:"block", width:"100%", marginBottom:16, padding:"9px 12px", borderRadius:8, border:"1px solid #1e293b", background:"#060b14", color:"white", fontSize:13, boxSizing:"border-box" }} />
               <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
                 <button onClick={() => setShowCreateUser(false)} style={{ padding:"8px 16px", borderRadius:8, border:"1px solid #1e293b", background:"transparent", color:"#94a3b8", cursor:"pointer", fontSize:13 }}>Cancel</button>
-                <button onClick={createUser} style={{ padding:"8px 16px", borderRadius:8, border:"none", background:"#6366f1", color:"white", cursor:"pointer", fontSize:13, fontWeight:700 }}>Create</button>
+                <button
+                  onClick={async () => {
+                    const created = await createUser(newUser)
+                    if (created) {
+                      setShowCreateUser(false)
+                      setNewUser({ email: "", password: "", name: "", credits: 0 })
+                    }
+                  }}
+                  style={{ padding:"8px 16px", borderRadius:8, border:"none", background:"#6366f1", color:"white", cursor:"pointer", fontSize:13, fontWeight:700 }}
+                >
+                  Create
+                </button>
               </div>
             </div>
           </div>
@@ -3058,7 +3061,7 @@ useEffect(() => {
             <button
               type="button"
               className={`editor-btn editor-btn--export ${exportReadiness === "guarded" ? "is-guarded" : ""}`}
-              onClick={handleExport}
+              onClick={() => { void handleExport() }}
               disabled={exporting || Boolean(versionPreview)}
               title="Export"
               aria-busy={exporting ? "true" : undefined}

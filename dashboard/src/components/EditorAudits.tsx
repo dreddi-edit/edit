@@ -1,9 +1,14 @@
 import React from 'react';
 
 interface EditorAuditsProps {
-  runEditorAudit: (type: any) => void;
+  runEditorAudit: (type: "seo" | "cro" | "accessibility") => void;
   runningAudit: string | null;
-  editorAudit: any;
+  editorAudit: {
+    headline: string;
+    summary: string;
+    items: string[];
+    scoreBadges?: string[];
+  } | null;
 }
 
 export const EditorAudits: React.FC<EditorAuditsProps> = ({ runEditorAudit, runningAudit, editorAudit }) => {

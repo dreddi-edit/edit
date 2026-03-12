@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { translations } from "./translations"
 import { translateTexts } from "../utils/googleApis"
 import { TOP_TRANSLATION_LANGUAGES } from "../utils/htmlTranslation"
@@ -37,7 +37,9 @@ function getCachedRuntimePack(lang: Language): Record<string, string> {
 function setCachedRuntimePack(lang: Language, value: Record<string, string>) {
   try {
     localStorage.setItem(`${RUNTIME_CACHE_PREFIX}${lang}`, JSON.stringify(value))
-  } catch {}
+  } catch {
+    // Ignore storage failures (quota/private mode).
+  }
 }
 
 async function ensureLanguagePack(lang: Language) {
@@ -89,7 +91,10 @@ export function useRuntimeTranslations(
   fallback: (key: string) => string = (key) => key,
 ) {
   const [runtimePack, setRuntimePack] = useState<Record<string, string>>(() => getCachedRuntimePack(lang))
-  const normalizedTexts = Array.from(new Set(texts.map(text => String(text || "").trim()).filter(Boolean)))
+  const normalizedTexts = useMemo(
+    () => Array.from(new Set(texts.map(text => String(text || "").trim()).filter(Boolean))),
+    [texts],
+  )
   const textSignature = normalizedTexts.join("\u0000")
 
   useEffect(() => {
@@ -115,12 +120,14 @@ export function useRuntimeTranslations(
         setCachedRuntimePack(lang, merged)
         setRuntimePack(merged)
       })
-      .catch(() => {})
+      .catch(() => {
+        // Ignore runtime translation failures and keep fallback strings.
+      })
 
     return () => {
       cancelled = true
     }
-  }, [lang, textSignature])
+  }, [lang, normalizedTexts, textSignature])
 
   return (text: string) => {
     const normalized = String(text || "")

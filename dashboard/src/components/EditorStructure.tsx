@@ -1,7 +1,14 @@
 import React from 'react';
 
 interface EditorStructureProps {
-  structureItems: any[];
+  structureItems: Array<{
+    id: string;
+    rootId: string;
+    displayLabel: string;
+    kind: string;
+    childCount: number;
+    isSelected: boolean;
+  }>;
   moveStructureItem: (id: string, delta: number) => void;
   titleCaseFallback: (text: string) => string;
 }

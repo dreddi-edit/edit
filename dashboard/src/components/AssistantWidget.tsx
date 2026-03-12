@@ -102,7 +102,7 @@ export default function AssistantWidget({
       }),
     [context.projectId, context.projectName, context.projectUrl, context.surface, context.workspace],
   )
-  const welcomeMessage = useMemo(() => buildWelcomeMessage(context), [contextResetKey])
+  const welcomeMessage = useMemo(() => buildWelcomeMessage(context), [context])
   const messageStorageKey = useMemo(
     () => `${ASSISTANT_MESSAGE_STORAGE_PREFIX}:${contextResetKey}`,
     [contextResetKey],
@@ -284,7 +284,11 @@ export default function AssistantWidget({
                     const cleared = [buildWelcomeMessage(context)]
                     setMessages(cleared)
                     if (typeof window !== "undefined") {
-                      try { window.sessionStorage.removeItem(messageStorageKey) } catch {}
+                      try {
+                        window.sessionStorage.removeItem(messageStorageKey)
+                      } catch {
+                        // Ignore storage clear failures (private mode / quota).
+                      }
                     }
                   }}
                   title={t("Clear chat")}

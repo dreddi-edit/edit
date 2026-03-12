@@ -1,12 +1,12 @@
 import React from 'react';
 
 interface EditorOverlayProps {
-  blockFilter: any;
-  setBlockFilter: (val: any) => void;
-  BLOCK_FILTER_OPTIONS: any[];
-  handleAiRescan: (type: any) => void;
+  blockFilter: string;
+  setBlockFilter: (val: string) => void;
+  BLOCK_FILTER_OPTIONS: Array<{ value: string; label: string }>;
+  handleAiRescan: (type: "block" | "page") => void;
   aiScanLoading: boolean;
-  versionPreview: any;
+  versionPreview: unknown;
 }
 
 export const EditorOverlay: React.FC<EditorOverlayProps> = ({
@@ -27,7 +27,7 @@ export const EditorOverlay: React.FC<EditorOverlayProps> = ({
         title="Visible blocks"
         aria-label="Visible block filter"
       >
-        {BLOCK_FILTER_OPTIONS.map((option: any) => (
+        {BLOCK_FILTER_OPTIONS.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
           </option>

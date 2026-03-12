@@ -143,12 +143,13 @@ function buildElementSelector(element: Element | null) {
   let current: Element | null = element;
   while (current && current.tagName && current.tagName.toLowerCase() !== "html") {
     const tag = current.tagName.toLowerCase();
-    const parent = current.parentElement;
+    const parent: Element | null = current.parentElement;
     if (!parent || tag === "body") {
       parts.unshift(tag);
       break;
     }
-    const siblings = Array.from(parent.children).filter((child) => child.tagName === current?.tagName);
+    const currentTagName = current.tagName;
+    const siblings = (Array.from(parent.children) as Element[]).filter((child) => child.tagName === currentTagName);
     const index = siblings.indexOf(current) + 1;
     parts.unshift(`${tag}:nth-of-type(${Math.max(1, index)})`);
     current = parent;

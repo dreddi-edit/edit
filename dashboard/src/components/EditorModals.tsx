@@ -1,7 +1,12 @@
 import React from 'react';
 
 interface EditorModalsProps {
-  aiDiff: any;
+  aiDiff: {
+    scope: "block" | "page";
+    beforeHtml?: string;
+    beforeDocumentHtml?: string;
+    afterHtml: string;
+  } | null;
   theme: string;
   acceptAiDiff: () => void;
   rejectAiDiff: () => void;
@@ -26,7 +31,7 @@ export const EditorModals: React.FC<EditorModalsProps> = ({
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div style={{ borderRadius: 14, border: theme === "light" ? "1px solid rgba(148,163,184,0.22)" : "1px solid rgba(148,163,184,0.16)", padding: 12, background: theme === "light" ? "rgba(248,250,252,0.96)" : "rgba(255,255,255,0.03)" }}>
               <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 8, color: theme === "light" ? "#334155" : "#cbd5e1" }}>Before</div>
-              <pre style={{ whiteSpace: "pre-wrap", margin: 0, fontSize: 12, lineHeight: 1.5, color: theme === "light" ? "#0f172a" : "#f8fafc" }}>{buildDiffPreview(aiDiff.beforeHtml || aiDiff.beforeDocumentHtml)}</pre>
+              <pre style={{ whiteSpace: "pre-wrap", margin: 0, fontSize: 12, lineHeight: 1.5, color: theme === "light" ? "#0f172a" : "#f8fafc" }}>{buildDiffPreview(aiDiff.beforeHtml || aiDiff.beforeDocumentHtml || "")}</pre>
             </div>
             <div style={{ borderRadius: 14, border: "1px solid rgba(34,197,94,0.24)", padding: 12, background: theme === "light" ? "rgba(240,253,244,0.96)" : "rgba(34,197,94,0.08)" }}>
               <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 8, color: theme === "light" ? "#166534" : "#86efac" }}>After</div>

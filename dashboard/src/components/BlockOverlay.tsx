@@ -1600,7 +1600,7 @@ useEffect(() => {
   const [imageGenerating, setImageGenerating] = useState(false);
   const [showRawHtml, setShowRawHtml] = useState(false);
   const [rawHtmlValue, setRawHtmlValue] = useState("");
-  const [isButtonSelected, setIsButtonSelected] = useState(false);
+  const [, setIsButtonSelected] = useState(false);
   // Heading + List Panel
   const [panelType, setPanelType] = useState<PanelType>("generic");
   const [editHeading, setEditHeading] = useState("");

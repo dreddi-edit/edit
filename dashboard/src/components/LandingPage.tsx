@@ -116,6 +116,31 @@ const FEATURES = [
   },
 ]
 
+function FeatureCard({
+  feature,
+  index,
+}: {
+  feature: (typeof FEATURES)[number]
+  index: number
+}) {
+  const { ref, visible } = useVisible()
+  return (
+    <div
+      ref={ref}
+      className={`lp-feat ${visible ? "lp-feat--visible" : ""}`}
+      style={{ transitionDelay: `${(index % 3) * 80}ms` }}
+    >
+      <div className="lp-feat__icon">{feature.icon}</div>
+      <div className="lp-feat__tag">{feature.tag}</div>
+      <div className="lp-feat__title">{feature.title}</div>
+      <div className="lp-feat__body">{feature.body}</div>
+      <ul className="lp-feat__list">
+        {feature.items.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}
+      </ul>
+    </div>
+  )
+}
+
 const COMPARE_ROWS = [
   { label: "Import existing site", rf: true, wf: false, ai: false, manual: false },
   { label: "AI with project context", rf: true, wf: false, ai: true, manual: false },
@@ -328,8 +353,6 @@ export default function LandingPage({ onEnter }: LandingPageProps) {
     setMenuOpen(false)
   }
 
-  const featureRefs = FEATURES.map(() => useVisible())
-
   return (
     <div className="lp">
       <nav className="lp-nav">
@@ -431,25 +454,9 @@ export default function LandingPage({ onEnter }: LandingPageProps) {
             Nothing they don't.
           </h2>
           <div className="lp-features__grid">
-            {FEATURES.map((f, i) => {
-              const { ref, visible } = featureRefs[i]
-              return (
-                <div
-                  key={i}
-                  ref={ref}
-                  className={`lp-feat ${visible ? "lp-feat--visible" : ""}`}
-                  style={{ transitionDelay: `${(i % 3) * 80}ms` }}
-                >
-                  <div className="lp-feat__icon">{f.icon}</div>
-                  <div className="lp-feat__tag">{f.tag}</div>
-                  <div className="lp-feat__title">{f.title}</div>
-                  <div className="lp-feat__body">{f.body}</div>
-                  <ul className="lp-feat__list">
-                    {f.items.map((item, j) => <li key={j}>{item}</li>)}
-                  </ul>
-                </div>
-              )
-            })}
+            {FEATURES.map((feature, index) => (
+              <FeatureCard key={index} feature={feature} index={index} />
+            ))}
           </div>
         </div>
       </section>

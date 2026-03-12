@@ -1,5 +1,54 @@
-import type { ProjectAsset as AssetEntry, ProjectPage } from "./api/projects";
-import { resolveThemePreference } from "./utils/theme";
+import type {
+  ProjectAsset as AssetEntry,
+  ProjectLanguageVariant,
+  ProjectPage,
+  ProjectVersionSource,
+  WorkflowStage,
+} from "./api/projects"
+import type { WebsiteTranslationSegment } from "./utils/htmlTranslation"
+import { resolveThemePreference } from "./utils/theme"
+
+type BlockFilter =
+  | "all"
+  | "button"
+  | "heading"
+  | "image"
+  | "form"
+  | "navigation"
+  | "container"
+  | "list"
+  | "content"
+
+type ExportMode =
+  | "wp-placeholder"
+  | "html-clean"
+  | "html-raw"
+  | "shopify-section"
+  | "wp-theme"
+  | "wp-block"
+  | "web-component"
+  | "react-component"
+  | "webflow-json"
+  | "email-newsletter"
+  | "markdown-content"
+  | "pdf-print"
+
+type ViewportPreset = "desktop" | "tablet" | "mobile"
+
+type GlobalStyleOverrides = {
+  fontFamily: string
+  textColor: string
+  backgroundColor: string
+  accentColor: string
+}
+
+type EditorAudit = {
+  source: "seo" | "cro" | "accessibility"
+  headline: string
+  summary: string
+  items: string[]
+  scoreBadges?: string[]
+}
 
 export const BLOCK_FILTER_OPTIONS: Array<{ value: BlockFilter; label: string }> = [
   { value: "all", label: "All blocks" },
@@ -313,7 +362,9 @@ export function applyTranslationOverrideToHtml(
   if (segment.kind === "attr" && segment.attr) {
     element.setAttribute(segment.attr, nextValue)
   } else {
-    const textNodes = Array.from(element.childNodes).filter((node) => node.nodeType === Node.TEXT_NODE) as Text[]
+    const textNodes = Array.from(element.childNodes).filter(
+      (node): node is Text => node.nodeType === Node.TEXT_NODE,
+    )
     const targetNode = textNodes[Math.max(0, Number(segment.textIndex || 0))]
     if (!targetNode) return source
     const leading = targetNode.nodeValue?.match(/^\s*/)?.[0] || ""

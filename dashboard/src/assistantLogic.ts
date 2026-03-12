@@ -7,8 +7,11 @@ export const calculateCost = (model: string, inputTokens: number, outputTokens: 
   return inputCost + outputCost;
 };
 
-export const processAIResponse = (response: any) => {
+export const processAIResponse = (response: unknown) => {
   // Logic for cleaning and parsing AI code blocks
   if (!response) return null;
-  return response.choices?.[0]?.message?.content || "";
+  const candidate = response as {
+    choices?: Array<{ message?: { content?: string } }>
+  }
+  return candidate.choices?.[0]?.message?.content || "";
 };

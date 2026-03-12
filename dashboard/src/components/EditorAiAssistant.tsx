@@ -7,12 +7,12 @@ interface EditorAiAssistantProps {
   setLeftAiTone: (val: string) => void;
   leftAiPrompt: string;
   setLeftAiPrompt: (val: string) => void;
-  AI_MODELS: any[];
+  AI_MODELS: Array<{ value: string; label: string }>;
   leftAiRunning: boolean;
   batchAiRunning: boolean;
   runLeftAiPrompt: () => void;
   runBatchAiAcrossPages: () => void;
-  versionPreview: any;
+  versionPreview: unknown;
 }
 
 export const EditorAiAssistant: React.FC<EditorAiAssistantProps> = ({

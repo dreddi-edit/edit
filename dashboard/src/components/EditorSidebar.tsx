@@ -291,7 +291,10 @@ export const EditorSidebar: React.FC<SidebarProps> = (props) => {
   const visibleAssets = props.filteredAssetLibrary.slice(0, 10);
   const [translationSearch, setTranslationSearch] = useState("");
   const [translationFilter, setTranslationFilter] = useState<TranslationFilter>("all");
-  const translationSegments = props.translationReview?.segments || [];
+  const translationSegments = useMemo(
+    () => props.translationReview?.segments ?? [],
+    [props.translationReview]
+  );
   const translationReviewEntries = useMemo(
     () =>
       translationSegments.map((segment) => {

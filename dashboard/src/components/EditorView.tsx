@@ -1,12 +1,11 @@
 import React from 'react';
 
 interface EditorViewProps {
-  currentProject: any;
-  loadedUrl: string;
+  currentProject: { name?: string } | null;
   children?: React.ReactNode;
 }
 
-export const EditorView: React.FC<EditorViewProps> = ({ currentProject, loadedUrl, children }) => {
+export const EditorView: React.FC<EditorViewProps> = ({ currentProject, children }) => {
   return (
     <div className="editor-main-layout">
       <div className="editor-sidebar">

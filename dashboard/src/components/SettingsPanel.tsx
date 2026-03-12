@@ -172,11 +172,9 @@ export default function SettingsPanel({
   const [languageSaving, setLanguageSaving] = useState(false)
   const [modelBrowserOpen, setModelBrowserOpen] = useState(true)
   const [expandedModelCategories, setExpandedModelCategories] = useState<Record<ModelCategoryId, boolean>>({
-    chat: true,
-    image: false,
-    video: false,
-    code: false,
-    extras: false,
+    creative: true,
+    coding: false,
+    fast: false,
   })
 
   const [myKeys, setMyKeys] = useState<ApiKey[]>([])
