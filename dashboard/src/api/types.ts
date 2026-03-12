@@ -34,8 +34,29 @@ export type StripePackage = {
   description: string
 }
 
+export type StripeSubscriptionPlan = StripePackage & {
+  project_limit: number
+}
+
+export type UserInvoice = {
+  id: number
+  stripe_invoice_id?: string | null
+  stripe_charge_id?: string | null
+  amount_eur?: number | null
+  status?: string | null
+  receipt_url?: string | null
+  refunded?: number
+  created_at: string
+}
+
 /** Stripe packages list */
-export type StripePackagesRes = { ok: true; packages: StripePackage[] } | ApiError
+export type StripePackagesRes = {
+  ok: true
+  packages: StripePackage[]
+  subscription_plans?: StripeSubscriptionPlan[]
+} | ApiError
+
+export type StripeInvoicesRes = { ok: true; invoices: UserInvoice[] } | ApiError
 
 /** Stripe checkout redirect */
 export type StripeCheckoutRes = { ok: true; url: string } | ApiError

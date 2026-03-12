@@ -8,6 +8,8 @@ import {
   prepareWordPressThemeFiles,
   prepareWordPressBlockFiles,
   prepareWebComponentFile,
+  prepareReactComponentFile,
+  prepareWebflowJsonFile,
   prepareEmailHtml,
   preparePlainTextEmail,
   prepareMarkdownFile,
@@ -91,6 +93,40 @@ test("delivery artifact emits manifest and warnings for guarded cases", () => {
   assert.ok(artifact.readiness === "guarded");
 });
 
+test("delivery artifact emits canonical and hreflang metadata for multilingual bundles", () => {
+  const artifact = buildDeliveryArtifact({
+    html: `<!DOCTYPE html><html><head><title>Localized</title></head><body><main><h1>Hello</h1></main></body></html>`,
+    url: "https://example.com",
+    platform: "static",
+    mode: "html-clean",
+    canonicalUrl: "index.html",
+    language: "de",
+    alternates: [
+      { hreflang: "x-default", href: "index.html" },
+      { hreflang: "de", href: "variants/de/index.html" },
+    ],
+  });
+
+  assert.equal(artifact.manifest.language, "de");
+  assert.equal(artifact.manifest.source.canonicalUrl, "index.html");
+  assert.equal(artifact.manifest.alternates.length, 2);
+  assert.match(artifact.html, /rel="canonical" href="index\.html"/);
+  assert.match(artifact.html, /rel="alternate" hreflang="de" href="variants\/de\/index\.html"/);
+});
+
+test("delivery artifact rewrites seo, asset, and internal link output for handoff", () => {
+  const artifact = buildDeliveryArtifact({
+    html: `<!DOCTYPE html><html><head><title>Launch Page</title><meta name="description" content="Ship faster"></head><body><a href="https://agency.example.com/about?ref=nav">About</a><img src="/asset?url=https%3A%2F%2Fcdn.example.com%2Fhero.png"></body></html>`,
+    url: "https://agency.example.com",
+    platform: "static",
+    mode: "html-clean",
+  });
+
+  assert.match(artifact.html, /<meta name="description" content="Ship faster">/);
+  assert.match(artifact.html, /href="\/about\?ref=nav"/);
+  assert.match(artifact.html, /src="https:\/\/cdn\.example\.com\/hero\.png"/);
+});
+
 test("delivery validation warns on unresolved assets and embeds", () => {
   const validation = validateDeliveryArtifact({
     html: `<!DOCTYPE html><html><body><img src="hero.png"><iframe src="https://example.com"></iframe></body></html>`,
@@ -135,6 +171,16 @@ test("format generators produce portable export artifacts", async () => {
   assert.equal(jsFile.name, "embed.js");
   assert.equal(demoFile.name, "demo.html");
   assert.match(readmeFile.content, /site-editor-launch-site/);
+
+  const reactFiles = prepareReactComponentFile({ html, project });
+  assert.ok(reactFiles.some((file) => file.name === "LaunchSite.jsx"));
+  assert.ok(reactFiles.some((file) => file.name === "launch-site.css"));
+  assert.ok(reactFiles.some((file) => file.name === "demo.jsx"));
+
+  const webflow = prepareWebflowJsonFile({ html, project });
+  assert.equal(webflow.jsonFile.name, "launch-site.webflow.json");
+  assert.match(webflow.readmeFile.content, /Webflow Import/);
+  assert.match(webflow.jsonFile.content, /"type": "page"/);
 
   const emailHtml = await prepareEmailHtml(`${html}<script>alert(1)</script>`);
   assert.doesNotMatch(emailHtml, /<script\b/i);

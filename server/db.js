@@ -22,6 +22,15 @@ db.exec(`
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     name TEXT,
+    avatar_url TEXT,
+    email_verified INTEGER NOT NULL DEFAULT 0,
+    totp_secret TEXT,
+    totp_enabled INTEGER NOT NULL DEFAULT 0,
+    stripe_customer_id TEXT,
+    stripe_subscription_id TEXT,
+    plan_id TEXT NOT NULL DEFAULT 'basis',
+    plan_status TEXT NOT NULL DEFAULT 'active',
+    notification_prefs TEXT NOT NULL DEFAULT '{"email_updates":true,"team_mentions":true}',
     created_at TEXT DEFAULT (datetime('now'))
   );
 
@@ -33,6 +42,7 @@ db.exec(`
     url TEXT,
     html TEXT,
     pages_json TEXT DEFAULT '[]',
+    asset_library_json TEXT DEFAULT '[]',
     platform TEXT DEFAULT 'unknown',
     workflow_status TEXT DEFAULT 'draft',
     workflow_stage TEXT DEFAULT 'draft',
@@ -42,6 +52,10 @@ db.exec(`
     last_export_at TEXT,
     last_export_mode TEXT,
     last_export_warning_count INTEGER DEFAULT 0,
+    brand_context TEXT DEFAULT '{}',
+    share_token TEXT UNIQUE,
+    approval_status TEXT NOT NULL DEFAULT 'draft',
+    status TEXT NOT NULL DEFAULT 'active',
     approved_at TEXT,
     shipped_at TEXT,
     thumbnail TEXT,
@@ -202,6 +216,9 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL,
     token TEXT UNIQUE NOT NULL,
+    html_snapshot TEXT,
+    page_id TEXT,
+    language_variant TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (project_id) REFERENCES projects(id)
   );
@@ -214,6 +231,9 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id INTEGER NOT NULL,
     html TEXT NOT NULL,
+    label TEXT,
+    source TEXT DEFAULT 'autosave',
+    page_id TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (project_id) REFERENCES projects(id)
   );
@@ -259,6 +279,53 @@ db.exec(`
     FOREIGN KEY (user_id) REFERENCES users(id)
   );
   CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets(token);
+
+  CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    token TEXT UNIQUE NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token ON refresh_tokens(token);
+  CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
+
+  CREATE TABLE IF NOT EXISTS email_verifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    new_email TEXT NOT NULL,
+    token TEXT UNIQUE NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_email_verifications_token ON email_verifications(token);
+
+  CREATE TABLE IF NOT EXISTS totp_pending_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL UNIQUE,
+    session_token TEXT UNIQUE NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_totp_pending_token ON totp_pending_sessions(session_token);
+
+  CREATE TABLE IF NOT EXISTS user_invoices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    stripe_invoice_id TEXT UNIQUE,
+    stripe_charge_id TEXT,
+    amount_eur REAL,
+    status TEXT,
+    receipt_url TEXT,
+    refunded INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_invoices_user ON user_invoices(user_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_user_invoices_stripe ON user_invoices(stripe_invoice_id);
 
   CREATE TABLE IF NOT EXISTS schema_migrations (
     id TEXT PRIMARY KEY,
@@ -332,6 +399,15 @@ execMigrationSql(`ALTER TABLE projects ADD COLUMN last_export_warning_count INTE
 runMigration("20260311_projects_pages_json", () => {
   execMigrationSql(`ALTER TABLE projects ADD COLUMN pages_json TEXT DEFAULT '[]'`)
   execMigrationSql(`UPDATE projects SET pages_json = COALESCE(pages_json, '[]')`)
+})
+runMigration("20260311_projects_asset_library_json", () => {
+  execMigrationSql(`ALTER TABLE projects ADD COLUMN asset_library_json TEXT DEFAULT '[]'`)
+  execMigrationSql(`UPDATE projects SET asset_library_json = COALESCE(asset_library_json, '[]')`)
+})
+runMigration("20260311_project_shares_snapshot", () => {
+  execMigrationSql(`ALTER TABLE project_shares ADD COLUMN html_snapshot TEXT`)
+  execMigrationSql(`ALTER TABLE project_shares ADD COLUMN page_id TEXT`)
+  execMigrationSql(`ALTER TABLE project_shares ADD COLUMN language_variant TEXT`)
 })
 runMigration("20260310_project_exports_table", () => {
   execMigrationSql(`
@@ -410,6 +486,185 @@ runMigration("20260310_deleted_archives", () => {
     );
   `)
   execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_deleted_templates_user ON deleted_templates(user_id, deleted_at)`)
+})
+runMigration("20260311_project_versions_metadata", () => {
+  execMigrationSql(`ALTER TABLE project_versions ADD COLUMN label TEXT`)
+  execMigrationSql(`ALTER TABLE project_versions ADD COLUMN source TEXT DEFAULT 'autosave'`)
+  execMigrationSql(`ALTER TABLE project_versions ADD COLUMN page_id TEXT`)
+  execMigrationSql(`UPDATE project_versions SET source = COALESCE(NULLIF(source, ''), 'autosave')`)
+})
+runMigration("20260312_publish_deployments", () => {
+  execMigrationSql(`
+    CREATE TABLE IF NOT EXISTS publish_deployments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      target TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      deploy_url TEXT,
+      preview_url TEXT,
+      error_message TEXT,
+      export_mode TEXT,
+      platform TEXT DEFAULT 'unknown',
+      manifest_json TEXT DEFAULT '{}',
+      created_at TEXT DEFAULT (datetime('now')),
+      finished_at TEXT,
+      FOREIGN KEY (project_id) REFERENCES projects(id),
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+  `)
+  execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_publish_deployments_project ON publish_deployments(project_id, created_at)`)
+  execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_publish_deployments_user ON publish_deployments(user_id, created_at)`)
+})
+runMigration("20260312_project_preview_tokens", () => {
+  execMigrationSql(`
+    CREATE TABLE IF NOT EXISTS project_preview_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
+      deployment_id INTEGER,
+      token TEXT UNIQUE NOT NULL,
+      html TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (project_id) REFERENCES projects(id)
+    );
+  `)
+  execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_preview_tokens_token ON project_preview_tokens(token)`)
+  execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_preview_tokens_project ON project_preview_tokens(project_id)`)
+})
+runMigration("20260312_project_exports_outcome", () => {
+  execMigrationSql(`ALTER TABLE project_exports ADD COLUMN outcome TEXT DEFAULT 'success'`)
+  execMigrationSql(`ALTER TABLE project_exports ADD COLUMN error_message TEXT`)
+})
+runMigration("20260313_lane2_ai_studio_runs", () => {
+  execMigrationSql(`
+    CREATE TABLE IF NOT EXISTS ai_studio_runs (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      project_id TEXT,
+      tool_name TEXT NOT NULL,
+      input_payload TEXT NOT NULL DEFAULT '{}',
+      output_result TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'completed',
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `)
+  execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_ai_studio_runs_user ON ai_studio_runs(user_id, created_at)`)
+  execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_ai_studio_runs_project ON ai_studio_runs(project_id, created_at)`)
+})
+runMigration("20260313_lane2_block_comments", () => {
+  execMigrationSql(`
+    CREATE TABLE IF NOT EXISTS block_comments (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      block_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      comment_text TEXT NOT NULL,
+      resolved INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `)
+  execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_block_comments_project ON block_comments(project_id, resolved)`)
+})
+runMigration("20260313_lane2_projects_share_approval", () => {
+  execMigrationSql(`ALTER TABLE projects ADD COLUMN share_token TEXT UNIQUE`)
+  execMigrationSql(`ALTER TABLE projects ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'draft'`)
+})
+runMigration("20260313_lane2_projects_brand_context", () => {
+  execMigrationSql(`ALTER TABLE projects ADD COLUMN brand_context TEXT DEFAULT '{}'`)
+})
+runMigration("20260313_lane2_org_member_role", () => {
+  try {
+    execMigrationSql(`ALTER TABLE org_members ADD COLUMN role TEXT NOT NULL DEFAULT 'editor'`)
+  } catch {}
+})
+runMigration("20260313_lane2_user_notification_prefs", () => {
+  execMigrationSql(`ALTER TABLE users ADD COLUMN notification_prefs TEXT NOT NULL DEFAULT '{"email_updates":true,"team_mentions":true}'`)
+})
+runMigration("20260313_lane3_auth_columns", () => {
+  execMigrationSql(`ALTER TABLE users ADD COLUMN avatar_url TEXT`)
+  execMigrationSql(`ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0`)
+  execMigrationSql(`ALTER TABLE users ADD COLUMN totp_secret TEXT`)
+  execMigrationSql(`ALTER TABLE users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0`)
+})
+runMigration("20260313_lane3_billing_columns", () => {
+  execMigrationSql(`ALTER TABLE users ADD COLUMN stripe_customer_id TEXT`)
+  execMigrationSql(`ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT`)
+  execMigrationSql(`ALTER TABLE users ADD COLUMN plan_id TEXT NOT NULL DEFAULT 'basis'`)
+  execMigrationSql(`ALTER TABLE users ADD COLUMN plan_status TEXT NOT NULL DEFAULT 'active'`)
+  execMigrationSql(`
+    UPDATE users
+    SET plan_id = COALESCE(
+      NULLIF((SELECT plan FROM user_settings WHERE user_settings.user_id = users.id), ''),
+      NULLIF(plan_id, ''),
+      'basis'
+    )
+  `)
+})
+runMigration("20260313_lane3_projects_status", () => {
+  execMigrationSql(`ALTER TABLE projects ADD COLUMN status TEXT NOT NULL DEFAULT 'active'`)
+  execMigrationSql(`UPDATE projects SET status = COALESCE(NULLIF(status, ''), 'active')`)
+})
+runMigration("20260313_lane3_refresh_tokens", () => {
+  execMigrationSql(`
+    CREATE TABLE IF NOT EXISTS refresh_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      token TEXT UNIQUE NOT NULL,
+      expires_at TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `)
+  execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token ON refresh_tokens(token)`)
+  execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)`)
+})
+runMigration("20260313_lane3_email_verifications", () => {
+  execMigrationSql(`
+    CREATE TABLE IF NOT EXISTS email_verifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      new_email TEXT NOT NULL,
+      token TEXT UNIQUE NOT NULL,
+      expires_at TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `)
+  execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_email_verifications_token ON email_verifications(token)`)
+})
+runMigration("20260313_lane3_totp_pending", () => {
+  execMigrationSql(`
+    CREATE TABLE IF NOT EXISTS totp_pending_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL UNIQUE,
+      session_token TEXT UNIQUE NOT NULL,
+      expires_at TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `)
+  execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_totp_pending_token ON totp_pending_sessions(session_token)`)
+})
+runMigration("20260313_lane3_invoices", () => {
+  execMigrationSql(`
+    CREATE TABLE IF NOT EXISTS user_invoices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      stripe_invoice_id TEXT UNIQUE,
+      stripe_charge_id TEXT,
+      amount_eur REAL,
+      status TEXT,
+      receipt_url TEXT,
+      refunded INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `)
+  execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_user_invoices_user ON user_invoices(user_id, created_at)`)
+  execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_user_invoices_stripe ON user_invoices(stripe_invoice_id)`)
 })
 
 export default db

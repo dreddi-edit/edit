@@ -1086,17 +1086,7 @@ function mergeImportAnalysisWithAi({ baseline, aiStructure, entries, textEntries
   const entryPaths = Array.isArray(entries) ? entries.map((entry) => normalizeEntryPath(entry.name)).filter(Boolean) : []
   const relativePaths = entryPaths.map((entryPath) => stripCommonRootPrefix(entryPath, baseline.analysis.rootPrefix || ""))
   const validPaths = new Set(relativePaths)
-  const singleFileMode = String(options.entryMode || "").toLowerCase() === "single-file"
-  const validPagePaths = new Set(
-    relativePaths.filter((entryPath) => {
-      const resolved = resolveAnalysisEntryPath(entryPath, baseline.analysis.rootPrefix || "")
-      if (!textEntries.has(resolved)) return false
-      const ext = path.extname(entryPath).toLowerCase()
-      if (HTML_LIKE_FILE_EXTENSIONS.has(ext)) return true
-      if (singleFileMode && (TEXT_FILE_EXTENSIONS.has(ext) || ext === ".svg")) return true
-      return false
-    }),
-  )
+  const validPagePaths = new Set(baseline.pageEntries.map((entry) => entry.entryPath))
 
   const aiPageCandidatesRaw = Array.isArray(aiStructure.pageCandidates) ? aiStructure.pageCandidates : []
   const aiPageSelections = aiPageCandidatesRaw
@@ -1122,7 +1112,23 @@ function mergeImportAnalysisWithAi({ baseline, aiStructure, entries, textEntries
     title: entry.title || entry.name,
   }))
 
-  const mergedSelections = aiPageSelections.length ? aiPageSelections : baselineSelections
+  const mergedSelectionMap = new Map(
+    baselineSelections.map((selection) => [selection.entryPath, { ...selection }]),
+  )
+  for (const selection of aiPageSelections) {
+    const existing = mergedSelectionMap.get(selection.entryPath)
+    if (!existing) continue
+    mergedSelectionMap.set(selection.entryPath, {
+      entryPath: selection.entryPath,
+      pagePath:
+        existing.pagePath === "/"
+          ? "/"
+          : cleanText(selection.pagePath) || existing.pagePath,
+      title: cleanText(selection.title) || existing.title,
+    })
+  }
+
+  const mergedSelections = Array.from(mergedSelectionMap.values())
   const pageEntries = buildPageEntriesFromSelection(mergedSelections, {
     textEntries,
     assetEntries,

@@ -13,8 +13,9 @@ import { registerOrgRoutes } from "./organisations.js"
 import { registerStripeRoutes } from "./stripe.js"
 import { registerScreenshotRoutes } from "./screenshot.js"
 import { registerGoogleServiceRoutes } from "./googleServices.js"
+import { registerPublishRoutes } from "./publish.js"
 import { uploadExportZip } from "./cloudStorage.js"
-import { registerProjectRoutes } from "./projects.js"
+import { createProjectVersion, registerProjectRoutes } from "./projects.js"
 import { createRateLimit } from "./rateLimit.js"
 import { registerSeoRoutes } from "./seo.js"
 import { registerTemplateRoutes } from "./templates.js"
@@ -40,6 +41,8 @@ import {
   prepareWordPressThemeFiles,
   prepareWordPressBlockFiles,
   prepareWebComponentFile,
+  prepareReactComponentFile,
+  prepareWebflowJsonFile,
   prepareEmailHtml,
   preparePlainTextEmail,
   prepareMarkdownFile,
@@ -54,6 +57,7 @@ import { parseInstruction } from "./aiNavigator.js"
 import { groqRewriteBlock } from "./groq.js"
 import { ollamaRewriteBlock, ollamaHealth } from "./ollama.js"
 import { resolveModel } from "./autoRouter.js"
+import { ownerOnly } from "./accessControl.js"
 import archiver from "archiver"
 import db from "./db.js"
 import path from "path"
@@ -163,7 +167,14 @@ app.use(cors({
 app.use(cookieParser())
 const API_BODY_LIMIT = process.env.API_BODY_LIMIT || "100mb"
 app.use(express.urlencoded({ extended: true, limit: API_BODY_LIMIT }))
-app.use(express.json({ limit: API_BODY_LIMIT }))
+const jsonBodyParser = express.json({ limit: API_BODY_LIMIT })
+const rawStripeBodyParser = express.raw({ type: "application/json", limit: API_BODY_LIMIT })
+app.use((req, res, next) => {
+  if (req.path === "/api/stripe/webhook") {
+    return rawStripeBodyParser(req, res, next)
+  }
+  return jsonBodyParser(req, res, next)
+})
 
 const dashboardIndex = path.join(dashboardDist, "index.html")
 if (!fs.existsSync(dashboardIndex)) {
@@ -227,12 +238,18 @@ app.get("/api/platforms/:platform", authMiddleware, (req, res) => {
 // Public shareable preview (no auth)
 app.get("/share/:token", (req, res, next) => {
   try {
-    const row = db.prepare(
-      "SELECT p.html, p.name FROM project_shares s JOIN projects p ON p.id = s.project_id WHERE s.token = ?"
+    let row = db.prepare(
+      "SELECT s.html_snapshot, s.page_id, s.language_variant, p.html, p.name FROM project_shares s JOIN projects p ON p.id = s.project_id WHERE s.token = ?"
     ).get(req.params.token)
-    if (!row || !row.html) return res.status(404).send("Share link not found or expired")
+    if (!row) {
+      row = db.prepare(
+        "SELECT NULL AS html_snapshot, NULL AS page_id, NULL AS language_variant, html, name FROM projects WHERE share_token = ?"
+      ).get(req.params.token)
+    }
+    const sharedHtml = String(row?.html_snapshot || row?.html || "")
+    if (!row || !sharedHtml) return res.status(404).send("Share link not found or expired")
     res.setHeader("Content-Type", "text/html; charset=utf-8")
-    res.send(row.html)
+    res.send(sharedHtml)
   } catch (e) {
     next(e)
   }
@@ -267,6 +284,8 @@ const EXPORT_FILENAMES = {
   "wp-theme": "wordpress_theme.zip",
   "wp-block": "wordpress_block_plugin.zip",
   "web-component": "web_component_embed.zip",
+  "react-component": "react_component.zip",
+  "webflow-json": "webflow_import.zip",
   "email-newsletter": "email_newsletter.zip",
   "markdown-content": "content_markdown.zip",
   "pdf-print": "design_preview.pdf",
@@ -276,51 +295,242 @@ function exportFilenameForMode(mode) {
   return EXPORT_FILENAMES[String(mode || "wp-placeholder")] || "site_export.zip"
 }
 
-async function appendExportBundle(archive, exportMode, artifact, linkedProject) {
-  archive.append(JSON.stringify(artifact.manifest, null, 2), { name: "manifest.json" })
-  archive.append(artifact.notes, { name: "DELIVERY_NOTES.md" })
+function cleanExportText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim()
+}
+
+function normalizeExportLanguageCode(value) {
+  return cleanExportText(value).replace(/_/g, "-").slice(0, 24)
+}
+
+function normalizeExportPagePath(pageUrl, siteRootUrl = "") {
+  try {
+    const resolved = new URL(String(pageUrl || "/"), siteRootUrl || "https://example.com/")
+    resolved.hash = ""
+    resolved.search = ""
+    let pathname = resolved.pathname || "/"
+    pathname = pathname.replace(/\/index\.html?$/i, "/")
+    pathname = pathname.replace(/\/{2,}/g, "/")
+    return pathname || "/"
+  } catch {
+    const raw = String(pageUrl || "/").trim()
+    if (!raw) return "/"
+    const normalized = `/${raw.replace(/^\/+/, "")}`.replace(/\/{2,}/g, "/")
+    return normalized || "/"
+  }
+}
+
+function exportPageIdFromPath(pathname) {
+  const normalized = String(pathname || "/").replace(/^\/+|\/+$/g, "")
+  if (!normalized) return "home"
+  return normalized.replace(/[^\w]+/g, "-").replace(/^-+|-+$/g, "") || "page"
+}
+
+function parseExportPagesInput(rawPages, siteRootUrl = "") {
+  if (!Array.isArray(rawPages)) return []
+  const seen = new Set()
+  return rawPages
+    .map((entry) => {
+      const url = cleanExportText(entry?.url)
+      const path = normalizeExportPagePath(entry?.path || url || "/", siteRootUrl)
+      const languageVariants =
+        entry?.languageVariants && typeof entry.languageVariants === "object"
+          ? Object.fromEntries(
+              Object.entries(entry.languageVariants)
+                .map(([language, variant]) => {
+                  const code = normalizeExportLanguageCode(language)
+                  return [
+                    code,
+                    {
+                      html: typeof variant?.html === "string" ? variant.html : "",
+                      updatedAt: cleanExportText(variant?.updatedAt),
+                      detectedSourceLanguage: cleanExportText(variant?.detectedSourceLanguage),
+                      translatedCount: Number(variant?.translatedCount || 0) || 0,
+                    },
+                  ]
+                })
+                .filter(([code, variant]) => code && variant.html),
+            )
+          : undefined
+      return {
+        id: cleanExportText(entry?.id) || exportPageIdFromPath(path),
+        name: cleanExportText(entry?.name || entry?.title || ""),
+        title: cleanExportText(entry?.title),
+        path,
+        url,
+        html: typeof entry?.html === "string" ? entry.html : "",
+        languageVariants,
+        updatedAt: cleanExportText(entry?.updatedAt),
+      }
+    })
+    .filter((entry) => {
+      const key = `${entry.id}|${entry.path}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+}
+
+function buildBundleLanguageFolder(languageCode) {
+  return normalizeExportLanguageCode(languageCode).toLowerCase() || "lang"
+}
+
+function buildBundleAlternates(languageCodes = []) {
+  const seen = new Set()
+  const alternates = [{ hreflang: "x-default", href: "index.html" }]
+  for (const code of languageCodes) {
+    const normalized = normalizeExportLanguageCode(code)
+    if (!normalized) continue
+    const key = normalized.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    alternates.push({
+      hreflang: normalized,
+      href: `variants/${buildBundleLanguageFolder(normalized)}/index.html`,
+    })
+  }
+  return alternates
+}
+
+function buildLocalizedArtifacts({ html, normalized, linkedProject, exportMode, versionId, pages, pageId, languageVariant }) {
+  const selectedPage = pageId ? pages.find((page) => page.id === pageId) || null : null
+  const variantEntries = selectedPage?.languageVariants
+    ? Object.entries(selectedPage.languageVariants).filter(([, variant]) => String(variant?.html || "").trim())
+    : []
+
+  if (!selectedPage || !variantEntries.length) {
+    return [
+      {
+        prefix: "",
+        artifact: buildDeliveryArtifact({
+          html: normalized.html || html,
+          url: normalized.meta.url,
+          platform: normalized.meta.platform,
+          mode: exportMode,
+          project: linkedProject,
+          versionId,
+        }),
+      },
+    ]
+  }
+
+  const alternates = buildBundleAlternates(variantEntries.map(([code]) => code))
+  const baseHtml = languageVariant
+    ? normalized.html || String(selectedPage.languageVariants?.[normalizeExportLanguageCode(languageVariant)]?.html || "") || html
+    : String(selectedPage.html || normalized.html || html)
+
+  const artifacts = [
+    {
+      prefix: "",
+      artifact: buildDeliveryArtifact({
+        html: baseHtml,
+        url: normalized.meta.url,
+        platform: normalized.meta.platform,
+        mode: exportMode,
+        project: linkedProject,
+        versionId,
+        alternates,
+        canonicalUrl: "index.html",
+      }),
+    },
+  ]
+
+  for (const [code, variant] of variantEntries) {
+    const folder = buildBundleLanguageFolder(code)
+    const variantHtml =
+      normalizeExportLanguageCode(code).toLowerCase() === normalizeExportLanguageCode(languageVariant).toLowerCase()
+        ? normalized.html || String(variant?.html || "")
+        : String(variant?.html || "")
+    if (!variantHtml.trim()) continue
+    artifacts.push({
+      prefix: `variants/${folder}/`,
+      artifact: buildDeliveryArtifact({
+        html: variantHtml,
+        url: normalized.meta.url,
+        platform: normalized.meta.platform,
+        mode: exportMode,
+        project: linkedProject,
+        versionId,
+        alternates,
+        canonicalUrl: `variants/${folder}/index.html`,
+        language: normalizeExportLanguageCode(code),
+      }),
+    })
+  }
+
+  return artifacts
+}
+
+async function appendExportBundle(archive, exportMode, artifact, linkedProject, options = {}) {
+  const prefix = String(options.prefix || "")
+  const entryName = (name) => `${prefix}${name}`.replace(/^\/+/, "")
+  archive.append(JSON.stringify(artifact.manifest, null, 2), { name: entryName("manifest.json") })
+  archive.append(artifact.notes, { name: entryName("DELIVERY_NOTES.md") })
 
   switch (exportMode) {
     case "wp-theme": {
       const slug = getExportSlug(linkedProject)
-      for (const file of prepareWordPressThemeFiles({ html: artifact.html, project: linkedProject })) {
-        archive.append(file.content, { name: `${slug}/${file.name}` })
+      for (const file of prepareWordPressThemeFiles({
+        html: artifact.html,
+        project: linkedProject,
+        alternates: artifact.manifest?.alternates,
+        canonicalUrl: artifact.manifest?.source?.canonicalUrl,
+      })) {
+        archive.append(file.content, { name: entryName(`${slug}/${file.name}`) })
       }
       return
     }
     case "wp-block": {
       const slug = getExportSlug(linkedProject)
       for (const file of prepareWordPressBlockFiles({ html: artifact.html, project: linkedProject })) {
-        archive.append(file.content, { name: `${slug}/${file.name}` })
+        archive.append(file.content, { name: entryName(`${slug}/${file.name}`) })
       }
       return
     }
     case "web-component": {
-      const { jsFile, demoFile, readmeFile } = prepareWebComponentFile({ html: artifact.html, project: linkedProject })
-      archive.append(jsFile.content, { name: jsFile.name })
-      archive.append(demoFile.content, { name: demoFile.name })
-      archive.append(readmeFile.content, { name: readmeFile.name })
+      const { jsFile, demoFile, readmeFile } = prepareWebComponentFile({
+        html: artifact.html,
+        project: linkedProject,
+        alternates: artifact.manifest?.alternates,
+        canonicalUrl: artifact.manifest?.source?.canonicalUrl,
+      })
+      archive.append(jsFile.content, { name: entryName(jsFile.name) })
+      archive.append(demoFile.content, { name: entryName(demoFile.name) })
+      archive.append(readmeFile.content, { name: entryName(readmeFile.name) })
+      return
+    }
+    case "webflow-json": {
+      const { jsonFile, readmeFile } = prepareWebflowJsonFile({ html: artifact.html, project: linkedProject })
+      archive.append(jsonFile.content, { name: entryName(jsonFile.name) })
+      archive.append(readmeFile.content, { name: entryName(readmeFile.name) })
+      return
+    }
+    case "react-component": {
+      const slug = getExportSlug(linkedProject)
+      for (const file of prepareReactComponentFile({ html: artifact.html, project: linkedProject })) {
+        archive.append(file.content, { name: entryName(`${slug}/${file.name}`) })
+      }
       return
     }
     case "email-newsletter":
-      archive.append(await prepareEmailHtml(artifact.html), { name: "index.html" })
+      archive.append(await prepareEmailHtml(artifact.html), { name: entryName("index.html") })
       {
         const plainText = preparePlainTextEmail({ html: artifact.html, project: linkedProject })
-        archive.append(plainText.content, { name: plainText.name })
+        archive.append(plainText.content, { name: entryName(plainText.name) })
       }
       return
     case "markdown-content": {
       const markdownFile = prepareMarkdownFile({ html: artifact.html, project: linkedProject })
-      archive.append(markdownFile.content, { name: markdownFile.name })
+      archive.append(markdownFile.content, { name: entryName(markdownFile.name) })
       return
     }
     case "shopify-section": {
       const slug = getExportSlug(linkedProject)
-      archive.append(artifact.html, { name: `sections/${slug}.liquid` })
+      archive.append(artifact.html, { name: entryName(`sections/${slug}.liquid`) })
       return
     }
     default:
-      archive.append(artifact.html, { name: "index.html" })
+      archive.append(artifact.html, { name: entryName("index.html") })
   }
 }
 
@@ -808,6 +1018,8 @@ app.post("/api/export", authMiddleware, exportRateLimit, async (req, res) => {
     const platform = readOptionalString(req.body?.platform, "Platform", { max: 32, empty: "" })
     const mode = readOptionalString(req.body?.mode, "Mode", { max: 40, empty: "wp-placeholder" })
     const projectId = readOptionalNumber(req.body?.project_id ?? req.body?.projectId, "Project", { min: 1, integer: true })
+    const pageId = readOptionalString(req.body?.pageId, "Page ID", { max: 160, empty: "" }) || ""
+    const languageVariant = readOptionalString(req.body?.languageVariant, "Language variant", { max: 24, empty: "" }) || ""
     if (!html && !url) {
       return res.status(400).json({ ok: false, error: "Missing html or url" })
     }
@@ -834,41 +1046,97 @@ app.post("/api/export", authMiddleware, exportRateLimit, async (req, res) => {
 
     let linkedProject = null
     let versionId = null
+    let exportPages = []
     if (projectId) {
       linkedProject = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, req.user.id)
       if (!linkedProject) {
         return sendError(res, 404, "Projekt nicht gefunden")
       }
+      exportPages = parseExportPagesInput(req.body?.pages, linkedProject.url || normalized.meta.url || sourceUrl)
+      if (!exportPages.length) {
+        try {
+          exportPages = parseExportPagesInput(JSON.parse(linkedProject.pages_json || "[]"), linkedProject.url || normalized.meta.url || sourceUrl)
+        } catch {
+          exportPages = []
+        }
+      }
+      if (pageId && exportPages.length) {
+        const pageIndex = exportPages.findIndex((page) => page.id === pageId)
+        if (pageIndex >= 0) {
+          const selectedPage = exportPages[pageIndex]
+          if (languageVariant) {
+            exportPages[pageIndex] = {
+              ...selectedPage,
+              languageVariants: {
+                ...(selectedPage.languageVariants || {}),
+                [normalizeExportLanguageCode(languageVariant)]: {
+                  ...(selectedPage.languageVariants?.[normalizeExportLanguageCode(languageVariant)] || {}),
+                  html: normalized.html || sourceHtml,
+                  updatedAt: new Date().toISOString(),
+                },
+              },
+            }
+          } else {
+            exportPages[pageIndex] = {
+              ...selectedPage,
+              html: normalized.html || sourceHtml,
+              updatedAt: new Date().toISOString(),
+            }
+          }
+        }
+      }
       if (normalized.html && normalized.html !== linkedProject.html) {
-        const versionResult = db.prepare("INSERT INTO project_versions (project_id, html) VALUES (?, ?)").run(projectId, normalized.html)
-        versionId = Number(versionResult.lastInsertRowid)
+        const version = createProjectVersion(projectId, {
+          html: normalized.html,
+          label: `Before export · ${exportMode}`,
+          source: "export",
+          pageId,
+        })
+        versionId = Number(version?.id || 0) || null
       }
       db.prepare(
         `UPDATE projects SET
           html = ?,
+          pages_json = COALESCE(?, pages_json),
           url = ?,
           platform = ?,
           last_activity_at = datetime('now'),
           updated_at = datetime('now')
         WHERE id = ? AND user_id = ?`
-      ).run(normalized.html, normalized.meta.url || sourceUrl || "", normalized.meta.platform, projectId, req.user.id)
+      ).run(
+        normalized.html,
+        exportPages.length ? JSON.stringify(exportPages) : null,
+        normalized.meta.url || sourceUrl || "",
+        normalized.meta.platform,
+        projectId,
+        req.user.id
+      )
       linkedProject = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ?").get(projectId, req.user.id)
     }
 
-    const artifact = buildDeliveryArtifact({
-      html: normalized.html || sourceHtml,
-      url: normalized.meta.url || sourceUrl,
-      platform: normalized.meta.platform || platform,
-      mode: exportMode,
-      project: linkedProject,
+    const exportArtifacts = buildLocalizedArtifacts({
+      html: sourceHtml,
+      normalized: {
+        html: normalized.html || sourceHtml,
+        meta: {
+          url: normalized.meta.url || sourceUrl,
+          platform: normalized.meta.platform || platform,
+        },
+      },
+      linkedProject,
+      exportMode,
       versionId,
+      pages: exportPages,
+      pageId,
+      languageVariant,
     })
+    const artifact = exportArtifacts[0].artifact
 
     if (linkedProject) {
       db.prepare(
         `INSERT INTO project_exports (
-          project_id, user_id, version_id, export_mode, platform, readiness, warning_count, manifest_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          project_id, user_id, version_id, export_mode, platform, readiness, warning_count, manifest_json, outcome
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         linkedProject.id,
         req.user.id,
@@ -877,7 +1145,8 @@ app.post("/api/export", authMiddleware, exportRateLimit, async (req, res) => {
         artifact.manifest.platform,
         artifact.readiness,
         artifact.warnings.length,
-        JSON.stringify(artifact.manifest)
+        JSON.stringify(artifact.manifest),
+        "success"
       )
       db.prepare(
         `UPDATE projects SET
@@ -911,7 +1180,9 @@ app.post("/api/export", authMiddleware, exportRateLimit, async (req, res) => {
       const chunks = []
       const archiveCloud = archiver("zip", { zlib: { level: 9 } })
       archiveCloud.on("data", chunk => chunks.push(chunk))
-      await appendExportBundle(archiveCloud, exportMode, artifact, linkedProject)
+      for (const item of exportArtifacts) {
+        await appendExportBundle(archiveCloud, exportMode, item.artifact, linkedProject, { prefix: item.prefix })
+      }
       await archiveCloud.finalize()
       const buffer = Buffer.concat(chunks)
       const uniqueName = `${Date.now()}_${filename}`
@@ -930,11 +1201,24 @@ app.post("/api/export", authMiddleware, exportRateLimit, async (req, res) => {
     res.setHeader("X-Export-Warnings", String(artifact.warnings.length))
     const archive = archiver("zip", { zlib: { level: 9 } })
     archive.pipe(res)
-    await appendExportBundle(archive, exportMode, artifact, linkedProject)
+    for (const item of exportArtifacts) {
+      await appendExportBundle(archive, exportMode, item.artifact, linkedProject, { prefix: item.prefix })
+    }
     await archive.finalize()
   } catch (error) {
     if (isValidationError(error)) return sendError(res, 400, error.message)
     console.error("Export error:", error)
+    try {
+      const failProjectId = readOptionalNumber(req.body?.project_id ?? req.body?.projectId, "Project", { min: 1, integer: true })
+      const failMode = readOptionalString(req.body?.mode, "Mode", { max: 40, empty: "wp-placeholder" }) || "wp-placeholder"
+      if (failProjectId && req.user?.id) {
+        db.prepare(
+          `INSERT INTO project_exports
+            (project_id, user_id, export_mode, platform, readiness, warning_count, manifest_json, outcome, error_message)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(failProjectId, req.user.id, failMode, "unknown", "guarded", 0, "{}", "failure", String(error?.message || "unknown"))
+      }
+    } catch {}
     if (!res.headersSent) {
       sendError(res, 500, safeErrorMessage(error))
     }
@@ -959,19 +1243,6 @@ registerCreditRoutes(app)
 registerSettingsRoutes(app)
 registerOrgRoutes(app)
 
-function ownerOnly(req, res, next) {
-  if (!req.user) {
-    return res.status(401).json({ ok:false, error:"not authenticated" })
-  }
-
-  const owner = process.env.OWNER_EMAIL
-  if (!owner || req.user.email !== owner) {
-    return res.status(403).json({ ok:false, error:"not owner" })
-  }
-
-  next()
-}
-
 app.get("/api/admin/audit", authMiddleware, ownerOnly, (req, res) => {
   try {
     const limit = Math.max(1, Math.min(200, Number(req.query.limit || 100) || 100))
@@ -992,9 +1263,48 @@ app.get("/api/admin/audit", authMiddleware, ownerOnly, (req, res) => {
   }
 })
 
+app.get("/api/admin/export-stats", authMiddleware, ownerOnly, (req, res) => {
+  try {
+    const since = req.query.since
+      ? String(req.query.since)
+      : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+
+    const byMode = db.prepare(`
+      SELECT
+        export_mode,
+        COUNT(*) AS total,
+        SUM(CASE WHEN outcome = 'success' THEN 1 ELSE 0 END) AS successes,
+        SUM(CASE WHEN outcome = 'failure' THEN 1 ELSE 0 END) AS failures
+      FROM project_exports
+      WHERE created_at >= ?
+      GROUP BY export_mode
+      ORDER BY total DESC
+    `).all(since)
+
+    const overall = byMode.reduce(
+      (acc, row) => {
+        acc.total += row.total
+        acc.successes += row.successes
+        acc.failures += row.failures
+        return acc
+      },
+      { total: 0, successes: 0, failures: 0 }
+    )
+
+    const passRate = overall.total > 0
+      ? Number(((overall.successes / overall.total) * 100).toFixed(2))
+      : null
+
+    res.json({ ok: true, since, passRate, overall, byMode })
+  } catch (e) {
+    sendError(res, 500, safeErrorMessage(e))
+  }
+})
+
 registerStripeRoutes(app)
 registerScreenshotRoutes(app)
 registerGoogleServiceRoutes(app)
+registerPublishRoutes(app)
 
 
 app.get("/api/admin/me", authMiddleware, (req, res) => {
@@ -1011,7 +1321,14 @@ app.get("/api/admin/me", authMiddleware, (req, res) => {
 app.get("/api/admin/users", authMiddleware, ownerOnly, (_req, res) => {
   try {
     const rows = db.prepare(`
-      SELECT u.id, u.email, u.name, u.created_at, COALESCE(c.balance_eur, 0) as credits, COALESCE(s.plan, 'basis') as plan
+      SELECT
+        u.id,
+        u.email,
+        u.name,
+        u.created_at,
+        COALESCE(c.balance_eur, 0) as credits,
+        COALESCE(NULLIF(u.plan_id, ''), s.plan, 'basis') as plan,
+        COALESCE(NULLIF(u.plan_status, ''), 'active') as plan_status
       FROM users u
       LEFT JOIN credits c ON u.id = c.user_id
       LEFT JOIN user_settings s ON u.id = s.user_id
@@ -1096,14 +1413,37 @@ app.delete("/api/admin/users/:id", authMiddleware, ownerOnly, (req, res) => {
     
     // Delete in correct order to avoid foreign key constraints
     try {
+      const projectIds = db.prepare("SELECT id FROM projects WHERE user_id = ?").all(userId).map(row => row.id)
+      for (const projectId of projectIds) {
+        db.prepare("DELETE FROM project_assignees WHERE project_id = ?").run(projectId)
+        db.prepare("DELETE FROM project_shares WHERE project_id = ?").run(projectId)
+        db.prepare("DELETE FROM project_exports WHERE project_id = ?").run(projectId)
+        db.prepare("DELETE FROM project_versions WHERE project_id = ?").run(projectId)
+        db.prepare("DELETE FROM project_workflow_events WHERE project_id = ?").run(projectId)
+        db.prepare("DELETE FROM publish_deployments WHERE project_id = ?").run(projectId)
+        db.prepare("DELETE FROM project_preview_tokens WHERE project_id = ?").run(projectId)
+        db.prepare("DELETE FROM block_comments WHERE project_id = ?").run(String(projectId))
+      }
+
       // Delete credit transactions first
       db.prepare("DELETE FROM credit_transactions WHERE user_id = ?").run(userId)
       
       // Delete user's credits
       db.prepare("DELETE FROM credits WHERE user_id = ?").run(userId)
+
+      db.prepare("DELETE FROM user_invoices WHERE user_id = ?").run(userId)
+      db.prepare("DELETE FROM refresh_tokens WHERE user_id = ?").run(userId)
+      db.prepare("DELETE FROM email_verifications WHERE user_id = ?").run(userId)
+      db.prepare("DELETE FROM totp_pending_sessions WHERE user_id = ?").run(userId)
+      db.prepare("DELETE FROM product_events WHERE user_id = ?").run(userId)
+      db.prepare("DELETE FROM audit_logs WHERE user_id = ?").run(userId)
+      db.prepare("DELETE FROM ai_studio_runs WHERE user_id = ?").run(userId)
       
       // Delete user's projects
       db.prepare("DELETE FROM projects WHERE user_id = ?").run(userId)
+      db.prepare("DELETE FROM templates WHERE user_id = ?").run(userId)
+      db.prepare("DELETE FROM deleted_projects WHERE user_id = ?").run(userId)
+      db.prepare("DELETE FROM deleted_templates WHERE user_id = ?").run(userId)
       
       // Delete user's settings
       db.prepare("DELETE FROM user_settings WHERE user_id = ?").run(userId)
@@ -1377,6 +1717,11 @@ app.post("/api/admin/users/:id/set-plan", authMiddleware, ownerOnly, (req, res) 
     if (!valid.includes(plan)) return res.json({ ok: false, error: "Invalid plan" })
     const uid = readId(req.params.id, "User ID")
     db.prepare(`INSERT INTO user_settings (user_id, plan) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET plan = excluded.plan`).run(uid, plan)
+    db.prepare(`
+      UPDATE users
+      SET plan_id = ?, plan_status = COALESCE(NULLIF(plan_status, ''), 'active')
+      WHERE id = ?
+    `).run(plan, uid)
     logAudit({ userId: req.user.id, action: "admin.set_plan", targetType: "user", targetId: uid, meta: { plan } })
     res.json({ ok: true, plan })
   } catch (e) {
@@ -1387,7 +1732,12 @@ app.post("/api/admin/users/:id/set-plan", authMiddleware, ownerOnly, (req, res) 
 
 app.get("/api/user/plan", authMiddleware, (req, res) => {
   try {
-    const row = db.prepare(`SELECT plan FROM user_settings WHERE user_id = ?`).get(req.user.id)
+    const row = db.prepare(`
+      SELECT COALESCE(NULLIF(u.plan_id, ''), s.plan, 'basis') AS plan
+      FROM users u
+      LEFT JOIN user_settings s ON s.user_id = u.id
+      WHERE u.id = ?
+    `).get(req.user.id)
     res.json({ ok: true, plan: row?.plan || "basis" })
   } catch (e) {
     res.json({ ok: false, plan: "basis" })

@@ -1,17 +1,39 @@
 import { apiMe, type User } from "./api/auth"
 import { apiGetPlan } from "./api/credits"
-import { apiFetch } from "./api/client"
+import { apiFetch, fetchWithAuth } from "./api/client"
 import {
+  apiCreateProjectShare,
+  apiCreatePublishPreview,
+  apiCreateProjectVersion,
+  apiDeleteProjectShare,
+  apiGetCustomDomainGuide,
   apiGetProject,
+  apiGetPublishHistory,
+  apiGetPublishTargets,
+  apiGetProjectShares,
+  apiGetProjectVersion,
+  apiGetProjectVersions,
   apiLoadProjectPage,
+  apiPublishProject,
+  apiRollbackDeployment,
   apiGetProjectWorkflowHistory,
+  apiRestoreProjectVersion,
   apiScanProjectPages,
   apiSaveProject,
   apiSetProjectWorkflowStage,
   type ExportWarning,
   type PlatformGuide,
+  type PublishDeployment,
+  type PublishTarget,
+  type PublishTargetInfo,
   type Project,
+  type ProjectAsset,
+  type ProjectLanguageVariant,
   type ProjectPage,
+  type ProjectShare,
+  type ProjectVersion,
+  type ProjectVersionDetail,
+  type ProjectVersionSource,
   type WorkflowEvent,
   type WorkflowStage,
 } from "./api/projects"
@@ -20,13 +42,17 @@ import ResetPasswordScreen from "./components/ResetPasswordScreen"
 import ProjectDashboard from "./components/ProjectDashboard"
 import AssistantWidget from "./components/AssistantWidget"
 import { toast, ToastContainer } from "./components/Toast"
-import { useRef, useState, useEffect, type CSSProperties } from 'react';
+import { useCallback, useRef, useState, useEffect, type CSSProperties } from 'react';
 import BlockOverlay from "./components/BlockOverlay";
 import { ENDPOINTS } from './config';
 import { COMPONENT_LIBRARY, COMPONENT_CATEGORIES } from './components/ComponentLibrary';
 import { useTranslation } from "./i18n/useTranslation"
 import { detectSitePlatform, getPlatformMeta, normalizePlatform, type SitePlatform } from "./utils/sitePlatform"
-import { TOP_TRANSLATION_LANGUAGES, translateWebsiteHtml } from "./utils/htmlTranslation"
+import {
+  TOP_TRANSLATION_LANGUAGES,
+  translateWebsiteHtml,
+  type WebsiteTranslationSegment,
+} from "./utils/htmlTranslation"
 import "./components/editor-viewer-dark.css"
 
 type BlockFilter =
@@ -59,9 +85,45 @@ type ExportMode =
   | "wp-theme"
   | "wp-block"
   | "web-component"
+  | "react-component"
+  | "webflow-json"
   | "email-newsletter"
   | "markdown-content"
   | "pdf-print"
+
+type ViewportPreset = "desktop" | "tablet" | "mobile"
+
+type EditorAudit = {
+  source: "seo" | "cro" | "accessibility"
+  headline: string
+  summary: string
+  items: string[]
+  scoreBadges?: string[]
+}
+
+type AiDiffState = {
+  id: string
+  scope: "block" | "page"
+  beforeHtml: string
+  afterHtml: string
+  beforeDocumentHtml: string
+}
+
+type TranslationReviewState = {
+  targetLanguage: string
+  detectedSourceLanguage: string
+  translatedCount: number
+  segments: WebsiteTranslationSegment[]
+}
+
+type AssetEntry = ProjectAsset
+
+type GlobalStyleOverrides = {
+  fontFamily: string
+  textColor: string
+  backgroundColor: string
+  accentColor: string
+}
 
 const BLOCK_FILTER_OPTIONS: Array<{ value: BlockFilter; label: string }> = [
   { value: "all", label: "All blocks" },
@@ -87,6 +149,8 @@ const EXPORT_FILENAME_MAP: Record<ExportMode, string> = {
   "wp-theme": "wordpress_theme.zip",
   "wp-block": "wordpress_block_plugin.zip",
   "web-component": "web_component_embed.zip",
+  "react-component": "react_component.zip",
+  "webflow-json": "webflow_import.zip",
   "email-newsletter": "email_newsletter.zip",
   "markdown-content": "content_markdown.zip",
   "pdf-print": "design_preview.pdf",
@@ -99,6 +163,8 @@ const EXPORT_MODE_OPTIONS: Array<{ value: ExportMode; label: string }> = [
   { value: "wp-theme", label: "WordPress Theme" },
   { value: "wp-block", label: "WordPress Block" },
   { value: "web-component", label: "Web Component" },
+  { value: "react-component", label: "React Component" },
+  { value: "webflow-json", label: "Webflow JSON" },
   { value: "email-newsletter", label: "Email Newsletter" },
   { value: "markdown-content", label: "Markdown" },
   { value: "pdf-print", label: "PDF Print" },
@@ -110,6 +176,28 @@ const WORKFLOW_STAGE_OPTIONS: Array<{ value: WorkflowStage; label: string }> = [
   { value: "approved", label: "Approved" },
   { value: "shipped", label: "Shipped" },
 ]
+const PROJECT_VERSION_SOURCE_LABELS: Record<ProjectVersionSource, string> = {
+  autosave: "Autosave",
+  manual: "Manual snapshot",
+  translate: "Before translation",
+  ai_block: "Before AI block",
+  ai_page: "Before AI page",
+  ai_prompt: "Before AI prompt",
+  restore: "Restore backup",
+  export: "Before export",
+}
+const VIEWPORT_PRESETS: Record<ViewportPreset, { label: string; width: number | null }> = {
+  desktop: { label: "Desktop", width: null },
+  tablet: { label: "Tablet", width: 820 },
+  mobile: { label: "Mobile", width: 390 },
+}
+const DEFAULT_GLOBAL_STYLE_OVERRIDES: GlobalStyleOverrides = {
+  fontFamily: "",
+  textColor: "",
+  backgroundColor: "",
+  accentColor: "",
+}
+
 function titleCaseFallback(value: string): string {
   return String(value || "")
     .replace(/[-_]+/g, " ")
@@ -120,6 +208,16 @@ function shortenText(value: string, max = 92): string {
   const normalized = String(value || "").replace(/\s+/g, " ").trim()
   if (normalized.length <= max) return normalized
   return `${normalized.slice(0, max - 1).trimEnd()}…`
+}
+
+function formatEditorDateTime(value: string): string {
+  if (!value) return "Unknown date"
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) return value
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(parsed)
 }
 
 function parseRgbChannels(color: string): [number, number, number] | null {
@@ -170,6 +268,302 @@ function readSavedTheme(): "dark" | "light" {
   return localStorage.getItem("se_theme") === "light" ? "light" : "dark"
 }
 
+function serializeEditorHtml(doc: Document, inputIsDocument: boolean) {
+  const doctype = doc.doctype
+    ? `<!DOCTYPE ${doc.doctype.name}${doc.doctype.publicId ? ` PUBLIC "${doc.doctype.publicId}"` : ""}${
+        doc.doctype.systemId ? ` "${doc.doctype.systemId}"` : ""
+      }>`
+    : ""
+  return inputIsDocument
+    ? `${doctype ? `${doctype}\n` : ""}${doc.documentElement.outerHTML}`
+    : doc.body.innerHTML
+}
+
+function stripHtmlForPreview(value: string) {
+  return String(value || "")
+    .replace(/<style\b[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script\b[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+function buildDiffPreview(value: string, max = 420) {
+  return shortenText(stripHtmlForPreview(value), max)
+}
+
+function collectProjectAssets(currentHtml: string, pages: ProjectPage[]) {
+  const parser = new DOMParser()
+  const seen = new Set<string>()
+  const assets: AssetEntry[] = []
+  const documents = [String(currentHtml || ""), ...pages.map((page) => String(page.html || ""))]
+
+  for (const html of documents) {
+    if (!html.trim()) continue
+    const doc = parser.parseFromString(
+      /<html[\s>]/i.test(html) ? html : `<!doctype html><html><body>${html}</body></html>`,
+      "text/html",
+    )
+    doc.querySelectorAll("img[src], source[src], img[data-bo-local-src], link[href]").forEach((element) => {
+      const tag = element.tagName.toLowerCase()
+      const url = String(element.getAttribute(tag === "link" ? "href" : "src") || "").trim()
+      if (!url || seen.has(url)) return
+      const lower = url.toLowerCase()
+      const isFont = tag === "link" || /\.(woff2?|ttf|otf|eot)(\?|#|$)/i.test(lower)
+      const isImage = tag !== "link" || /\.(png|jpe?g|gif|webp|svg|avif)(\?|#|$)/i.test(lower)
+      if (!isFont && !isImage) return
+      seen.add(url)
+      assets.push({
+        id: `${isFont ? "font" : "image"}:${url}`,
+        type: isFont ? "font" : "image",
+        url,
+        label: url.split("/").pop() || url,
+      })
+    })
+  }
+
+  return assets.slice(0, 80)
+}
+
+function mergeAssetLibraries(primary: AssetEntry[], secondary: AssetEntry[]) {
+  const seen = new Set<string>()
+  return [...primary, ...secondary].filter((asset, index) => {
+    const key = `${asset.type}:${asset.url || asset.id || index}`
+    if (!asset.url || seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(reader.error || new Error("File read failed"))
+    reader.onload = () => resolve(String(reader.result || ""))
+    reader.readAsDataURL(file)
+  })
+}
+
+function collectCssVariables(html: string) {
+  const seen = new Set<string>()
+  const vars: string[] = []
+  for (const match of String(html || "").matchAll(/(--[A-Za-z0-9_-]+)\s*:/g)) {
+    const name = match[1]
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    vars.push(name)
+  }
+  return vars.slice(0, 40)
+}
+
+function applyGlobalStylesToHtml(
+  html: string,
+  overrides: GlobalStyleOverrides,
+  cssVariables: Record<string, string>,
+  fontAsset?: AssetEntry | null,
+) {
+  const source = String(html || "")
+  if (!source.trim()) return source
+  const parser = new DOMParser()
+  const inputIsDocument = /<html[\s>]/i.test(source) || /<!doctype/i.test(source)
+  const doc = parser.parseFromString(
+    inputIsDocument ? source : `<!doctype html><html><head></head><body>${source}</body></html>`,
+    "text/html",
+  )
+  const head = doc.head || doc.documentElement.insertBefore(doc.createElement("head"), doc.body || null)
+  const styleId = "se-global-style-overrides"
+  doc.getElementById(styleId)?.remove()
+
+  const rootLines = Object.entries(cssVariables)
+    .filter(([, value]) => String(value || "").trim())
+    .map(([name, value]) => `${name}: ${String(value).trim()};`)
+  if (overrides.textColor.trim()) rootLines.push(`--se-editor-text-color: ${overrides.textColor.trim()};`)
+  if (overrides.backgroundColor.trim()) rootLines.push(`--se-editor-surface-color: ${overrides.backgroundColor.trim()};`)
+  if (overrides.accentColor.trim()) rootLines.push(`--se-editor-accent-color: ${overrides.accentColor.trim()};`)
+
+  const bodyRules = [
+    overrides.fontFamily.trim() ? `font-family: ${overrides.fontFamily.trim()} !important;` : "",
+    overrides.textColor.trim() ? `color: var(--se-editor-text-color) !important;` : "",
+    overrides.backgroundColor.trim() ? `background: var(--se-editor-surface-color) !important;` : "",
+  ].filter(Boolean)
+
+  const accentRules = overrides.accentColor.trim()
+    ? `
+      a { color: var(--se-editor-accent-color) !important; }
+      button, .button, [class*="button"], [type="submit"] {
+        border-color: var(--se-editor-accent-color) !important;
+      }
+    `
+    : ""
+
+  const fontFaceCss =
+    fontAsset?.type === "font" && fontAsset.url
+      ? `
+        @font-face {
+          font-family: '${String(fontAsset.label || "ProjectFont").replace(/\.[A-Za-z0-9]+$/, "")}';
+          src: url('${fontAsset.url}') format('${/woff2/i.test(fontAsset.mimeType || fontAsset.url) ? "woff2" : /woff/i.test(fontAsset.mimeType || fontAsset.url) ? "woff" : /otf/i.test(fontAsset.mimeType || fontAsset.url) ? "opentype" : "truetype"}');
+          font-display: swap;
+        }
+      `
+      : ""
+
+  const css = `
+    ${fontFaceCss}
+    :root {
+      ${rootLines.join("\n")}
+    }
+    ${bodyRules.length ? `body { ${bodyRules.join(" ")} }` : ""}
+    ${accentRules}
+  `.trim()
+
+  if (!css) return serializeEditorHtml(doc, inputIsDocument)
+
+  const style = doc.createElement("style")
+  style.id = styleId
+  style.textContent = css
+  head.appendChild(style)
+
+  return serializeEditorHtml(doc, inputIsDocument)
+}
+
+function applyTranslationOverrideToHtml(
+  html: string,
+  segment: WebsiteTranslationSegment,
+  nextValue: string,
+) {
+  const source = String(html || "")
+  if (!source.trim()) return source
+  const parser = new DOMParser()
+  const inputIsDocument = /<html[\s>]/i.test(source) || /<!doctype/i.test(source)
+  const doc = parser.parseFromString(
+    inputIsDocument ? source : `<!doctype html><html><body>${source}</body></html>`,
+    "text/html",
+  )
+  const element = doc.querySelector(segment.selector)
+  if (!element) return source
+
+  if (segment.kind === "attr" && segment.attr) {
+    element.setAttribute(segment.attr, nextValue)
+  } else {
+    const textNodes = Array.from(element.childNodes).filter((node) => node.nodeType === Node.TEXT_NODE) as Text[]
+    const targetNode = textNodes[Math.max(0, Number(segment.textIndex || 0))]
+    if (!targetNode) return source
+    const leading = targetNode.nodeValue?.match(/^\s*/)?.[0] || ""
+    const trailing = targetNode.nodeValue?.match(/\s*$/)?.[0] || ""
+    targetNode.nodeValue = `${leading}${nextValue}${trailing}`
+  }
+
+  return serializeEditorHtml(doc, inputIsDocument)
+}
+
+function buildTranslationSegmentsWithOverrides(
+  segments: WebsiteTranslationSegment[],
+  overrides: Record<string, string> = {},
+) {
+  return segments.map((segment) => ({
+    ...segment,
+    translatedText: overrides[segment.id]?.trim() || segment.translatedText,
+  }))
+}
+
+function applyTranslationOverridesToHtml(
+  html: string,
+  segments: WebsiteTranslationSegment[],
+  overrides: Record<string, string> = {},
+) {
+  return buildTranslationSegmentsWithOverrides(segments, overrides).reduce((acc, segment) => {
+    const nextValue = overrides[segment.id]?.trim()
+    return nextValue ? applyTranslationOverrideToHtml(acc, segment, nextValue) : acc
+  }, String(html || ""))
+}
+
+function getLanguageVariantEffectiveHtml(variant?: ProjectLanguageVariant | null) {
+  if (!variant) return ""
+  if (variant.baseHtml && variant.segments?.length && variant.overrides && Object.keys(variant.overrides).length) {
+    return applyTranslationOverridesToHtml(variant.baseHtml, variant.segments as WebsiteTranslationSegment[], variant.overrides)
+  }
+  return String(variant.html || variant.baseHtml || "")
+}
+
+function buildLocalAudit(html: string, loadedUrl: string, source: EditorAudit["source"], remoteAudit?: {
+  scores?: Record<string, number>
+  metrics?: Record<string, string>
+  opportunities?: Array<{ title: string; value: string }>
+}) {
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(
+    /<html[\s>]/i.test(html) ? html : `<!doctype html><html><body>${html}</body></html>`,
+    "text/html",
+  )
+  if (source === "seo") {
+    const title = doc.querySelector("title")?.textContent?.trim() || ""
+    const description = doc.querySelector("meta[name='description']")?.getAttribute("content")?.trim() || ""
+    const h1Count = doc.querySelectorAll("h1").length
+    const missingAlt = Array.from(doc.querySelectorAll("img")).filter((img) => !(img.getAttribute("alt") || "").trim()).length
+    const items = [
+      !title ? "Add a page title." : title.length > 70 ? "Shorten the title below 70 characters." : `Title looks present (${title.length} chars).`,
+      !description ? "Add a meta description." : description.length > 160 ? "Shorten the meta description below 160 characters." : `Meta description looks present (${description.length} chars).`,
+      h1Count === 0 ? "Add a single H1 heading on the page." : h1Count > 1 ? "Reduce multiple H1 headings to one clear primary headline." : "Primary H1 structure looks valid.",
+      missingAlt > 0 ? `${missingAlt} image${missingAlt === 1 ? "" : "s"} still need alt text.` : "All detected images have alt text.",
+    ]
+    const scoreBadges = remoteAudit?.scores
+      ? Object.entries(remoteAudit.scores).map(([key, value]) => `${titleCaseFallback(key)} ${value}`)
+      : []
+    const summary = loadedUrl
+      ? `SEO review for ${loadedUrl.replace(/^https?:\/\//, "")}`
+      : "SEO review for the current page"
+    if (remoteAudit?.opportunities?.length) {
+      items.push(...remoteAudit.opportunities.slice(0, 3).map((item) => `${item.title}: ${item.value}`))
+    }
+    return {
+      source,
+      headline: "SEO audit",
+      summary,
+      items,
+      scoreBadges,
+    } satisfies EditorAudit
+  }
+
+  if (source === "accessibility") {
+    const missingAlt = Array.from(doc.querySelectorAll("img")).filter((img) => !(img.getAttribute("alt") || "").trim()).length
+    const unlabeledFields = Array.from(doc.querySelectorAll("input, textarea, select")).filter((field) => {
+      if ((field.getAttribute("type") || "").toLowerCase() === "hidden") return false
+      const id = field.getAttribute("id")
+      if (id && doc.querySelector(`label[for="${id}"]`)) return false
+      return !(field.getAttribute("aria-label") || field.getAttribute("placeholder") || "").trim()
+    }).length
+    const buttonIssues = Array.from(doc.querySelectorAll("button, a")).filter((node) => {
+      const text = (node.textContent || "").replace(/\s+/g, " ").trim()
+      return !text && !node.querySelector("img[alt]")
+    }).length
+    return {
+      source,
+      headline: "Accessibility audit",
+      summary: "Quick structural review of alt text, labels, and interactive copy.",
+      items: [
+        missingAlt > 0 ? `${missingAlt} image${missingAlt === 1 ? "" : "s"} are missing alt text.` : "Image alt text coverage looks complete.",
+        unlabeledFields > 0 ? `${unlabeledFields} form field${unlabeledFields === 1 ? "" : "s"} need labels or aria-labels.` : "Form fields look labelled.",
+        buttonIssues > 0 ? `${buttonIssues} interactive element${buttonIssues === 1 ? "" : "s"} need visible or accessible text.` : "Interactive elements look labelled.",
+      ],
+    } satisfies EditorAudit
+  }
+
+  const ctas = Array.from(doc.querySelectorAll("a, button")).filter((node) =>
+    /(start|get|book|buy|contact|talk|demo|trial|quote|apply|join|learn)/i.test((node.textContent || "").trim()),
+  ).length
+  const headings = Array.from(doc.querySelectorAll("h1, h2")).map((node) => (node.textContent || "").trim()).filter(Boolean)
+  return {
+    source,
+    headline: "CRO audit",
+    summary: "Checks for a clear headline, CTA coverage, and section flow.",
+    items: [
+      headings[0] ? `Primary headline: "${shortenText(headings[0], 82)}".` : "Add a stronger primary headline above the fold.",
+      ctas === 0 ? "No clear CTA found. Add a primary CTA near the top of the page." : `${ctas} CTA element${ctas === 1 ? "" : "s"} detected across the page.`,
+      headings.length < 3 ? "Add clearer section hierarchy to guide the visitor through the offer." : "Section hierarchy looks present.",
+    ],
+  } satisfies EditorAudit
+}
+
 export default function App() {
   const { t } = useTranslation();
   const resolvePlatform = (platform?: string | null, pageUrl?: string, html?: string): SitePlatform => {
@@ -190,6 +584,7 @@ export default function App() {
   ]
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
+  const comparisonIframeRef = useRef<HTMLIFrameElement | null>(null)
   const currentHtmlRef = useRef("")
   const skipNextLiveIframeSyncRef = useRef(false)
   const loadRequestRef = useRef(0)
@@ -201,11 +596,28 @@ export default function App() {
   const [status, setStatus] = useState<"idle" | "blocked" | "ok">("idle")
   const [currentHtml, setCurrentHtml] = useState<string>("")
   const [loadedUrl, setLoadedUrl] = useState<string>("")
+  const [viewportPreset, setViewportPreset] = useState<ViewportPreset>("desktop")
   const [currentPlatform, setCurrentPlatform] = useState<SitePlatform>("unknown")
   const [currentPlatformGuide, setCurrentPlatformGuide] = useState<PlatformGuide | null>(null)
   const [exportWarnings, setExportWarnings] = useState<ExportWarning[]>([])
   const [exportReadiness, setExportReadiness] = useState<"ready" | "guarded">("ready")
   const [workflowHistory, setWorkflowHistory] = useState<WorkflowEvent[]>([])
+  const [projectVersions, setProjectVersions] = useState<ProjectVersion[]>([])
+  const [projectShares, setProjectShares] = useState<ProjectShare[]>([])
+  const [publishTargets, setPublishTargets] = useState<PublishTargetInfo[]>([])
+  const [publishHistory, setPublishHistory] = useState<PublishDeployment[]>([])
+  const [loadingVersions, setLoadingVersions] = useState(false)
+  const [loadingShares, setLoadingShares] = useState(false)
+  const [loadingPublishTargets, setLoadingPublishTargets] = useState(false)
+  const [loadingPublishHistory, setLoadingPublishHistory] = useState(false)
+  const [savingSnapshot, setSavingSnapshot] = useState(false)
+  const [sharingPreview, setSharingPreview] = useState(false)
+  const [creatingPublishPreview, setCreatingPublishPreview] = useState(false)
+  const [publishingTarget, setPublishingTarget] = useState<PublishTarget | null>(null)
+  const [rollingBackDeploymentId, setRollingBackDeploymentId] = useState<number | null>(null)
+  const [activeVersionActionId, setActiveVersionActionId] = useState<number | null>(null)
+  const [versionPreview, setVersionPreview] = useState<ProjectVersionDetail | null>(null)
+  const [versionCompare, setVersionCompare] = useState<ProjectVersionDetail | null>(null)
   const [aiScanLoading, setAiScanLoading] = useState(false)
   const [sessionCost, setSessionCost] = useState(0)
   const [sessionTokens, setSessionTokens] = useState({input: 0, output: 0})
@@ -213,6 +625,7 @@ export default function App() {
     background: DEFAULT_CHROME_BACKGROUND,
     border: DEFAULT_CHROME_BORDER,
   })
+  const versionPreviewReturnModeRef = useRef<"view" | "edit">("view")
   const [aiApproval] = useState<null | {
     id: string
     model: string
@@ -285,7 +698,6 @@ export default function App() {
   const [projectPages, setProjectPages] = useState<ProjectPage[]>([])
   const [activePageId, setActivePageId] = useState<string | null>(null)
   const [scanningPages, setScanningPages] = useState(false)
-  const [loadingProjectPageId, setLoadingProjectPageId] = useState<string | null>(null)
   const [selectedComponent, setSelectedComponent] = useState<string>("")
   
   const [undoHistory, setUndoHistory] = useState<string[]>([])
@@ -346,71 +758,74 @@ const [adminLoading, setAdminLoading] = useState(false)
     detectedSourceLanguage: string
     translatedCount: number
   } | null>(null)
+  const [translationReview, setTranslationReview] = useState<TranslationReviewState | null>(null)
+  const [translationOverrideDrafts, setTranslationOverrideDrafts] = useState<Record<string, string>>({})
+  const [activeTranslationSegmentId, setActiveTranslationSegmentId] = useState<string | null>(null)
+  const [activeLanguageVariant, setActiveLanguageVariant] = useState<string>("base")
+  const [showTranslationSplitView, setShowTranslationSplitView] = useState(false)
   const [showExportWarnings, setShowExportWarnings] = useState(false)
-
-  const demoPlanMeta: Record<"basis" | "starter" | "pro" | "scale", {
-    label: string
-    price: string
-    users: string
-    projects: string
-    team: string
-    accent: string
-    bg: string
-    border: string
-  }> = {
-    basis: {
-      label: "Basis",
-      price: "€9/mo",
-      users: "1 user",
-      projects: "3 projects",
-      team: "No team",
-      accent: "rgba(99,102,241,0.95)",
-      bg: "rgba(99,102,241,0.12)",
-      border: "rgba(99,102,241,0.35)",
-    },
-    starter: {
-      label: "Starter",
-      price: "€29/mo",
-      users: "1 user",
-      projects: "10 projects",
-      team: "2 team members",
-      accent: "rgba(34,197,94,0.95)",
-      bg: "rgba(34,197,94,0.12)",
-      border: "rgba(34,197,94,0.35)",
-    },
-    pro: {
-      label: "Pro",
-      price: "€79/mo",
-      users: "3 users",
-      projects: "30 projects",
-      team: "10 team members",
-      accent: "rgba(168,85,247,0.95)",
-      bg: "rgba(168,85,247,0.12)",
-      border: "rgba(168,85,247,0.35)",
-    },
-    scale: {
-      label: "Scale",
-      price: "€149/mo",
-      users: "10 users",
-      projects: "100 projects",
-      team: "50 team members",
-      accent: "rgba(245,158,11,0.95)",
-      bg: "rgba(245,158,11,0.12)",
-      border: "rgba(245,158,11,0.35)",
-    },
-  }
 
   const [exportMode, setExportMode] = useState<ExportMode>("wp-placeholder")
   const [exporting, setExporting] = useState(false)
   const [leftAiPrompt, setLeftAiPrompt] = useState("")
   const [leftAiModel, setLeftAiModel] = useState("auto")
+  const [leftAiTone, setLeftAiTone] = useState("neutral")
   const [leftAiRunning, setLeftAiRunning] = useState(false)
+  const [batchAiRunning, setBatchAiRunning] = useState(false)
+  const [editorAudit, setEditorAudit] = useState<EditorAudit | null>(null)
+  const [runningAudit, setRunningAudit] = useState<EditorAudit["source"] | null>(null)
+  const [shareEmail, setShareEmail] = useState("")
+  const [lastPublishPreview, setLastPublishPreview] = useState<{
+    previewUrl: string
+    expiresAt: string
+    token: string
+  } | null>(null)
+  const [publishDraft, setPublishDraft] = useState<{
+    target: PublishTarget
+    firebaseSiteId: string
+    netlifySiteId: string
+    netlifyToken: string
+    vercelToken: string
+    wpUrl: string
+    wpUser: string
+    wpAppPassword: string
+    wpPageId: string
+    shopDomain: string
+    shopAccessToken: string
+    shopThemeId: string
+    customDomain: string
+  }>({
+    target: "firebase",
+    firebaseSiteId: "",
+    netlifySiteId: "",
+    netlifyToken: "",
+    vercelToken: "",
+    wpUrl: "",
+    wpUser: "",
+    wpAppPassword: "",
+    wpPageId: "",
+    shopDomain: "",
+    shopAccessToken: "",
+    shopThemeId: "",
+    customDomain: "",
+  })
+  const [customDomainGuide, setCustomDomainGuide] = useState<{
+    domain: string
+    target: string
+    guide: { steps: string[]; recordType: string; recordValue: string }
+  } | null>(null)
+  const [aiDiff, setAiDiff] = useState<AiDiffState | null>(null)
+  const [globalStyleOverrides, setGlobalStyleOverrides] = useState<GlobalStyleOverrides>(DEFAULT_GLOBAL_STYLE_OVERRIDES)
+  const [cssVariableOverrides, setCssVariableOverrides] = useState<Record<string, string>>({})
+  const [selectedFontAssetId, setSelectedFontAssetId] = useState<string | null>(null)
+  const [assetLibraryQuery, setAssetLibraryQuery] = useState("")
+  const lastSignificantSnapshotRef = useRef<{ html: string; createdAt: number }>({ html: "", createdAt: 0 })
   // Auto-save Projekt
   
 const loadAdminUsers = async () => {
   setAdminLoading(true)
   try {
-    const r = await fetch("/api/admin/users", { credentials: "include" })
+    const r = await fetchWithAuth("/api/admin/users")
     const d = await r.json()
     if (d.ok) {
       setAdminUsers(d.users || [])
@@ -426,9 +841,8 @@ const deleteUser = async (userId: number, userEmail: string) => {
   }
   
   try {
-    const r = await fetch(`/api/admin/users/${userId}`, { 
+    const r = await fetchWithAuth(`/api/admin/users/${userId}`, { 
       method: "DELETE", 
-      credentials: "include" 
     })
     const d = await r.json()
     if (d.ok) {
@@ -450,11 +864,10 @@ const addCredits = async (userId: number, userEmail: string) => {
   }
   
   try {
-    const r = await fetch(`/api/admin/users/${userId}/add-credits`, {
+    const r = await fetchWithAuth(`/api/admin/users/${userId}/add-credits`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ credits: Number(Number(credits) * 100) }), // Convert dollars to cents
-      credentials: "include"
     })
     const d = await r.json()
     if (d.ok) {
@@ -474,11 +887,10 @@ const resetPassword = async (userId: number, userEmail: string) => {
   }
   
   try {
-    const r = await fetch("/api/admin/send-reset", {
+    const r = await fetchWithAuth("/api/admin/send-reset", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ userId }),
-      credentials: "include"
     })
     const d = await r.json()
     if (d.ok) {
@@ -499,9 +911,8 @@ const assignPlan = async (userId: number, userEmail: string) => {
   const plan = normalized as "basis" | "starter" | "pro" | "scale"
   setAdminUserPlans(prev => ({ ...prev, [userId]: plan }))
   try {
-    const response = await fetch(`/api/admin/users/${userId}/set-plan`, {
+    const response = await fetchWithAuth(`/api/admin/users/${userId}/set-plan`, {
       method: "POST",
-      credentials: "include",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ plan }),
     })
@@ -533,11 +944,10 @@ const createUser = async () => {
   }
   
   try {
-    const r = await fetch("/api/admin/users", {
+    const r = await fetchWithAuth("/api/admin/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({...newUser, credits: Number(newUser.credits * 100)}), // Convert dollars to cents
-      credentials: "include"
     })
     const d = await r.json()
     if (d.ok) {
@@ -555,25 +965,90 @@ const createUser = async () => {
 
 const autoSave = async (html: string) => {
     if (!currentProject) return
+    const nowIso = new Date().toISOString()
     const nextPages = activePageId
       ? projectPages.map((page) =>
           page.id === activePageId
-            ? { ...page, html, updatedAt: new Date().toISOString() }
+            ? {
+                ...page,
+                html: activeLanguageVariant === "base" ? html : page.html,
+                languageVariants:
+                  activeLanguageVariant === "base"
+                    ? page.languageVariants
+                    : {
+                        ...(page.languageVariants || {}),
+                        [activeLanguageVariant]: {
+                          ...(page.languageVariants?.[activeLanguageVariant] || {}),
+                          html,
+                          updatedAt: nowIso,
+                        },
+                      },
+                updatedAt: nowIso,
+              }
             : page
         )
       : projectPages
     if (activePageId) setProjectPages(nextPages)
+    const activeBasePage = activePageId
+      ? nextPages.find((page) => page.id === activePageId) || null
+      : null
+    const projectHtmlForSave =
+      activeLanguageVariant === "base"
+        ? html
+        : String(activeBasePage?.html || currentProject.html || currentHtmlRef.current || "")
     try {
       const saved = await apiSaveProject(currentProject.id, {
-        html,
+        html: projectHtmlForSave,
         platform: currentPlatform,
         pages: nextPages.length ? nextPages : undefined,
+        pageId: activePageId || undefined,
       })
       if (saved) {
         setCurrentProject(prev => (prev && prev.id === saved.id ? { ...prev, ...saved } : saved))
         if (saved.pages) setProjectPages(saved.pages)
       }
     } catch { /* autosave failure is non-fatal */ }
+  }
+
+  const saveAssetLibrary = async (assets: AssetEntry[]) => {
+    if (!currentProject) return
+    try {
+      const saved = await apiSaveProject(currentProject.id, {
+        html: currentHtmlRef.current,
+        platform: currentPlatform,
+        pages: projectPages.length ? projectPages : undefined,
+        pageId: activePageId || undefined,
+        assetLibrary: assets,
+      })
+      if (saved) {
+        setCurrentProject(saved)
+        if (saved.pages) setProjectPages(saved.pages)
+      } else {
+        setCurrentProject((previous) => (previous ? { ...previous, assetLibrary: assets } : previous))
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Asset library save failed")
+    }
+  }
+
+  const handleAssetLibraryUpload = async (files: FileList | null) => {
+    if (!files?.length) return
+    const uploads = await Promise.all(
+      Array.from(files)
+        .slice(0, 12)
+        .map(async (file, index) => ({
+          id: `asset-${Date.now()}-${index}`,
+          type: /^font\//i.test(file.type) || /\.(woff2?|ttf|otf|eot)$/i.test(file.name) ? "font" as const : "image" as const,
+          url: await readFileAsDataUrl(file),
+          label: file.name,
+          mimeType: file.type || "",
+          createdAt: new Date().toISOString(),
+        })),
+    )
+    const nextAssets = mergeAssetLibraries(currentProject?.assetLibrary || [], uploads)
+    setCurrentProject((previous) => (previous ? { ...previous, assetLibrary: nextAssets } : previous))
+    await saveAssetLibrary(nextAssets)
+    toast.success(`${uploads.length} asset${uploads.length === 1 ? "" : "s"} added to the project library`)
   }
 
   useEffect(() => {
@@ -587,6 +1062,921 @@ const autoSave = async (html: string) => {
     } catch {
       setWorkflowHistory([])
     }
+  }
+
+  const loadProjectVersions = async (projectId: number) => {
+    setLoadingVersions(true)
+    try {
+      const versions = await apiGetProjectVersions(projectId)
+      setProjectVersions(versions)
+    } catch {
+      setProjectVersions([])
+    } finally {
+      setLoadingVersions(false)
+    }
+  }
+
+  const loadProjectShares = async (projectId: number) => {
+    setLoadingShares(true)
+    try {
+      const shares = await apiGetProjectShares(projectId)
+      setProjectShares(shares)
+    } catch {
+      setProjectShares([])
+    } finally {
+      setLoadingShares(false)
+    }
+  }
+
+  const loadPublishTargets = async () => {
+    setLoadingPublishTargets(true)
+    try {
+      const targets = await apiGetPublishTargets()
+      setPublishTargets(targets)
+    } catch {
+      setPublishTargets([])
+    } finally {
+      setLoadingPublishTargets(false)
+    }
+  }
+
+  const loadPublishHistory = async (projectId: number) => {
+    setLoadingPublishHistory(true)
+    try {
+      const deployments = await apiGetPublishHistory(projectId)
+      setPublishHistory(deployments)
+    } catch {
+      setPublishHistory([])
+    } finally {
+      setLoadingPublishHistory(false)
+    }
+  }
+
+  const exitVersionPreview = (restoreMode = false) => {
+    setVersionPreview(null)
+    if (restoreMode && versionPreviewReturnModeRef.current === "edit") {
+      setMode("edit")
+    }
+  }
+
+  const clearVersionCompare = () => {
+    setVersionCompare(null)
+  }
+
+  const prependProjectVersion = (version: ProjectVersion) => {
+    setProjectVersions((prev) => [version, ...prev.filter((entry) => entry.id !== version.id)].slice(0, 50))
+  }
+
+  const createVersionSnapshot = useCallback(
+    async (
+      options: {
+        label?: string
+        source?: ProjectVersionSource
+        html?: string
+        pageId?: string
+        silent?: boolean
+      } = {},
+    ) => {
+      if (!currentProject?.id) return null
+      const snapshotHtml = String(options.html ?? currentHtmlRef.current)
+      if (!snapshotHtml.trim()) {
+        if (!options.silent) toast.warning("Load a page before creating a snapshot")
+        return null
+      }
+      try {
+        const version = await apiCreateProjectVersion(currentProject.id, {
+          html: snapshotHtml,
+          label: options.label,
+          source: options.source,
+          pageId: options.pageId ?? activePageId ?? undefined,
+        })
+        prependProjectVersion(version)
+        return version
+      } catch (error) {
+        if (!options.silent) {
+          toast.error(error instanceof Error ? error.message : "Snapshot could not be created")
+        }
+        return null
+      }
+    },
+    [activePageId, currentProject?.id],
+  )
+
+  const handleManualSnapshot = async () => {
+    if (!currentProject) {
+      toast.warning("Open a saved project before creating snapshots")
+      return
+    }
+    const label = window.prompt("Snapshot label (optional):", "")
+    if (label === null) return
+    setSavingSnapshot(true)
+    try {
+      const version = await createVersionSnapshot({
+        label: label.trim(),
+        source: "manual",
+      })
+      if (version) {
+        toast.success(label.trim() ? `Snapshot "${label.trim()}" saved` : "Snapshot saved")
+      }
+    } finally {
+      setSavingSnapshot(false)
+    }
+  }
+
+  const previewProjectVersion = async (versionId: number) => {
+    if (!currentProject?.id) return
+    setActiveVersionActionId(versionId)
+    try {
+      const version = await apiGetProjectVersion(currentProject.id, versionId)
+      versionPreviewReturnModeRef.current = mode
+      if (mode === "edit") setMode("view")
+      setVersionPreview(version)
+      setStatus("ok")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Snapshot preview failed")
+    } finally {
+      setActiveVersionActionId(null)
+    }
+  }
+
+  const restoreProjectVersion = async (versionId: number) => {
+    if (!currentProject?.id) return
+    const confirmed = window.confirm("Restore this snapshot? The current editor state will be backed up first.")
+    if (!confirmed) return
+    setActiveVersionActionId(versionId)
+    try {
+      const restored = await apiRestoreProjectVersion(currentProject.id, versionId, {
+        pageId: activePageId || undefined,
+      })
+      exitVersionPreview(false)
+      const nextProject = restored.project || null
+      if (nextProject) {
+        setCurrentProject(nextProject)
+        setProjectPages(nextProject.pages || [])
+        const restoredPage = restored.pageId
+          ? (nextProject.pages || []).find((page) => page.id === restored.pageId) || null
+          : null
+        if (restoredPage) {
+          applyProjectPage(nextProject, restoredPage)
+        } else {
+          setUrl(nextProject.url || "")
+          setLoadedUrl(nextProject.url || "")
+          applyEditorHtml(restored.html, { resetHistory: true })
+          setCurrentPlatform(resolvePlatform(nextProject.platform, nextProject.url, restored.html))
+          setCurrentPlatformGuide(nextProject.platformGuide ?? null)
+          setExportWarnings(nextProject.latestExport?.manifest?.warnings || [])
+          setExportReadiness(nextProject.latestExport?.readiness || "ready")
+          lastSignificantSnapshotRef.current = { html: restored.html, createdAt: Date.now() }
+          renderToIframe(restored.html)
+          setStatus("ok")
+        }
+      } else {
+        applyEditorHtml(restored.html, { resetHistory: true })
+        setCurrentPlatform(restored.platform)
+        lastSignificantSnapshotRef.current = { html: restored.html, createdAt: Date.now() }
+        renderToIframe(restored.html)
+        setStatus("ok")
+      }
+      await loadProjectVersions(currentProject.id)
+      toast.success("Snapshot restored")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Snapshot restore failed")
+    } finally {
+      setActiveVersionActionId(null)
+    }
+  }
+
+  const composeAiPromptWithTone = (prompt: string) => {
+    const trimmed = String(prompt || "").trim()
+    if (!trimmed) return ""
+    if (!leftAiTone || leftAiTone === "neutral") return trimmed
+    const toneLabel = titleCaseFallback(leftAiTone)
+    return `Rewrite with a ${toneLabel.toLowerCase()} tone.\n\n${trimmed}`
+  }
+
+  const openFullPreview = () => {
+    const previewHtml = String(versionPreview?.html || currentHtmlRef.current || "")
+    if (!previewHtml.trim()) {
+      toast.warning("Load a page before opening a clean preview")
+      return
+    }
+    const popup = window.open("", "_blank", "noopener,noreferrer")
+    if (!popup) {
+      toast.error("Popup blocked. Allow popups to open the clean preview.")
+      return
+    }
+    popup.document.open()
+    popup.document.write(previewHtml)
+    popup.document.close()
+  }
+
+  const createSharePreview = async () => {
+    if (!currentProject?.id) {
+      toast.warning("Open a saved project before creating share previews")
+      return
+    }
+    setSharingPreview(true)
+    try {
+      await autoSave(currentHtmlRef.current)
+      await apiCreateProjectShare(currentProject.id, {
+        email: shareEmail.trim() || undefined,
+        html: currentHtmlRef.current,
+        pageId: activePageId || undefined,
+        languageVariant: activeLanguageVariant !== "base" ? activeLanguageVariant : undefined,
+      })
+      await loadProjectShares(currentProject.id)
+      setShareEmail("")
+      toast.success("Share preview ready")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Share preview failed")
+    } finally {
+      setSharingPreview(false)
+    }
+  }
+
+  const revokeSharePreview = async (shareId: number) => {
+    if (!currentProject?.id) return
+    try {
+      await apiDeleteProjectShare(currentProject.id, shareId)
+      await loadProjectShares(currentProject.id)
+      toast.success("Share preview revoked")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Share revoke failed")
+    }
+  }
+
+  const copyTextValue = async (value: string, successMessage: string, promptLabel: string) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value)
+        toast.success(successMessage)
+        return
+      }
+    } catch {
+      // fall back below
+    }
+    window.prompt(promptLabel, value)
+  }
+
+  const copySharePreviewUrl = async (shareUrl: string) => {
+    await copyTextValue(shareUrl, "Share link copied", "Copy this share link")
+  }
+
+  const updatePublishDraft = <K extends keyof typeof publishDraft>(key: K, value: (typeof publishDraft)[K]) => {
+    setPublishDraft((previous) => ({ ...previous, [key]: value }))
+  }
+
+  const getPublishOptions = (target: PublishTarget, mode: "publish" | "rollback" = "publish") => {
+    const options: Record<string, string> = {}
+    if (mode === "publish") options.exportMode = exportMode
+
+    if (target === "firebase") {
+      if (publishDraft.firebaseSiteId.trim()) options.siteId = publishDraft.firebaseSiteId.trim()
+      return options
+    }
+
+    if (target === "netlify") {
+      if (publishDraft.netlifySiteId.trim()) options.siteId = publishDraft.netlifySiteId.trim()
+      if (publishDraft.netlifyToken.trim()) options.token = publishDraft.netlifyToken.trim()
+      return options
+    }
+
+    if (target === "vercel") {
+      if (publishDraft.vercelToken.trim()) options.token = publishDraft.vercelToken.trim()
+      return options
+    }
+
+    if (target === "wordpress") {
+      if (!publishDraft.wpUrl.trim() || !publishDraft.wpUser.trim() || !publishDraft.wpAppPassword.trim()) {
+        throw new Error("WordPress publish needs site URL, username, and application password.")
+      }
+      options.wpUrl = publishDraft.wpUrl.trim()
+      options.wpUser = publishDraft.wpUser.trim()
+      options.wpAppPassword = publishDraft.wpAppPassword.trim()
+      if (publishDraft.wpPageId.trim()) options.pageId = publishDraft.wpPageId.trim()
+      return options
+    }
+
+    if (target === "shopify") {
+      if (!publishDraft.shopDomain.trim() || !publishDraft.shopAccessToken.trim()) {
+        throw new Error("Shopify publish needs shop domain and access token.")
+      }
+      options.shopDomain = publishDraft.shopDomain.trim()
+      options.accessToken = publishDraft.shopAccessToken.trim()
+      if (publishDraft.shopThemeId.trim()) options.themeId = publishDraft.shopThemeId.trim()
+      return options
+    }
+
+    return options
+  }
+
+  const ensureProjectReadyForPublish = async () => {
+    if (versionPreview) throw new Error("Exit snapshot preview before publishing")
+    if (!currentProject?.id) throw new Error("Open a saved project before publishing")
+    if (!currentHtmlRef.current.trim()) throw new Error("Load a page before publishing")
+    await autoSave(currentHtmlRef.current)
+    return currentProject.id
+  }
+
+  const createPublishPreview = async () => {
+    try {
+      const projectId = await ensureProjectReadyForPublish()
+      setCreatingPublishPreview(true)
+      const preview = await apiCreatePublishPreview(projectId, { html: currentHtmlRef.current })
+      setLastPublishPreview(preview)
+      toast.success("Pre-publish preview ready")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Pre-publish preview failed")
+    } finally {
+      setCreatingPublishPreview(false)
+    }
+  }
+
+  const publishCurrentProject = async () => {
+    const target = publishDraft.target
+    try {
+      const projectId = await ensureProjectReadyForPublish()
+      setPublishingTarget(target)
+      const result = await apiPublishProject(projectId, target, {
+        ...getPublishOptions(target, "publish"),
+        html: currentHtmlRef.current,
+      })
+      await loadPublishHistory(projectId)
+      toast.success(result.deployUrl ? `Published to ${target}` : `Deployment queued for ${target}`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Publish failed")
+    } finally {
+      setPublishingTarget(null)
+    }
+  }
+
+  const rollbackPublishedDeployment = async (deployment: PublishDeployment) => {
+    if (!currentProject?.id) return
+    const confirmed = window.confirm(`Rollback to deployment #${deployment.id} on ${deployment.target}?`)
+    if (!confirmed) return
+    try {
+      setRollingBackDeploymentId(deployment.id)
+      const result = await apiRollbackDeployment(
+        currentProject.id,
+        deployment.id,
+        getPublishOptions(deployment.target, "rollback"),
+      )
+      await loadPublishHistory(currentProject.id)
+      toast.success(result.deployUrl ? "Rollback deployed" : "Rollback completed")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Rollback failed")
+    } finally {
+      setRollingBackDeploymentId(null)
+    }
+  }
+
+  const loadCustomDomainGuide = async () => {
+    if (!currentProject?.id) {
+      toast.warning("Open a saved project before requesting a custom domain guide")
+      return
+    }
+    if (!publishDraft.customDomain.trim()) {
+      toast.warning("Enter a custom domain first")
+      return
+    }
+    try {
+      const nextGuide = await apiGetCustomDomainGuide(
+        currentProject.id,
+        publishDraft.customDomain.trim(),
+        publishDraft.target,
+      )
+      setCustomDomainGuide(nextGuide)
+      toast.success("Domain guide ready")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Custom domain guide failed")
+    }
+  }
+
+  const compareProjectVersion = async (versionId: number) => {
+    if (!currentProject?.id) return
+    setActiveVersionActionId(versionId)
+    try {
+      const version = await apiGetProjectVersion(currentProject.id, versionId)
+      setVersionCompare(version)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Version compare failed")
+    } finally {
+      setActiveVersionActionId(null)
+    }
+  }
+
+  const runEditorAudit = async (source: EditorAudit["source"]) => {
+    if (!currentHtmlRef.current.trim()) {
+      toast.warning("Load a page before running an audit")
+      return
+    }
+    setRunningAudit(source)
+    try {
+      let remoteAudit:
+        | {
+            scores?: Record<string, number>
+            metrics?: Record<string, string>
+            opportunities?: Array<{ title: string; value: string }>
+          }
+        | undefined
+
+      if (source === "seo" && /^https?:\/\//i.test(loadedUrl || "")) {
+        try {
+          const data = await apiFetch<{
+            ok: boolean
+            url: string
+            scores: Record<string, number>
+            metrics: Record<string, string>
+            opportunities: Array<{ title: string; value: string }>
+          }>("/api/seo/audit", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: loadedUrl }),
+          })
+          if (data?.ok) {
+            remoteAudit = {
+              scores: data.scores,
+              metrics: data.metrics,
+              opportunities: data.opportunities,
+            }
+          }
+        } catch {
+          remoteAudit = undefined
+        }
+      }
+
+      setEditorAudit(buildLocalAudit(currentHtmlRef.current, loadedUrl, source, remoteAudit))
+    } finally {
+      setRunningAudit(null)
+    }
+  }
+
+  const persistProjectPagesState = async (nextPages: ProjectPage[], nextHtml = currentHtmlRef.current) => {
+    if (!currentProject?.id) return null
+    const savedProject = await apiSaveProject(currentProject.id, {
+      html: nextHtml,
+      pages: nextPages,
+      platform: currentPlatform,
+      pageId: activePageId || undefined,
+    })
+    if (savedProject) {
+      setCurrentProject(savedProject)
+      setProjectPages(savedProject.pages || nextPages)
+    } else {
+      setProjectPages(nextPages)
+    }
+    return savedProject
+  }
+
+  const switchLanguageVariant = (variant: string) => {
+    if (!activePageId) {
+      setActiveLanguageVariant("base")
+      return
+    }
+    const activePage = projectPages.find((page) => page.id === activePageId)
+    if (!activePage) return
+    const storedVariant = variant === "base" ? null : activePage.languageVariants?.[variant] || null
+    const nextHtml =
+      variant === "base"
+        ? String(activePage.html || "")
+        : getLanguageVariantEffectiveHtml(storedVariant)
+    if (!nextHtml.trim()) {
+      toast.warning("That language variant is not stored yet for this page")
+      return
+    }
+    setActiveLanguageVariant(variant)
+    if (variant === "base") setShowTranslationSplitView(false)
+    const storedSegments =
+      storedVariant?.segments?.length
+        ? buildTranslationSegmentsWithOverrides(storedVariant.segments as WebsiteTranslationSegment[], storedVariant.overrides || {})
+        : []
+    setTranslationReview(
+      variant === "base" || !storedSegments.length
+        ? null
+        : {
+            targetLanguage: variant,
+            detectedSourceLanguage: storedVariant?.detectedSourceLanguage || "",
+            translatedCount: Number(storedVariant?.translatedCount || storedSegments.length || 0),
+            segments: storedSegments,
+          }
+    )
+    setTranslationOverrideDrafts(
+      storedSegments.length
+        ? Object.fromEntries(
+            storedSegments.map((segment) => [segment.id, storedVariant?.overrides?.[segment.id] || segment.translatedText])
+          )
+        : {}
+    )
+    setActiveTranslationSegmentId(storedSegments[0]?.id || null)
+    setTranslationInfo(
+      variant === "base"
+        ? null
+        : {
+            targetLanguage: variant,
+            detectedSourceLanguage: storedVariant?.detectedSourceLanguage || "",
+            translatedCount: Number(storedVariant?.translatedCount || 0),
+          }
+    )
+    applyEditorHtml(nextHtml, { resetHistory: true })
+    renderToIframe(nextHtml)
+    setStatus("ok")
+  }
+
+  const applyTranslationOverride = async (segmentId: string) => {
+    const segment = translationReview?.segments.find((entry) => entry.id === segmentId)
+    const nextValue = translationOverrideDrafts[segmentId]
+    if (!segment || !nextValue?.trim()) return
+    const trimmedValue = nextValue.trim()
+    const activePage = activePageId ? projectPages.find((page) => page.id === activePageId) || null : null
+    const currentVariant =
+      activeLanguageVariant !== "base" && activePage
+        ? activePage.languageVariants?.[activeLanguageVariant] || null
+        : null
+    const sourceSegments = (currentVariant?.segments as WebsiteTranslationSegment[] | undefined) || translationReview?.segments || []
+    const nextOverrides = {
+      ...(currentVariant?.overrides || {}),
+      [segmentId]: trimmedValue,
+    }
+    const baseHtml = String(currentVariant?.baseHtml || currentVariant?.html || currentHtmlRef.current || "")
+    const nextHtml = applyTranslationOverridesToHtml(baseHtml, sourceSegments, nextOverrides)
+    const nextSegments = buildTranslationSegmentsWithOverrides(sourceSegments, nextOverrides)
+
+    if (currentProject?.id && activePage) {
+      applyEditorHtml(nextHtml, { recordUndo: true })
+      renderToIframe(nextHtml)
+      const nowIso = new Date().toISOString()
+      const nextPages = projectPages.map((page) =>
+        page.id === activePage.id
+          ? {
+              ...page,
+              languageVariants: {
+                ...(page.languageVariants || {}),
+                [activeLanguageVariant]: {
+                  ...(page.languageVariants?.[activeLanguageVariant] || {}),
+                  html: nextHtml,
+                  baseHtml,
+                  updatedAt: nowIso,
+                  overrides: nextOverrides,
+                  segments: sourceSegments,
+                },
+              },
+              updatedAt: nowIso,
+            }
+          : page
+      )
+      setProjectPages(nextPages)
+      setCurrentProject((previous) => (previous ? { ...previous, pages: nextPages } : previous))
+
+      try {
+        const savedProject = await apiSaveProject(currentProject.id, {
+          html: String(activePage.html || currentProject.html || ""),
+          pages: nextPages,
+          platform: currentPlatform,
+          pageId: activePage.id,
+        })
+        if (savedProject) {
+          setCurrentProject(savedProject)
+          setProjectPages(savedProject.pages || nextPages)
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Translation override save failed")
+      }
+    } else {
+      commitLiveEditorHtml(nextHtml)
+    }
+
+    setTranslationReview((previous) =>
+      previous
+        ? {
+            ...previous,
+            segments: nextSegments,
+          }
+        : previous
+    )
+    setTranslationOverrideDrafts((previous) => ({ ...previous, [segmentId]: trimmedValue }))
+    toast.success("Translation override applied")
+  }
+
+  const storeCurrentAsLanguageVariant = async () => {
+    if (!currentProject?.id || !activePageId) {
+      toast.warning("Open a saved project page before creating language variants")
+      return
+    }
+    if (!translationTargetLanguage || translationTargetLanguage === "base") {
+      toast.warning("Choose a target language first")
+      return
+    }
+    const activePage = projectPages.find((page) => page.id === activePageId)
+    if (!activePage) return
+    const nowIso = new Date().toISOString()
+    const nextPages = projectPages.map((page) =>
+      page.id === activePageId
+        ? {
+            ...page,
+            languageVariants: {
+              ...(page.languageVariants || {}),
+              [translationTargetLanguage]: {
+                html: currentHtmlRef.current,
+                updatedAt: nowIso,
+                detectedSourceLanguage:
+                  activeLanguageVariant === "base"
+                    ? translationInfo?.detectedSourceLanguage || ""
+                    : activeLanguageVariant,
+                translatedCount: Number(translationInfo?.translatedCount || 0),
+              },
+            },
+            updatedAt: nowIso,
+          }
+        : page
+    )
+    await persistProjectPagesState(nextPages)
+    setActiveLanguageVariant(translationTargetLanguage)
+    toast.success(`Saved current page as ${selectedTranslationLanguage.label}`)
+  }
+
+  const resetLanguageVariantFromBase = async () => {
+    if (!currentProject?.id || !activePageId || activeLanguageVariant === "base") return
+    const activePage = projectPages.find((page) => page.id === activePageId)
+    if (!activePage?.html?.trim()) {
+      toast.warning("Base page is empty, so there is nothing to restore")
+      return
+    }
+    const nowIso = new Date().toISOString()
+    const nextPages = projectPages.map((page) =>
+      page.id === activePageId
+        ? {
+            ...page,
+            languageVariants: {
+              ...(page.languageVariants || {}),
+              [activeLanguageVariant]: {
+                html: activePage.html,
+                updatedAt: nowIso,
+                detectedSourceLanguage: "",
+                translatedCount: 0,
+              },
+            },
+            updatedAt: nowIso,
+          }
+        : page
+    )
+    await persistProjectPagesState(nextPages, activePage.html)
+    setTranslationInfo({
+      targetLanguage: activeLanguageVariant,
+      detectedSourceLanguage: "",
+      translatedCount: 0,
+    })
+    setTranslationReview(null)
+    setTranslationOverrideDrafts({})
+    setActiveTranslationSegmentId(null)
+    applyEditorHtml(activePage.html, { resetHistory: true })
+    renderToIframe(activePage.html)
+    toast.success(`Reset ${activeLanguageVariant.toUpperCase()} to the base page`)
+  }
+
+  const deleteLanguageVariant = async () => {
+    if (!currentProject?.id || !activePageId || activeLanguageVariant === "base") return
+    const confirmed = window.confirm(`Delete the stored ${activeLanguageVariant.toUpperCase()} variant for this page?`)
+    if (!confirmed) return
+    const activePage = projectPages.find((page) => page.id === activePageId)
+    if (!activePage) return
+    const nextPages = projectPages.map((page) => {
+      if (page.id !== activePageId) return page
+      const nextVariants = { ...(page.languageVariants || {}) }
+      delete nextVariants[activeLanguageVariant]
+      return {
+        ...page,
+        languageVariants: nextVariants,
+        updatedAt: new Date().toISOString(),
+      }
+    })
+    await persistProjectPagesState(nextPages, activePage.html)
+    setActiveLanguageVariant("base")
+    setTranslationInfo(null)
+    setTranslationReview(null)
+    setTranslationOverrideDrafts({})
+    setActiveTranslationSegmentId(null)
+    setShowTranslationSplitView(false)
+    applyEditorHtml(activePage.html, { resetHistory: true })
+    renderToIframe(activePage.html)
+    toast.success("Language variant deleted")
+  }
+
+  const applyGlobalStyleOverridesNow = () => {
+    if (!currentHtmlRef.current.trim()) {
+      toast.warning("Load a page before applying site-wide style overrides")
+      return
+    }
+    const nextHtml = applyGlobalStylesToHtml(
+      currentHtmlRef.current,
+      globalStyleOverrides,
+      cssVariableOverrides,
+      selectedFontAsset,
+    )
+    commitLiveEditorHtml(nextHtml)
+    toast.success("Global style overrides applied")
+  }
+
+  const runBatchAiAcrossPages = async () => {
+    if (versionPreview) {
+      toast.warning("Exit snapshot preview before running AI prompts")
+      return
+    }
+    if (!currentProject?.id || projectPages.length < 2) {
+      toast.warning("Open a multi-page project before running batch AI")
+      return
+    }
+    if (!leftAiPrompt.trim()) {
+      toast.warning("Enter an AI prompt first")
+      return
+    }
+    setBatchAiRunning(true)
+    try {
+      await createVersionSnapshot({
+        source: "ai_page",
+        label: "Before batch AI across pages",
+        silent: true,
+      })
+
+      const nextPages: ProjectPage[] = []
+      const resolvedModel = leftAiModel === "auto" ? "claude-sonnet-4-6" : leftAiModel
+      const composedPrompt = composeAiPromptWithTone(leftAiPrompt)
+      for (const page of projectPages) {
+        const hydratedPage =
+          page.html && page.html.trim()
+            ? page
+            : (await apiLoadProjectPage(currentProject.id, page.id)).page || page
+        const pageHtml = String(hydratedPage.html || "")
+        if (!pageHtml.trim()) {
+          nextPages.push(hydratedPage)
+          continue
+        }
+        const response = await fetchWithAuth(ENDPOINTS.rewrite, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            html: pageHtml,
+            instruction: composedPrompt,
+            systemHint: "Return only valid HTML.",
+            model: resolvedModel,
+            approved: 1,
+          }),
+        })
+        const data = await response.json()
+        if (!data?.ok || !data?.html) {
+          throw new Error(data?.error || `AI rewrite failed for ${page.name || page.id}`)
+        }
+        if (data.usage || data.cost_eur != null) trackUsage(data)
+        nextPages.push({
+          ...hydratedPage,
+          html: data.html,
+          updatedAt: new Date().toISOString(),
+        })
+      }
+
+      const activePage = nextPages.find((page) => page.id === activePageId) || null
+      const saved = await apiSaveProject(currentProject.id, {
+        html: activePage?.html || currentHtmlRef.current,
+        pages: nextPages,
+        platform: currentPlatform,
+        pageId: activePageId || undefined,
+      })
+      if (saved) {
+        setCurrentProject(saved)
+        setProjectPages(saved.pages || nextPages)
+      } else {
+        setProjectPages(nextPages)
+      }
+      if (activePage?.html && activeLanguageVariant === "base") {
+        applyEditorHtml(activePage.html, { resetHistory: true })
+        renderToIframe(activePage.html)
+      }
+      await loadProjectVersions(currentProject.id)
+      toast.success(`Batch AI updated ${nextPages.length} pages`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Batch AI failed")
+    } finally {
+      setBatchAiRunning(false)
+    }
+  }
+
+  const inferAssistantEditorAction = (value: string) => {
+    const raw = String(value || "").trim()
+    if (!raw) return null
+    if (raw.startsWith("/")) return raw
+
+    const normalized = raw.toLowerCase()
+    const findLanguageCode = () => {
+      const directMatch = TOP_TRANSLATION_LANGUAGES.find((language) => {
+        const label = language.label.toLowerCase()
+        return (
+          normalized.includes(` ${language.code.toLowerCase()} `) ||
+          normalized.endsWith(` ${language.code.toLowerCase()}`) ||
+          normalized.includes(label)
+        )
+      })
+      return directMatch?.code || null
+    }
+    const findExportMode = () => {
+      const matched = EXPORT_MODE_OPTIONS.find((option) => {
+        const slug = option.value.toLowerCase()
+        const label = option.label.toLowerCase()
+        return normalized.includes(slug) || normalized.includes(label)
+      })
+      return matched?.value || null
+    }
+
+    if (/\b(open|show|launch)\b.*\bpreview\b/.test(normalized) || /^preview\b/.test(normalized)) {
+      return "/preview"
+    }
+
+    if (
+      /\b(create|make|generate|send|share)\b.*\bshare\b/.test(normalized) ||
+      /\bshare\b.*\b(link|preview)\b/.test(normalized)
+    ) {
+      return "/share"
+    }
+
+    if (
+      /\b(a11y|accessibility)\b/.test(normalized) ||
+      /\bseo\b/.test(normalized) ||
+      /\bcro\b/.test(normalized) ||
+      /\baudit\b/.test(normalized)
+    ) {
+      if (/\b(a11y|accessibility)\b/.test(normalized)) return "/audit accessibility"
+      if (/\bcro\b/.test(normalized)) return "/audit cro"
+      return "/audit seo"
+    }
+
+    if (/\btranslate\b|\blocali[sz]e\b/.test(normalized)) {
+      return `/translate ${findLanguageCode() || translationTargetLanguage}`
+    }
+
+    if (/\bexport\b|\bdownload\b/.test(normalized)) {
+      return `/export ${findExportMode() || exportMode}`
+    }
+
+    return null
+  }
+
+  const handleAssistantEditorAction = async (command: string) => {
+    const inferred = inferAssistantEditorAction(command)
+    if (!inferred) return null
+
+    const normalized = inferred.trim().replace(/^\/+/, "")
+    const [verbRaw, ...rest] = normalized.split(/\s+/)
+    const verb = String(verbRaw || "").toLowerCase()
+
+    if (!verb) return null
+
+    if (verb === "preview") {
+      openFullPreview()
+      return "Opened a clean preview."
+    }
+
+    if (verb === "share") {
+      await createSharePreview()
+      return "Created a share preview from the current saved state."
+    }
+
+    if (verb === "audit") {
+      const requested = String(rest[0] || "seo").toLowerCase()
+      const source: EditorAudit["source"] =
+        requested === "cro" ? "cro" : requested === "accessibility" || requested === "a11y" ? "accessibility" : "seo"
+      await runEditorAudit(source)
+      return `Ran the ${source} audit in the editor.`
+    }
+
+    if (verb === "translate") {
+      const language = String(rest[0] || translationTargetLanguage).trim()
+      await handleTranslateSite(language)
+      return `Translated the current page to ${language.toUpperCase()}.`
+    }
+
+    if (verb === "export") {
+      const requestedMode = String(rest[0] || exportMode).trim() as ExportMode
+      const validMode = EXPORT_MODE_OPTIONS.some((option) => option.value === requestedMode)
+        ? requestedMode
+        : exportMode
+      await handleExport(validMode)
+      return `Started export in ${validMode}.`
+    }
+
+    return null
+  }
+
+  const acceptAiDiff = () => {
+    setAiDiff(null)
+  }
+
+  const rejectAiDiff = () => {
+    if (!aiDiff?.beforeDocumentHtml) {
+      setAiDiff(null)
+      return
+    }
+    applyEditorHtml(aiDiff.beforeDocumentHtml, { resetHistory: true, save: true })
+    renderToIframe(aiDiff.beforeDocumentHtml)
+    setAiDiff(null)
+    toast.success("AI change reverted")
   }
 
   const changeWorkflowStage = async (stage: WorkflowStage) => {
@@ -610,6 +2000,12 @@ const autoSave = async (html: string) => {
     if (!iframe) return;
     iframe.srcdoc = html || "<!doctype html><html><head></head><body></body></html>";
   };
+
+  const renderToComparisonIframe = (html: string) => {
+    const iframe = comparisonIframeRef.current
+    if (!iframe) return
+    iframe.srcdoc = html || "<!doctype html><html><head></head><body></body></html>"
+  }
 
   const applyEditorHtml = (
     html: string,
@@ -658,12 +2054,25 @@ const autoSave = async (html: string) => {
 
   useEffect(() => {
     if (view !== "editor") return
+    if (versionPreview) {
+      renderToIframe(versionPreview.html)
+      return
+    }
     if (skipNextLiveIframeSyncRef.current && mode === "edit") {
       skipNextLiveIframeSyncRef.current = false
       return
     }
     renderToIframe(currentHtml)
-  }, [currentHtml, mode, view]);
+  }, [currentHtml, mode, view, versionPreview]);
+
+  useEffect(() => {
+    if (view !== "editor") return
+    if (!showTranslationSplitView || activeLanguageVariant === "base") {
+      renderToComparisonIframe("")
+      return
+    }
+    renderToComparisonIframe(comparisonBaseHtml)
+  }, [activeLanguageVariant, comparisonBaseHtml, showTranslationSplitView, view])
 
   const hasMeaningfulProjectHtml = (html: string) => {
     const raw = String(html || "").trim()
@@ -686,15 +2095,24 @@ const autoSave = async (html: string) => {
 
   const applyProjectPage = (project: Project, page: ProjectPage) => {
     const pageHtml = String(page.html || "")
+    exitVersionPreview(false)
+    clearVersionCompare()
     setActivePageId(page.id)
+    setActiveLanguageVariant("base")
+    setShowTranslationSplitView(false)
     setUrl(page.url || project.url || "")
     setLoadedUrl(page.url || project.url || "")
     applyEditorHtml(pageHtml, { resetHistory: true })
     setTranslationInfo(null)
+    setTranslationReview(null)
+    setTranslationOverrideDrafts({})
+    setActiveTranslationSegmentId(null)
+    setEditorAudit(null)
     setCurrentPlatform(resolvePlatform(project.platform, page.url || project.url, pageHtml))
     setCurrentPlatformGuide(project.platformGuide ?? null)
     setExportWarnings(project.latestExport?.manifest?.warnings || [])
     setExportReadiness(project.latestExport?.readiness || "ready")
+    lastSignificantSnapshotRef.current = { html: pageHtml, createdAt: Date.now() }
     renderToIframe(pageHtml)
     setStatus("ok")
   }
@@ -705,7 +2123,6 @@ const autoSave = async (html: string) => {
       applyProjectPage(project, page)
       return
     }
-    setLoadingProjectPageId(page.id)
     try {
       const response = await apiLoadProjectPage(project.id, page.id)
       const nextProject = response.project
@@ -715,8 +2132,6 @@ const autoSave = async (html: string) => {
       applyProjectPage(nextProject, nextPage)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Page could not be loaded.")
-    } finally {
-      setLoadingProjectPageId(null)
     }
   }
 
@@ -740,14 +2155,26 @@ const autoSave = async (html: string) => {
   }
 
   const resetLoadedDocument = (nextUrl = "", nextPlatform: SitePlatform = "unknown") => {
+    exitVersionPreview(false)
+    clearVersionCompare()
     setUrl(nextUrl)
     setLoadedUrl("")
     applyEditorHtml("", { resetHistory: true })
     setProjectPages([])
+    setProjectVersions([])
+    setProjectShares([])
+    setAiDiff(null)
     setActivePageId(null)
     setTranslationInfo(null)
+    setTranslationReview(null)
+    setTranslationOverrideDrafts({})
+    setActiveTranslationSegmentId(null)
+    setActiveLanguageVariant("base")
+    setShowTranslationSplitView(false)
     setCurrentPlatform(nextPlatform)
     setCurrentPlatformGuide(null)
+    setEditorAudit(null)
+    lastSignificantSnapshotRef.current = { html: "", createdAt: Date.now() }
     setExportWarnings([])
     setExportReadiness("ready")
     renderToIframe("")
@@ -761,7 +2188,7 @@ const autoSave = async (html: string) => {
     try {
       resetLoadedDocument(targetUrl)
       setStatus("blocked");
-      const r = await fetch(`${ENDPOINTS.proxy}?url=${encodeURIComponent(targetUrl)}`, { credentials: "include" });
+      const r = await fetchWithAuth(`${ENDPOINTS.proxy}?url=${encodeURIComponent(targetUrl)}`);
       if (!r.ok) {
         const text = await r.text();
         let msg = "Page could not be loaded.";
@@ -794,11 +2221,21 @@ const autoSave = async (html: string) => {
 
   const handleOpenProject = async (p: Project, initialPageId?: string | null) => {
     const project = await apiGetProject(p.id).catch(() => p)
+    exitVersionPreview(false)
+    clearVersionCompare()
+    setAiDiff(null)
     setCurrentProject(project)
     setTranslationInfo(null)
     setProjectPages(project.pages || [])
     setActivePageId(null)
+    setActiveLanguageVariant("base")
+    setLastPublishPreview(null)
+    setCustomDomainGuide(null)
     loadWorkflowHistory(project.id).catch(() => {})
+    loadProjectVersions(project.id).catch(() => {})
+    loadProjectShares(project.id).catch(() => {})
+    loadPublishTargets().catch(() => {})
+    loadPublishHistory(project.id).catch(() => {})
     if (view !== "admin") setView("editor")
 
     const projectHtml = String(project.html ?? "")
@@ -822,6 +2259,7 @@ const autoSave = async (html: string) => {
       setCurrentPlatformGuide(project.platformGuide ?? null)
       setExportWarnings(project.latestExport?.manifest?.warnings || [])
       setExportReadiness(project.latestExport?.readiness || "ready")
+      lastSignificantSnapshotRef.current = { html: inlineHtml, createdAt: Date.now() }
       renderToIframe(inlineHtml)
       setStatus("ok")
       if (project.url) {
@@ -839,6 +2277,7 @@ const autoSave = async (html: string) => {
       setCurrentPlatformGuide(project.platformGuide ?? null)
       setExportWarnings(project.latestExport?.manifest?.warnings || [])
       setExportReadiness(project.latestExport?.readiness || "ready")
+      lastSignificantSnapshotRef.current = { html: projectHtml, createdAt: Date.now() }
       renderToIframe(projectHtml)
       setStatus("ok")
       return
@@ -851,6 +2290,10 @@ const autoSave = async (html: string) => {
   }
 
   const handleModeSwitch = () => {
+    if (versionPreview) {
+      toast.warning("Exit snapshot preview before editing")
+      return
+    }
     if (mode === "view") { setMode("edit"); if (currentHtml) setStatus("ok"); }
     else {
       if (confirm("Änderungen speichern und zum View-Modus wechseln?")) {
@@ -859,8 +2302,14 @@ const autoSave = async (html: string) => {
     }
   };
 
-  const handleExport = async () => {
+  const handleExport = async (modeOverride?: ExportMode) => {
+    if (versionPreview) {
+      toast.warning("Exit snapshot preview before exporting")
+      return
+    }
     if (!currentHtml) { toast.warning("Bitte lade zuerst eine Website"); return; }
+    const nextExportMode = modeOverride || exportMode
+    if (modeOverride && modeOverride !== exportMode) setExportMode(modeOverride)
     setExporting(true);
     try {
       const validation = await apiFetch<{
@@ -873,7 +2322,7 @@ const autoSave = async (html: string) => {
       }>("/api/export/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html: currentHtml, url: loadedUrl, mode: exportMode, platform: currentPlatform })
+        body: JSON.stringify({ html: currentHtml, url: loadedUrl, mode: nextExportMode, platform: currentPlatform })
       })
       setCurrentPlatformGuide(validation.guide)
       setCurrentPlatform(validation.platform || currentPlatform)
@@ -883,14 +2332,17 @@ const autoSave = async (html: string) => {
         toast.warning(`${validation.warnings.length} delivery warning${validation.warnings.length === 1 ? "" : "s"} added to manifest`)
       }
 
-      const r = await fetch("/api/export", {
+      const r = await fetchWithAuth("/api/export", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           html: currentHtml,
           url: loadedUrl,
-          mode: exportMode,
+          mode: nextExportMode,
           platform: currentPlatform,
           project_id: currentProject?.id,
+          pageId: activePageId || undefined,
+          languageVariant: activeLanguageVariant !== "base" ? activeLanguageVariant : undefined,
+          pages: projectPages.length ? projectPages : undefined,
         })
       });
       if (!r.ok) {
@@ -901,13 +2353,14 @@ const autoSave = async (html: string) => {
       }
       const a = document.createElement("a");
       a.href = URL.createObjectURL(await r.blob());
-      a.download = getDownloadFilename(r, exportMode);
+      a.download = getDownloadFilename(r, nextExportMode);
       document.body.appendChild(a); a.click(); a.remove();
       if (currentProject?.id) {
         const refreshed = await apiGetProject(currentProject.id).catch(() => null)
         if (refreshed) {
           setCurrentProject(refreshed)
           await loadWorkflowHistory(refreshed.id)
+          await loadProjectVersions(refreshed.id)
         }
       }
     } catch (e) {
@@ -917,25 +2370,81 @@ const autoSave = async (html: string) => {
     }
   };
 
-  const handleTranslateSite = async () => {
+  const handleTranslateSite = async (targetLanguageOverride?: string) => {
+    if (versionPreview) {
+      toast.warning("Exit snapshot preview before translating")
+      return
+    }
     if (!currentHtml.trim()) {
       toast.warning("Load a site before translating it")
       return
     }
 
     const targetLanguage =
-      TOP_TRANSLATION_LANGUAGES.find((language) => language.code === translationTargetLanguage)?.code ||
+      TOP_TRANSLATION_LANGUAGES.find((language) => language.code === (targetLanguageOverride || translationTargetLanguage))?.code ||
       "de"
 
     setIsTranslatingSite(true)
     try {
+      await createVersionSnapshot({
+        source: "translate",
+        label: `Before translation to ${targetLanguage.toUpperCase()}`,
+        silent: true,
+      })
       const result = await translateWebsiteHtml(currentHtml, targetLanguage)
-      commitLiveEditorHtml(result.html)
+      if (currentProject?.id && activePageId) {
+        const nextPages = projectPages.map((page) =>
+          page.id === activePageId
+            ? {
+                ...page,
+                languageVariants: {
+                  ...(page.languageVariants || {}),
+                  [targetLanguage]: {
+                    html: result.html,
+                    baseHtml: result.html,
+                    updatedAt: new Date().toISOString(),
+                    detectedSourceLanguage: result.detectedSourceLanguage,
+                    translatedCount: result.translatedCount,
+                    overrides: {},
+                    segments: result.segments,
+                  },
+                },
+                updatedAt: new Date().toISOString(),
+              }
+            : page
+        )
+        setProjectPages(nextPages)
+        const savedProject = await apiSaveProject(currentProject.id, {
+          html: currentHtmlRef.current,
+          pages: nextPages,
+          platform: currentPlatform,
+          pageId: activePageId,
+        })
+        if (savedProject) {
+          setCurrentProject(savedProject)
+          setProjectPages(savedProject.pages || nextPages)
+        }
+        setActiveLanguageVariant(targetLanguage)
+        applyEditorHtml(result.html, { resetHistory: true })
+        renderToIframe(result.html)
+      } else {
+        commitLiveEditorHtml(result.html)
+      }
       setTranslationInfo({
         targetLanguage,
         detectedSourceLanguage: result.detectedSourceLanguage,
         translatedCount: result.translatedCount,
       })
+      setTranslationReview({
+        targetLanguage,
+        detectedSourceLanguage: result.detectedSourceLanguage,
+        translatedCount: result.translatedCount,
+        segments: result.segments,
+      })
+      setTranslationOverrideDrafts(
+        Object.fromEntries(result.segments.map((segment) => [segment.id, segment.translatedText]))
+      )
+      setActiveTranslationSegmentId(result.segments[0]?.id || null)
       const targetLabel =
         TOP_TRANSLATION_LANGUAGES.find((language) => language.code === targetLanguage)?.label || targetLanguage
       toast.success(
@@ -976,9 +2485,27 @@ const autoSave = async (html: string) => {
   }, [exportWarnings])
 
   useEffect(() => {
+    setAssetLibraryQuery("")
+  }, [currentProject?.id])
+
+  useEffect(() => {
     localStorage.setItem("se_translate_lang", translationTargetLanguage)
     setTranslationInfo(null)
+    setTranslationReview(null)
+    setTranslationOverrideDrafts({})
+    setActiveTranslationSegmentId(null)
   }, [translationTargetLanguage])
+
+  useEffect(() => {
+    const variableNames = collectCssVariables(currentHtml)
+    setCssVariableOverrides((previous) => {
+      const next: Record<string, string> = {}
+      variableNames.forEach((name) => {
+        next[name] = previous[name] || ""
+      })
+      return next
+    })
+  }, [currentHtml])
 
   useEffect(() => {
     const syncTheme = () => {
@@ -1016,12 +2543,21 @@ const autoSave = async (html: string) => {
       setEditorChrome(pickEditorChromeFromDocument(doc))
     }, 80)
     return () => window.clearTimeout(timer)
-  }, [view, currentHtml, loadedUrl, mode])
+  }, [view, currentHtml, loadedUrl, mode, versionPreview])
 
-  const handleAiRescan = (mode: "block" | "page") => {
-    setAiScanLoading(true);
-    window.dispatchEvent(new CustomEvent("blockoverlay:rescan", { detail: { mode } }));
-    setTimeout(() => setAiScanLoading(false), 4000);
+  const handleAiRescan = async (mode: "block" | "page") => {
+    if (versionPreview) {
+      toast.warning("Exit snapshot preview before running AI actions")
+      return
+    }
+    setAiScanLoading(true)
+    await createVersionSnapshot({
+      source: mode === "block" ? "ai_block" : "ai_page",
+      label: `Before AI ${mode} pass`,
+      silent: true,
+    })
+    window.dispatchEvent(new CustomEvent("blockoverlay:rescan", { detail: { mode } }))
+    setTimeout(() => setAiScanLoading(false), 4000)
   };
 
   const moveStructureItem = (rootId: string, delta: number) => {
@@ -1038,6 +2574,29 @@ const autoSave = async (html: string) => {
       }
     }))
     toast.success(`${component.name} added successfully!`)
+  }
+
+  const runLeftAiPrompt = async () => {
+    if (versionPreview) {
+      toast.warning("Exit snapshot preview before running AI prompts")
+      return
+    }
+    if (!leftAiPrompt.trim()) {
+      toast.warning(t("Please enter an AI prompt first"))
+      return
+    }
+    setLeftAiRunning(true)
+    await createVersionSnapshot({
+      source: "ai_prompt",
+      label: "Before AI prompt",
+      silent: true,
+    })
+    window.dispatchEvent(new CustomEvent("bo:left-ai-run", {
+      detail: {
+        model: leftAiModel === "auto" ? "claude-sonnet-4-6" : leftAiModel,
+        prompt: composeAiPromptWithTone(leftAiPrompt),
+      }
+    }))
   }
 
   useEffect(() => {
@@ -1069,8 +2628,83 @@ const autoSave = async (html: string) => {
   }, [])
 
   useEffect(() => {
+    const onDiffReady = (event: Event) => {
+      const detail = (event as CustomEvent).detail ?? {}
+      const afterHtml = String(detail.newHtml || "").trim()
+      if (!afterHtml) return
+      setAiDiff({
+        id: `diff-${Date.now()}`,
+        scope: detail.blockId ? "block" : "page",
+        beforeHtml: String(detail.oldHtml || ""),
+        afterHtml,
+        beforeDocumentHtml: currentHtmlRef.current,
+      })
+    }
+    window.addEventListener("bo:diff-ready", onDiffReady as EventListener)
+    return () => window.removeEventListener("bo:diff-ready", onDiffReady as EventListener)
+  }, [])
+
+  useEffect(() => {
+    const doc = iframeRef.current?.contentDocument || null
+    if (!doc) return
+    const markerId = "se-translation-review-style"
+    if (!doc.getElementById(markerId)) {
+      const style = doc.createElement("style")
+      style.id = markerId
+      style.textContent = `
+        [data-se-translation-focus="1"] {
+          outline: 2px solid rgba(16, 185, 129, 0.92) !important;
+          outline-offset: 3px !important;
+          box-shadow: 0 0 0 6px rgba(16, 185, 129, 0.16) !important;
+        }
+      `
+      doc.head?.appendChild(style)
+    }
+    Array.from(doc.querySelectorAll("[data-se-translation-focus='1']")).forEach((node) =>
+      node.removeAttribute("data-se-translation-focus")
+    )
+    if (!activeTranslationSegmentId || !translationReview) return
+    const segment = translationReview.segments.find((entry) => entry.id === activeTranslationSegmentId)
+    if (!segment) return
+    const element = doc.querySelector(segment.selector) as HTMLElement | null
+    if (!element) return
+    element.setAttribute("data-se-translation-focus", "1")
+    try {
+      element.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" })
+    } catch {
+      element.scrollIntoView()
+    }
+  }, [activeTranslationSegmentId, currentHtml, translationReview])
+
+  useEffect(() => {
+    if (!currentProject?.id || !currentHtml.trim() || versionPreview || mode !== "edit") return
+    const previous = lastSignificantSnapshotRef.current
+    if (!previous.html) {
+      lastSignificantSnapshotRef.current = { html: currentHtml, createdAt: Date.now() }
+      return
+    }
+    const changedEnough =
+      previous.html !== currentHtml &&
+      Math.abs(previous.html.length - currentHtml.length) >= 160
+    const waitedLongEnough = Date.now() - previous.createdAt >= 60_000
+    if (!changedEnough || !waitedLongEnough) return
+    const timer = window.setTimeout(() => {
+      void createVersionSnapshot({
+        source: "autosave",
+        label: "Autosave significant edit",
+        html: currentHtml,
+        pageId: activePageId || undefined,
+        silent: true,
+      })
+      lastSignificantSnapshotRef.current = { html: currentHtml, createdAt: Date.now() }
+    }, 1200)
+    return () => window.clearTimeout(timer)
+  }, [activePageId, createVersionSnapshot, currentHtml, currentProject?.id, mode, versionPreview])
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (view !== "editor") return
+      if (versionPreview) return
       const meta = event.metaKey || event.ctrlKey
       if (!meta || event.altKey) return
       const key = event.key.toLowerCase()
@@ -1084,13 +2718,31 @@ const autoSave = async (html: string) => {
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [view])
+  }, [versionPreview, view])
 
 
   const isEdit = mode === "edit";
   const isLoading = status === "blocked";
   const currentPlatformMeta = getPlatformMeta(currentPlatform);
   const editRailWidth = isEdit ? (isEditRailCollapsed ? EDIT_RAIL_COLLAPSED_WIDTH : EDIT_RAIL_EXPANDED_WIDTH) : 0
+  const viewportConfig = VIEWPORT_PRESETS[viewportPreset]
+  const activePage = activePageId ? projectPages.find((page) => page.id === activePageId) || null : null
+  const comparisonBaseHtml = activeLanguageVariant !== "base" ? String(activePage?.html || "") : ""
+  const availableLanguageVariants = [
+    { code: "base", label: "Original" },
+    ...Object.keys(activePage?.languageVariants || {}).map((code) => ({
+      code,
+      label: TOP_TRANSLATION_LANGUAGES.find((language) => language.code === code)?.label || code.toUpperCase(),
+    })),
+  ]
+  const assetLibrary = mergeAssetLibraries(currentProject?.assetLibrary || [], collectProjectAssets(currentHtml, projectPages))
+  const filteredAssetLibrary = assetLibrary.filter((asset) => {
+    const query = assetLibraryQuery.trim().toLowerCase()
+    if (!query) return true
+    return `${asset.label} ${asset.type} ${asset.url}`.toLowerCase().includes(query)
+  })
+  const selectedFontAsset = assetLibrary.find((asset) => asset.id === selectedFontAssetId) || null
+  const cssVariableNames = Object.keys(cssVariableOverrides)
   const blockFamilyChips = [
     { label: currentPlatformMeta.label, tint: currentPlatformMeta.accent, background: currentPlatformMeta.background, value: "all" as BlockFilter },
     { label: "HTML", tint: "rgba(148,163,184,0.92)", background: "rgba(148,163,184,0.12)", value: "content" as BlockFilter },
@@ -1100,20 +2752,37 @@ const autoSave = async (html: string) => {
     { label: "CTA", tint: "rgba(168,85,247,0.92)", background: "rgba(168,85,247,0.12)", value: "button" as BlockFilter },
   ]
   const selectedExportMode = EXPORT_MODE_OPTIONS.find(option => option.value === exportMode) || EXPORT_MODE_OPTIONS[0]
+  const selectedPublishTargetInfo = publishTargets.find((target) => target.id === publishDraft.target) || null
+  const recentPublishHistory = publishHistory.slice(0, 4)
   const selectedTranslationLanguage =
     TOP_TRANSLATION_LANGUAGES.find((language) => language.code === translationTargetLanguage) ||
     TOP_TRANSLATION_LANGUAGES[0]
-  const selectedProjectPage =
-    projectPages.find((page) => page.id === activePageId) ||
-    findDefaultProjectPage(projectPages)
+  const showComparisonViewport =
+    !versionPreview && showTranslationSplitView && activeLanguageVariant !== "base" && Boolean(comparisonBaseHtml)
   const selectedStructureItem =
     structureItems.find((item) => item.rootId === selectedRootId) ||
     structureItems.find((item) => item.isSelected) ||
     null
+  const versionPageLabelFor = (pageId?: string) => {
+    if (!pageId) return "Project"
+    return projectPages.find((page) => page.id === pageId)?.name || pageId
+  }
+  const versionTitleFor = (version?: ProjectVersion | ProjectVersionDetail | null) => {
+    if (!version) return ""
+    return version.label?.trim() || PROJECT_VERSION_SOURCE_LABELS[version.source] || titleCaseFallback(version.source)
+  }
+  const versionMetaFor = (version?: ProjectVersion | ProjectVersionDetail | null) => {
+    if (!version) return ""
+    const parts = [formatEditorDateTime(version.created_at)]
+    if (version.pageId) parts.push(versionPageLabelFor(version.pageId))
+    return parts.join(" · ")
+  }
+  const previewVersionTitle = versionTitleFor(versionPreview)
   const editorShellStyle: CSSProperties = {
     height: "100vh",
     ["--editor-topbar-height" as string]: "58px",
     ["--editor-rail-width" as string]: `${editRailWidth}px`,
+    ["--editor-viewport-device-width" as string]: viewportConfig.width ? `${viewportConfig.width}px` : "100%",
     ["--editor-chrome-bg" as string]:
       theme === "light" ? "rgba(255,255,255,0.96)" : editorChrome.background,
     ["--editor-chrome-border" as string]:
@@ -1356,6 +3025,7 @@ useEffect(() => {
               className="editor-select"
               value={currentProject.workflowStage || "draft"}
               onChange={e => changeWorkflowStage(e.target.value as WorkflowStage)}
+              disabled={Boolean(versionPreview)}
               title={workflowHistory[0] ? `Last workflow change: ${String(workflowHistory[0].to_stage || "draft").replace(/_/g, " ")}` : "Workflow stage"}
             >
               {WORKFLOW_STAGE_OPTIONS.map(option => (
@@ -1366,11 +3036,48 @@ useEffect(() => {
             </select>
           )}
 
+          {versionPreview && (
+            <div
+              className="editor-pill"
+              title={versionMetaFor(versionPreview)}
+              style={{
+                borderColor: "rgba(245, 158, 11, 0.3)",
+                background: "rgba(245, 158, 11, 0.14)",
+                color: "#fbbf24",
+              }}
+            >
+              <span className="editor-pill__dot" style={{ background: "#fbbf24" }} />
+              Snapshot preview
+            </div>
+          )}
+
+          <div className="editor-viewport-switcher" role="group" aria-label="Viewport preview">
+            {(Object.keys(VIEWPORT_PRESETS) as ViewportPreset[]).map((preset) => (
+              <button
+                key={preset}
+                className={`editor-btn editor-btn--compact ${viewportPreset === preset ? "editor-btn--primary" : ""}`}
+                onClick={() => setViewportPreset(preset)}
+                title={`${VIEWPORT_PRESETS[preset].label} preview`}
+              >
+                {VIEWPORT_PRESETS[preset].label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            className="editor-btn"
+            onClick={openFullPreview}
+            disabled={!currentHtml}
+            title="Open a clean no-chrome preview"
+          >
+            Preview
+          </button>
+
           <button
             className="editor-btn"
             onClick={applyUndo}
             title="Undo latest change"
-            disabled={!undoHistory.length}
+            disabled={!undoHistory.length || Boolean(versionPreview)}
           >
             Undo
           </button>
@@ -1378,7 +3085,7 @@ useEffect(() => {
             className="editor-btn"
             onClick={applyRedo}
             title="Redo latest change"
-            disabled={!redoHistory.length}
+            disabled={!redoHistory.length || Boolean(versionPreview)}
           >
             Redo
           </button>
@@ -1405,9 +3112,28 @@ useEffect(() => {
             </div>
           )}
 
+          {versionPreview && (
+            <>
+              <button
+                className="editor-btn"
+                onClick={() => exitVersionPreview(true)}
+              >
+                Exit preview
+              </button>
+              <button
+                className="editor-btn editor-btn--primary"
+                onClick={() => restoreProjectVersion(versionPreview.id)}
+                disabled={activeVersionActionId === versionPreview.id}
+              >
+                {activeVersionActionId === versionPreview.id ? "Restoring..." : "Restore snapshot"}
+              </button>
+            </>
+          )}
+
           <button
             className={`editor-btn editor-btn--primary ${isEdit ? "is-saving" : ""}`}
             onClick={handleModeSwitch}
+            disabled={Boolean(versionPreview)}
           >
             {isEdit ? "Save" : "Edit"}
           </button>
@@ -1429,7 +3155,7 @@ useEffect(() => {
             <button
               className={`editor-btn editor-btn--export ${exportReadiness === "guarded" ? "is-guarded" : ""}`}
               onClick={handleExport}
-              disabled={exporting}
+              disabled={exporting || Boolean(versionPreview)}
               title="Export"
               aria-busy={exporting ? "true" : undefined}
             >
@@ -1532,6 +3258,94 @@ useEffect(() => {
             >
               Allow Cloud Request
             </button>
+          </div>
+        </div>
+      )}
+
+      {aiDiff && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(2, 6, 23, 0.72)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 150,
+            padding: 18,
+          }}
+        >
+          <div
+            style={{
+              width: "min(1080px, 100%)",
+              maxHeight: "calc(100vh - 48px)",
+              overflow: "auto",
+              borderRadius: 18,
+              border: theme === "light" ? "1px solid rgba(148,163,184,0.28)" : "1px solid rgba(148,163,184,0.18)",
+              background: theme === "light" ? "rgba(255,255,255,0.98)" : "rgba(8,12,24,0.98)",
+              boxShadow: theme === "light" ? "0 24px 60px rgba(15,23,42,0.2)" : "0 24px 80px rgba(0,0,0,0.55)",
+              padding: 18,
+              display: "flex",
+              flexDirection: "column",
+              gap: 14,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 900, color: theme === "light" ? "#0f172a" : "white" }}>
+                  AI diff review
+                </div>
+                <div style={{ fontSize: 12, color: theme === "light" ? "#64748b" : "rgba(148,163,184,0.86)" }}>
+                  {aiDiff.scope === "block" ? "Block-level change" : "Page-level change"} ready for accept or rollback.
+                </div>
+              </div>
+              <button
+                className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                onClick={acceptAiDiff}
+              >
+                Close
+              </button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div
+                style={{
+                  borderRadius: 14,
+                  border: theme === "light" ? "1px solid rgba(148,163,184,0.22)" : "1px solid rgba(148,163,184,0.16)",
+                  padding: 12,
+                  background: theme === "light" ? "rgba(248,250,252,0.96)" : "rgba(255,255,255,0.03)",
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 8, color: theme === "light" ? "#334155" : "#cbd5e1" }}>
+                  Before
+                </div>
+                <pre style={{ whiteSpace: "pre-wrap", margin: 0, fontSize: 12, lineHeight: 1.5, color: theme === "light" ? "#0f172a" : "#f8fafc" }}>
+                  {buildDiffPreview(aiDiff.beforeHtml || aiDiff.beforeDocumentHtml)}
+                </pre>
+              </div>
+              <div
+                style={{
+                  borderRadius: 14,
+                  border: "1px solid rgba(34,197,94,0.24)",
+                  padding: 12,
+                  background: theme === "light" ? "rgba(240,253,244,0.96)" : "rgba(34,197,94,0.08)",
+                }}
+              >
+                <div style={{ fontSize: 12, fontWeight: 800, marginBottom: 8, color: theme === "light" ? "#166534" : "#86efac" }}>
+                  After
+                </div>
+                <pre style={{ whiteSpace: "pre-wrap", margin: 0, fontSize: 12, lineHeight: 1.5, color: theme === "light" ? "#14532d" : "#dcfce7" }}>
+                  {buildDiffPreview(aiDiff.afterHtml)}
+                </pre>
+              </div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+              <button className="editor-btn editor-btn--panel editor-btn--panel-muted" onClick={rejectAiDiff}>
+                Reject and revert
+              </button>
+              <button className="editor-btn editor-btn--panel editor-btn--success" onClick={acceptAiDiff}>
+                Accept change
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1694,6 +3508,505 @@ useEffect(() => {
               <div className="editor-panel__divider" />
 
               <section className="editor-panel__section">
+                <div className="editor-panel__label">Preview</div>
+                <div className="editor-panel__note">
+                  Clean previews open without editor chrome. Share previews use the saved project state.
+                </div>
+                <div className="editor-panel__two-up">
+                  <button
+                    className="editor-btn editor-btn--panel"
+                    onClick={openFullPreview}
+                    disabled={!currentHtml}
+                  >
+                    Clean preview
+                  </button>
+                  <button
+                    className="editor-btn editor-btn--panel editor-btn--panel-muted"
+                    onClick={createSharePreview}
+                    disabled={sharingPreview || !currentProject || Boolean(versionPreview)}
+                  >
+                    {sharingPreview ? "Sharing..." : "Share link"}
+                  </button>
+                </div>
+                <input
+                  className="editor-select editor-select--full"
+                  value={shareEmail}
+                  onChange={(event) => setShareEmail(event.target.value)}
+                  placeholder="Optional client email"
+                />
+                {currentProject ? (
+                  projectShares.length ? (
+                    <div className="editor-panel__warning-list">
+                      {projectShares.slice(0, 4).map((share) => (
+                        <div key={share.url} className="editor-panel__warning-item">
+                          <span className="editor-panel__warning-item-code">↗</span>
+                          <span className="editor-panel__warning-item-copy">
+                            {shortenText(
+                              [
+                                share.pageId ? versionPageLabelFor(share.pageId) : "",
+                                share.languageVariant ? share.languageVariant.toUpperCase() : "",
+                                share.url.replace(/^https?:\/\//, ""),
+                              ]
+                                .filter(Boolean)
+                                .join(" · "),
+                              56,
+                            )}
+                          </span>
+                          <button
+                            className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                            onClick={() => window.open(share.url, "_blank", "noopener,noreferrer")}
+                          >
+                            Open
+                          </button>
+                          <button
+                            className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                            onClick={() => void copySharePreviewUrl(share.url)}
+                          >
+                            Copy
+                          </button>
+                          <button
+                            className="editor-btn editor-btn--panel editor-btn--compact"
+                            onClick={() => void revokeSharePreview(share.id)}
+                          >
+                            Revoke
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="editor-panel__note">
+                      {loadingShares ? "Loading share previews..." : "No share previews yet."}
+                    </div>
+                  )
+                ) : (
+                  <div className="editor-panel__note">Share previews require a saved project.</div>
+                )}
+              </section>
+
+              <div className="editor-panel__divider" />
+
+              <section className="editor-panel__section">
+                <div className="editor-panel__label">Publish</div>
+                <div className="editor-panel__note">
+                  Publishes the current editor state. The active page is autosaved before preview or deployment.
+                </div>
+                <div className="editor-panel__publish-target">
+                  <select
+                    className="editor-select editor-select--full"
+                    value={publishDraft.target}
+                    onChange={(event) => {
+                      updatePublishDraft("target", event.target.value as PublishTarget)
+                      setCustomDomainGuide(null)
+                    }}
+                    disabled={loadingPublishTargets}
+                    title="Publish target"
+                  >
+                    {(["firebase", "netlify", "vercel", "wordpress", "shopify"] as PublishTarget[]).map((target) => (
+                      <option key={target} value={target}>
+                        {publishTargets.find((entry) => entry.id === target)?.label || titleCaseFallback(target)}
+                      </option>
+                    ))}
+                  </select>
+                  {selectedPublishTargetInfo ? (
+                    <div className={`editor-panel__publish-badge ${selectedPublishTargetInfo.configured ? "is-ready" : "is-manual"}`}>
+                      {selectedPublishTargetInfo.configured ? "Server ready" : "Needs inline credentials"}
+                    </div>
+                  ) : null}
+                </div>
+                {selectedPublishTargetInfo ? (
+                  <div className="editor-panel__note">
+                    {selectedPublishTargetInfo.configured
+                      ? `${selectedPublishTargetInfo.label} can publish with the server environment as-is.`
+                      : `${selectedPublishTargetInfo.label} needs values from the fields below unless the server environment is configured.`}
+                  </div>
+                ) : (
+                  <div className="editor-panel__note">
+                    {loadingPublishTargets ? "Loading publish targets..." : "Publish targets could not be loaded."}
+                  </div>
+                )}
+
+                {publishDraft.target === "firebase" ? (
+                  <input
+                    className="editor-select editor-select--full"
+                    value={publishDraft.firebaseSiteId}
+                    onChange={(event) => updatePublishDraft("firebaseSiteId", event.target.value)}
+                    placeholder="Optional Firebase site id"
+                  />
+                ) : null}
+
+                {publishDraft.target === "netlify" ? (
+                  <div className="editor-panel__publish-grid">
+                    <input
+                      className="editor-select editor-select--full"
+                      value={publishDraft.netlifySiteId}
+                      onChange={(event) => updatePublishDraft("netlifySiteId", event.target.value)}
+                      placeholder="Optional Netlify site id"
+                    />
+                    <input
+                      className="editor-select editor-select--full"
+                      value={publishDraft.netlifyToken}
+                      onChange={(event) => updatePublishDraft("netlifyToken", event.target.value)}
+                      placeholder="Optional Netlify token"
+                      type="password"
+                    />
+                  </div>
+                ) : null}
+
+                {publishDraft.target === "vercel" ? (
+                  <input
+                    className="editor-select editor-select--full"
+                    value={publishDraft.vercelToken}
+                    onChange={(event) => updatePublishDraft("vercelToken", event.target.value)}
+                    placeholder="Optional Vercel token"
+                    type="password"
+                  />
+                ) : null}
+
+                {publishDraft.target === "wordpress" ? (
+                  <>
+                    <div className="editor-panel__publish-grid">
+                      <input
+                        className="editor-select editor-select--full"
+                        value={publishDraft.wpUrl}
+                        onChange={(event) => updatePublishDraft("wpUrl", event.target.value)}
+                        placeholder="WordPress site URL"
+                      />
+                      <input
+                        className="editor-select editor-select--full"
+                        value={publishDraft.wpUser}
+                        onChange={(event) => updatePublishDraft("wpUser", event.target.value)}
+                        placeholder="WP username"
+                      />
+                    </div>
+                    <div className="editor-panel__publish-grid">
+                      <input
+                        className="editor-select editor-select--full"
+                        value={publishDraft.wpAppPassword}
+                        onChange={(event) => updatePublishDraft("wpAppPassword", event.target.value)}
+                        placeholder="WP app password"
+                        type="password"
+                      />
+                      <input
+                        className="editor-select editor-select--full"
+                        value={publishDraft.wpPageId}
+                        onChange={(event) => updatePublishDraft("wpPageId", event.target.value)}
+                        placeholder="Optional page id"
+                      />
+                    </div>
+                  </>
+                ) : null}
+
+                {publishDraft.target === "shopify" ? (
+                  <>
+                    <div className="editor-panel__publish-grid">
+                      <input
+                        className="editor-select editor-select--full"
+                        value={publishDraft.shopDomain}
+                        onChange={(event) => updatePublishDraft("shopDomain", event.target.value)}
+                        placeholder="Shopify domain"
+                      />
+                      <input
+                        className="editor-select editor-select--full"
+                        value={publishDraft.shopAccessToken}
+                        onChange={(event) => updatePublishDraft("shopAccessToken", event.target.value)}
+                        placeholder="Shopify access token"
+                        type="password"
+                      />
+                    </div>
+                    <input
+                      className="editor-select editor-select--full"
+                      value={publishDraft.shopThemeId}
+                      onChange={(event) => updatePublishDraft("shopThemeId", event.target.value)}
+                      placeholder="Optional Shopify theme id"
+                    />
+                  </>
+                ) : null}
+
+                <div className="editor-panel__publish-toolbar">
+                  <button
+                    className="editor-btn editor-btn--panel editor-btn--panel-muted"
+                    onClick={() => void createPublishPreview()}
+                    disabled={creatingPublishPreview || !currentProject || Boolean(versionPreview)}
+                  >
+                    {creatingPublishPreview ? "Creating..." : "Preview URL"}
+                  </button>
+                  <button
+                    className="editor-btn editor-btn--panel editor-btn--success"
+                    onClick={() => void publishCurrentProject()}
+                    disabled={!currentProject || !currentHtml || Boolean(versionPreview) || Boolean(publishingTarget)}
+                  >
+                    {publishingTarget === publishDraft.target ? "Publishing..." : `Publish to ${selectedPublishTargetInfo?.label || titleCaseFallback(publishDraft.target)}`}
+                  </button>
+                </div>
+
+                {lastPublishPreview ? (
+                  <div className="editor-panel__publish-preview">
+                    <div className="editor-panel__publish-row">
+                      <strong>Latest preview</strong>
+                      <span>Expires {formatEditorDateTime(lastPublishPreview.expiresAt)}</span>
+                    </div>
+                    <div className="editor-panel__publish-url">
+                      {shortenText(lastPublishPreview.previewUrl.replace(/^https?:\/\//, ""), 60)}
+                    </div>
+                    <div className="editor-panel__publish-actions">
+                      <button
+                        className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                        onClick={() => window.open(lastPublishPreview.previewUrl, "_blank", "noopener,noreferrer")}
+                      >
+                        Open
+                      </button>
+                      <button
+                        className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                        onClick={() => void copyTextValue(lastPublishPreview.previewUrl, "Preview URL copied", "Copy this preview URL")}
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="editor-panel__publish-grid">
+                  <input
+                    className="editor-select editor-select--full"
+                    value={publishDraft.customDomain}
+                    onChange={(event) => updatePublishDraft("customDomain", event.target.value)}
+                    placeholder="Custom domain"
+                  />
+                  <button
+                    className="editor-btn editor-btn--panel editor-btn--accent"
+                    onClick={() => void loadCustomDomainGuide()}
+                    disabled={!currentProject}
+                  >
+                    Domain guide
+                  </button>
+                </div>
+
+                {customDomainGuide ? (
+                  <div className="editor-panel__publish-guide">
+                    <div className="editor-panel__publish-row">
+                      <strong>{customDomainGuide.domain}</strong>
+                      <span>{titleCaseFallback(customDomainGuide.target)}</span>
+                    </div>
+                    <div className="editor-panel__note">
+                      {customDomainGuide.guide.recordType} → {customDomainGuide.guide.recordValue}
+                    </div>
+                    <div className="editor-panel__publish-guide-steps">
+                      {customDomainGuide.guide.steps.map((step, index) => (
+                        <div key={`${customDomainGuide.domain}-${index}`} className="editor-panel__publish-guide-step">
+                          <span>{index + 1}</span>
+                          <span>{step}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="editor-panel__version-toolbar">
+                  <div className="editor-panel__note">
+                    {currentProject
+                      ? recentPublishHistory.length
+                        ? `${publishHistory.length} deployment${publishHistory.length === 1 ? "" : "s"} tracked for this project.`
+                        : "No deployments recorded for this project yet."
+                      : "Open a saved project to publish and track deployment history."}
+                  </div>
+                  <button
+                    className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                    onClick={() => currentProject?.id && loadPublishHistory(currentProject.id)}
+                    disabled={!currentProject || loadingPublishHistory}
+                  >
+                    {loadingPublishHistory ? "..." : "Refresh"}
+                  </button>
+                </div>
+
+                {currentProject && recentPublishHistory.length ? (
+                  <div className="editor-panel__publish-history">
+                    {recentPublishHistory.map((deployment) => (
+                      <div
+                        key={deployment.id}
+                        className={`editor-panel__publish-item is-${deployment.status}`}
+                      >
+                        <div className="editor-panel__publish-row">
+                          <strong>{titleCaseFallback(deployment.target)}</strong>
+                          <span>{formatEditorDateTime(deployment.finished_at || deployment.created_at)}</span>
+                        </div>
+                        <div className="editor-panel__publish-row">
+                          <span>{deployment.status === "success" ? "Live" : deployment.status === "failed" ? "Failed" : "Pending"}</span>
+                          <span>{deployment.export_mode || selectedExportMode.label}</span>
+                        </div>
+                        {deployment.deploy_url ? (
+                          <div className="editor-panel__publish-url">
+                            {shortenText(deployment.deploy_url.replace(/^https?:\/\//, ""), 60)}
+                          </div>
+                        ) : null}
+                        {deployment.error_message ? (
+                          <div className="editor-panel__note">{shortenText(deployment.error_message, 120)}</div>
+                        ) : null}
+                        <div className="editor-panel__publish-actions">
+                          <button
+                            className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                            onClick={() => deployment.deploy_url && window.open(deployment.deploy_url, "_blank", "noopener,noreferrer")}
+                            disabled={!deployment.deploy_url}
+                          >
+                            Open
+                          </button>
+                          <button
+                            className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                            onClick={() => deployment.deploy_url && copyTextValue(deployment.deploy_url, "Publish URL copied", "Copy this publish URL")}
+                            disabled={!deployment.deploy_url}
+                          >
+                            Copy
+                          </button>
+                          <button
+                            className="editor-btn editor-btn--panel editor-btn--compact"
+                            onClick={() => void rollbackPublishedDeployment(deployment)}
+                            disabled={deployment.status !== "success" || rollingBackDeploymentId === deployment.id || Boolean(versionPreview)}
+                          >
+                            {rollingBackDeploymentId === deployment.id ? "Rolling back..." : "Rollback"}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </section>
+
+              <div className="editor-panel__divider" />
+
+              <section className="editor-panel__section">
+                <div className="editor-panel__label">Design System</div>
+                <div className="editor-panel__translation-controls">
+                  <input
+                    className="editor-select editor-select--full"
+                    value={globalStyleOverrides.fontFamily}
+                    onChange={(event) =>
+                      setGlobalStyleOverrides((previous) => ({ ...previous, fontFamily: event.target.value }))
+                    }
+                    placeholder="Site font-family"
+                  />
+                </div>
+                <div className="editor-panel__two-up">
+                  <input
+                    className="editor-select editor-select--full"
+                    value={globalStyleOverrides.textColor}
+                    onChange={(event) =>
+                      setGlobalStyleOverrides((previous) => ({ ...previous, textColor: event.target.value }))
+                    }
+                    placeholder="Text color"
+                  />
+                  <input
+                    className="editor-select editor-select--full"
+                    value={globalStyleOverrides.backgroundColor}
+                    onChange={(event) =>
+                      setGlobalStyleOverrides((previous) => ({ ...previous, backgroundColor: event.target.value }))
+                    }
+                    placeholder="Background"
+                  />
+                </div>
+                <div className="editor-panel__two-up">
+                  <input
+                    className="editor-select editor-select--full"
+                    value={globalStyleOverrides.accentColor}
+                    onChange={(event) =>
+                      setGlobalStyleOverrides((previous) => ({ ...previous, accentColor: event.target.value }))
+                    }
+                    placeholder="Accent color"
+                  />
+                  <button
+                    className="editor-btn editor-btn--panel editor-btn--success"
+                    onClick={applyGlobalStyleOverridesNow}
+                    disabled={!currentHtml}
+                  >
+                    Apply styles
+                  </button>
+                </div>
+                {cssVariableNames.length ? (
+                  <>
+                    <div className="editor-panel__note">CSS variables</div>
+                    <div className="editor-panel__warning-list">
+                      {cssVariableNames.slice(0, 8).map((name) => (
+                        <div key={name} className="editor-panel__warning-item">
+                          <span className="editor-panel__warning-item-code">#</span>
+                          <span className="editor-panel__warning-item-copy">{name}</span>
+                          <input
+                            className="editor-select editor-select--full"
+                            value={cssVariableOverrides[name] || ""}
+                            onChange={(event) =>
+                              setCssVariableOverrides((previous) => ({ ...previous, [name]: event.target.value }))
+                            }
+                            placeholder="override"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : null}
+                <div className="editor-panel__note">
+                  {assetLibrary.length
+                    ? `${assetLibrary.length} project asset${assetLibrary.length === 1 ? "" : "s"} available across this project.`
+                    : "No reusable project assets detected yet."}
+                </div>
+                {assetLibrary.length > 6 ? (
+                  <input
+                    className="editor-select editor-select--full"
+                    value={assetLibraryQuery}
+                    onChange={(event) => setAssetLibraryQuery(event.target.value)}
+                    placeholder="Search project assets"
+                  />
+                ) : null}
+                <input
+                  type="file"
+                  multiple
+                  accept="image/*,.woff,.woff2,.ttf,.otf,.eot"
+                  onChange={(event) => {
+                    void handleAssetLibraryUpload(event.target.files)
+                    event.currentTarget.value = ""
+                  }}
+                />
+                {assetLibrary.length ? (
+                  <div
+                    className="editor-panel__warning-list"
+                    style={{ maxHeight: 320, overflow: "auto", paddingRight: 4 }}
+                  >
+                    {filteredAssetLibrary.map((asset) => (
+                      <div key={asset.id} className="editor-panel__warning-item" title={asset.url}>
+                        <span className="editor-panel__warning-item-code">{asset.type === "image" ? "Img" : "Font"}</span>
+                        <span className="editor-panel__warning-item-copy">{shortenText(asset.label, 52)}</span>
+                        {asset.type === "image" ? (
+                          <button
+                            className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                            onClick={() =>
+                              window.dispatchEvent(new CustomEvent("bo:prefill-image-src", { detail: { url: asset.url } }))
+                            }
+                          >
+                            Use
+                          </button>
+                        ) : (
+                          <button
+                            className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                            onClick={() => {
+                              const fontName = String(asset.label || "ProjectFont").replace(/\.[A-Za-z0-9]+$/, "")
+                              setSelectedFontAssetId(asset.id)
+                              setGlobalStyleOverrides((previous) => ({
+                                ...previous,
+                                fontFamily: `'${fontName}', system-ui, sans-serif`,
+                              }))
+                            }}
+                          >
+                            Set font
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+                {assetLibrary.length && !filteredAssetLibrary.length ? (
+                  <div className="editor-panel__note">No assets match the current filter.</div>
+                ) : null}
+              </section>
+
+              <div className="editor-panel__divider" />
+
+              <section className="editor-panel__section">
                 <div className="editor-panel__label">Localization</div>
                 <div className="editor-panel__translation-card">
                   <div className="editor-panel__translation-head">
@@ -1713,10 +4026,24 @@ useEffect(() => {
                         </option>
                       ))}
                     </select>
+                    {activePage ? (
+                      <select
+                        className="editor-select editor-select--full"
+                        value={activeLanguageVariant}
+                        onChange={(event) => switchLanguageVariant(event.target.value)}
+                        title="Stored language variants"
+                      >
+                        {availableLanguageVariants.map((variant) => (
+                          <option key={variant.code} value={variant.code}>
+                            {variant.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : null}
                     <button
                       className={`editor-btn editor-btn--panel editor-btn--translate ${isTranslatingSite ? "is-loading" : ""}`}
                       onClick={handleTranslateSite}
-                      disabled={isTranslatingSite || !currentHtml}
+                      disabled={isTranslatingSite || !currentHtml || Boolean(versionPreview)}
                     >
                       {isTranslatingSite ? "Translating..." : "Translate site"}
                     </button>
@@ -1724,6 +4051,40 @@ useEffect(() => {
                   <div className="editor-panel__note">
                     Translates the loaded page copy while preserving structure, exports, and block overlay markup.
                   </div>
+                  <div className="editor-panel__two-up">
+                    <button
+                      className="editor-btn editor-btn--panel editor-btn--panel-muted"
+                      onClick={() => void storeCurrentAsLanguageVariant()}
+                      disabled={!currentProject || !activePage || !currentHtml}
+                    >
+                      Save current as {selectedTranslationLanguage.label}
+                    </button>
+                    {activeLanguageVariant !== "base" ? (
+                      <button
+                        className="editor-btn editor-btn--panel editor-btn--panel-muted"
+                        onClick={() => void resetLanguageVariantFromBase()}
+                        disabled={!activePage?.html}
+                      >
+                        Reset variant from base
+                      </button>
+                    ) : (
+                      <button
+                        className="editor-btn editor-btn--panel editor-btn--panel-muted"
+                        onClick={() => switchLanguageVariant("base")}
+                        disabled
+                      >
+                        Base page active
+                      </button>
+                    )}
+                  </div>
+                  {activeLanguageVariant !== "base" ? (
+                    <button
+                      className="editor-btn editor-btn--panel editor-btn--panel-muted"
+                      onClick={() => void deleteLanguageVariant()}
+                    >
+                      Delete current variant
+                    </button>
+                  ) : null}
                   {translationInfo ? (
                     <div className="editor-panel__translation-summary">
                       <strong>{translationInfo.translatedCount}</strong> text blocks translated
@@ -1734,7 +4095,239 @@ useEffect(() => {
                       Choose one of the top 50 languages in the top bar and run Translate site.
                     </div>
                   )}
+                  {activeLanguageVariant !== "base" && comparisonBaseHtml ? (
+                    <button
+                      className="editor-btn editor-btn--panel editor-btn--panel-muted"
+                      onClick={() => setShowTranslationSplitView((value) => !value)}
+                    >
+                      {showTranslationSplitView ? "Hide original side-by-side" : "Show original side-by-side"}
+                    </button>
+                  ) : null}
+                  {translationReview?.segments.length ? (
+                    <div className="editor-panel__warning-list">
+                      {translationReview.segments.slice(0, 6).map((segment) => (
+                        <div
+                          key={segment.id}
+                          className={`editor-panel__version-item ${activeTranslationSegmentId === segment.id ? "is-active" : ""}`}
+                        >
+                          <div className="editor-panel__version-copy">
+                            <strong>{shortenText(segment.sourceText, 68)}</strong>
+                            <span>{shortenText(segment.translatedText, 68)}</span>
+                          </div>
+                          <textarea
+                            className="editor-textarea"
+                            value={translationOverrideDrafts[segment.id] ?? segment.translatedText}
+                            onChange={(event) =>
+                              setTranslationOverrideDrafts((previous) => ({
+                                ...previous,
+                                [segment.id]: event.target.value,
+                              }))
+                            }
+                          />
+                          <div className="editor-panel__version-actions">
+                            <button
+                              className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                              onClick={() => setActiveTranslationSegmentId(segment.id)}
+                            >
+                              Focus
+                            </button>
+                            <button
+                              className="editor-btn editor-btn--panel editor-btn--compact"
+                              onClick={() => void applyTranslationOverride(segment.id)}
+                            >
+                              Override
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
+              </section>
+
+              <div className="editor-panel__divider" />
+
+              <section className="editor-panel__section">
+                <div className="editor-panel__label">Versioning</div>
+
+                <div className="editor-panel__version-toolbar">
+                  <button
+                    className="editor-btn editor-btn--panel"
+                    onClick={handleManualSnapshot}
+                    disabled={savingSnapshot || !currentProject || !currentHtml || Boolean(versionPreview)}
+                  >
+                    {savingSnapshot ? "Saving..." : "Save snapshot"}
+                  </button>
+
+                  <button
+                    className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                    onClick={() => currentProject?.id && loadProjectVersions(currentProject.id)}
+                    disabled={loadingVersions || !currentProject}
+                  >
+                    {loadingVersions ? "..." : "Refresh"}
+                  </button>
+                </div>
+
+                {currentProject ? (
+                  <div className="editor-panel__note">
+                    {projectVersions.length
+                      ? `${projectVersions.length} project snapshot${projectVersions.length === 1 ? "" : "s"} available.`
+                      : "Create a named snapshot before major editor, AI, or translation work."}
+                  </div>
+                ) : (
+                  <div className="editor-panel__note">
+                    Open a saved project to use project-level snapshots and rollback.
+                  </div>
+                )}
+
+                {versionPreview ? (
+                  <div className="editor-panel__version-preview">
+                    <div className="editor-panel__version-preview-title">{previewVersionTitle}</div>
+                    <div className="editor-panel__version-preview-meta">{versionMetaFor(versionPreview)}</div>
+                  </div>
+                ) : null}
+
+                {projectVersions.length > 0 ? (
+                  <div className="editor-panel__version-list">
+                    {projectVersions.slice(0, 8).map((version) => {
+                      const isPreviewing = versionPreview?.id === version.id
+                      const isBusy = activeVersionActionId === version.id
+                      return (
+                        <div
+                          key={version.id}
+                          className={`editor-panel__version-item ${isPreviewing ? "is-active" : ""}`}
+                        >
+                          <div className="editor-panel__version-copy">
+                            <strong>{versionTitleFor(version)}</strong>
+                            <span>{versionMetaFor(version)}</span>
+                          </div>
+
+                          <div className="editor-panel__version-actions">
+                            <button
+                              className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                              onClick={() => {
+                                if (isPreviewing) {
+                                  exitVersionPreview(true)
+                                  return
+                                }
+                                void previewProjectVersion(version.id)
+                              }}
+                              disabled={isBusy}
+                            >
+                              {isPreviewing ? "Exit" : "Preview"}
+                            </button>
+                            <button
+                              className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                              onClick={() => void compareProjectVersion(version.id)}
+                              disabled={isBusy}
+                            >
+                              Compare
+                            </button>
+                            <button
+                              className="editor-btn editor-btn--panel editor-btn--compact"
+                              onClick={() => void restoreProjectVersion(version.id)}
+                              disabled={isBusy}
+                            >
+                              {isBusy ? "..." : "Restore"}
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : currentProject ? (
+                  <div className="editor-panel__note">
+                    {loadingVersions ? "Loading project history..." : "No project snapshots yet."}
+                  </div>
+                ) : null}
+                {versionCompare ? (
+                  <div className="editor-panel__version-compare">
+                    <div className="editor-panel__version-preview">
+                      <div className="editor-panel__version-preview-title">
+                        Compare current vs {versionTitleFor(versionCompare)}
+                      </div>
+                      <div className="editor-panel__version-preview-meta">{versionMetaFor(versionCompare)}</div>
+                    </div>
+                    <div className="editor-panel__compare-grid">
+                      <div className="editor-panel__compare-pane">
+                        <div className="editor-panel__compare-label">Current</div>
+                        <iframe title="current-version-compare" srcDoc={currentHtml} className="editor-panel__compare-frame" />
+                      </div>
+                      <div className="editor-panel__compare-pane">
+                        <div className="editor-panel__compare-label">Snapshot</div>
+                        <iframe title="snapshot-version-compare" srcDoc={versionCompare.html} className="editor-panel__compare-frame" />
+                      </div>
+                    </div>
+                    <div className="editor-panel__version-actions">
+                      <button
+                        className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                        onClick={clearVersionCompare}
+                      >
+                        Close
+                      </button>
+                      <button
+                        className="editor-btn editor-btn--panel editor-btn--compact"
+                        onClick={() => void restoreProjectVersion(versionCompare.id)}
+                      >
+                        Restore snapshot
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </section>
+
+              <div className="editor-panel__divider" />
+
+              <section className="editor-panel__section">
+                <div className="editor-panel__label">Audits</div>
+                <div className="editor-panel__two-up">
+                  <button
+                    className="editor-btn editor-btn--panel"
+                    onClick={() => void runEditorAudit("seo")}
+                    disabled={runningAudit !== null}
+                  >
+                    {runningAudit === "seo" ? "Running..." : "SEO"}
+                  </button>
+                  <button
+                    className="editor-btn editor-btn--panel editor-btn--panel-muted"
+                    onClick={() => void runEditorAudit("cro")}
+                    disabled={runningAudit !== null}
+                  >
+                    {runningAudit === "cro" ? "Running..." : "CRO"}
+                  </button>
+                </div>
+                <button
+                  className="editor-btn editor-btn--panel editor-btn--panel-muted"
+                  onClick={() => void runEditorAudit("accessibility")}
+                  disabled={runningAudit !== null}
+                >
+                  {runningAudit === "accessibility" ? "Running..." : "Accessibility"}
+                </button>
+                {editorAudit ? (
+                  <div className="editor-panel__version-preview">
+                    <div className="editor-panel__version-preview-title">{editorAudit.headline}</div>
+                    <div className="editor-panel__version-preview-meta">{editorAudit.summary}</div>
+                    {editorAudit.scoreBadges?.length ? (
+                      <div className="editor-panel__chips">
+                        {editorAudit.scoreBadges.map((badge) => (
+                          <span key={badge} className="editor-chip is-active">
+                            {badge}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                    <div className="editor-panel__warning-list">
+                      {editorAudit.items.map((item) => (
+                        <div key={item} className="editor-panel__warning-item">
+                          <span className="editor-panel__warning-item-code">•</span>
+                          <span className="editor-panel__warning-item-copy">{item}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="editor-panel__note">Run an audit to surface page-level SEO, CRO, and accessibility issues here.</div>
+                )}
               </section>
 
               <div className="editor-panel__divider" />
@@ -1758,14 +4351,14 @@ useEffect(() => {
                   <button
                     className="editor-btn editor-btn--panel"
                     onClick={() => handleAiRescan("block")}
-                    disabled={aiScanLoading}
+                    disabled={aiScanLoading || Boolean(versionPreview)}
                   >
                     {aiScanLoading ? "..." : "AI Block"}
                   </button>
                   <button
                     className="editor-btn editor-btn--panel editor-btn--panel-muted"
                     onClick={() => handleAiRescan("page")}
-                    disabled={aiScanLoading}
+                    disabled={aiScanLoading || Boolean(versionPreview)}
                   >
                     {aiScanLoading ? "..." : "AI Page"}
                   </button>
@@ -1848,6 +4441,20 @@ useEffect(() => {
                   ))}
                 </select>
 
+                <select
+                  className="editor-select editor-select--full"
+                  value={leftAiTone}
+                  onChange={(event) => setLeftAiTone(event.target.value)}
+                  title="AI tone preset"
+                >
+                  <option value="neutral">Neutral tone</option>
+                  <option value="professional">Professional</option>
+                  <option value="casual">Casual</option>
+                  <option value="persuasive">Persuasive</option>
+                  <option value="luxury">Luxury</option>
+                  <option value="direct">Direct response</option>
+                </select>
+
                 <textarea
                   className="editor-textarea"
                   value={leftAiPrompt}
@@ -1858,21 +4465,18 @@ useEffect(() => {
                 <button
                   data-left-ai-run="1"
                   className={`editor-btn editor-btn--panel editor-btn--accent ${leftAiRunning ? "is-loading" : ""}`}
-                  onClick={() => {
-                    if (!leftAiPrompt.trim()) {
-                      toast.warning(t("Please enter an AI prompt first"))
-                      return
-                    }
-                    setLeftAiRunning(true)
-                    window.dispatchEvent(new CustomEvent("bo:left-ai-run", {
-                      detail: {
-                        model: leftAiModel === "auto" ? "claude-sonnet-4-6" : leftAiModel,
-                        prompt: leftAiPrompt
-                      }
-                    }))
-                  }}
+                  onClick={() => void runLeftAiPrompt()}
+                  disabled={leftAiRunning || Boolean(versionPreview)}
                 >
                   {leftAiRunning ? "Running..." : "Run prompt"}
+                </button>
+
+                <button
+                  className={`editor-btn editor-btn--panel editor-btn--panel-muted ${batchAiRunning ? "is-loading" : ""}`}
+                  onClick={() => void runBatchAiAcrossPages()}
+                  disabled={batchAiRunning || leftAiRunning || Boolean(versionPreview)}
+                >
+                  {batchAiRunning ? "Running..." : "Run across pages"}
                 </button>
               </section>
             </div>
@@ -1881,15 +4485,58 @@ useEffect(() => {
       )}
 
       <div className="editor-viewport">
-        <iframe
-          ref={iframeRef}
-          title="preview"
-          className="editor-viewport__frame"
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation"
-        />
+        <div className={`editor-viewport__canvas ${showComparisonViewport ? "editor-viewport__canvas--split" : ""}`}>
+          {showComparisonViewport ? (
+            <div className="editor-viewport__split">
+              <div className={`editor-viewport__device editor-viewport__device--${viewportPreset}`}>
+                <div className="editor-viewport__device-meta">
+                  <span>{viewportConfig.label}</span>
+                  <span>Original</span>
+                </div>
+                <iframe
+                  ref={comparisonIframeRef}
+                  title="original-preview"
+                  className="editor-viewport__frame"
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation"
+                />
+              </div>
+              <div className={`editor-viewport__device editor-viewport__device--${viewportPreset}`}>
+                <div className="editor-viewport__device-meta">
+                  <span>{viewportConfig.label}</span>
+                  <span>
+                    {TOP_TRANSLATION_LANGUAGES.find((language) => language.code === activeLanguageVariant)?.label || activeLanguageVariant.toUpperCase()}
+                  </span>
+                </div>
+                <iframe
+                  ref={iframeRef}
+                  title="preview"
+                  className="editor-viewport__frame"
+                  sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className={`editor-viewport__device editor-viewport__device--${viewportPreset}`}>
+              <div className="editor-viewport__device-meta">
+                <span>{viewportConfig.label}</span>
+                <span>
+                  {activeLanguageVariant === "base"
+                    ? "Original"
+                    : TOP_TRANSLATION_LANGUAGES.find((language) => language.code === activeLanguageVariant)?.label || activeLanguageVariant.toUpperCase()}
+                </span>
+              </div>
+              <iframe
+                ref={iframeRef}
+                title="preview"
+                className="editor-viewport__frame"
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-top-navigation"
+              />
+            </div>
+          )}
+        </div>
         <BlockOverlay
           iframeRef={iframeRef}
-          enabled={isEdit}
+          enabled={isEdit && !versionPreview}
           canvasMode={layoutMode === "canvas"}
           blockFilter={blockFilter}
           onStatus={setStatus}
@@ -1899,6 +4546,7 @@ useEffect(() => {
       <AssistantWidget
         plan={demoPlan}
         avoidOverlay={Boolean(currentAiApproval)}
+        onAction={view === "editor" ? handleAssistantEditorAction : undefined}
         context={{
           surface: "editor",
           plan: demoPlan,

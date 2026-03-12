@@ -1,5 +1,13 @@
 import { apiFetch } from "./client"
-import type { BalanceRes, PlanRes, CreditsTransactionsRes, StripePackagesRes, StripeCheckoutRes, Plan } from "./types"
+import type {
+  BalanceRes,
+  PlanRes,
+  CreditsTransactionsRes,
+  StripePackagesRes,
+  StripeCheckoutRes,
+  StripeInvoicesRes,
+  Plan,
+} from "./types"
 
 const BASE = ""
 
@@ -37,4 +45,18 @@ export async function apiStripeCheckout(packageId: string): Promise<string> {
   })
   if (!d.ok || !d.url) throw new Error("checkout_failed")
   return d.url
+}
+
+export async function apiStripeSubscriptionCheckout(planId: Plan): Promise<string> {
+  const d = await apiFetch<StripeCheckoutRes>(`${BASE}/api/stripe/checkout`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ plan_id: planId, billing_mode: "subscription" }),
+  })
+  if (!d.ok || !d.url) throw new Error("checkout_failed")
+  return d.url
+}
+
+export async function apiGetStripeInvoices(): Promise<StripeInvoicesRes> {
+  return apiFetch<StripeInvoicesRes>(`${BASE}/api/stripe/invoices`)
 }

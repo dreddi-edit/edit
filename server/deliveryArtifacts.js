@@ -63,6 +63,288 @@ function escapeTemplateLiteral(value) {
     .replace(/\$\{/g, "\\${");
 }
 
+function extractSeoMetadata(html) {
+  const source = String(html || "");
+  const titleMatch = source.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const title = (titleMatch?.[1] || "").replace(/\s+/g, " ").trim();
+  const metas = {};
+  const metaRe = /<meta\b([^>]*)>/gi;
+  let match;
+  while ((match = metaRe.exec(source))) {
+    const attrs = match[1] || "";
+    const key =
+      (attrs.match(/\bname=["']([^"']+)["']/i)?.[1] || "").toLowerCase()
+      || (attrs.match(/\bproperty=["']([^"']+)["']/i)?.[1] || "").toLowerCase();
+    const content = attrs.match(/\bcontent=["']([^"']*)["']/i)?.[1];
+    if (key && content !== undefined) metas[key] = content;
+  }
+  return { title, metas };
+}
+
+function injectSeoMetadata(html, seo) {
+  if (!seo) return String(html || "");
+  let out = String(html || "");
+  const title = String(seo?.title || "").trim();
+  const metas = seo?.metas && typeof seo.metas === "object" ? seo.metas : {};
+
+  if (title) {
+    if (/<title\b/i.test(out)) {
+      out = out.replace(/<title[^>]*>[\s\S]*?<\/title>/i, `<title>${escapeHtmlAttribute(title)}</title>`);
+    } else {
+      out = out.replace(/(<head\b[^>]*>)/i, `$1\n  <title>${escapeHtmlAttribute(title)}</title>`);
+    }
+  }
+
+  const description = String(metas.description || "").trim();
+  if (description && !/<meta\b[^>]*\bname=["']description["']/i.test(out)) {
+    out = out.replace(/(<head\b[^>]*>)/i, `$1\n  <meta name="description" content="${escapeHtmlAttribute(description)}">`);
+  }
+
+  const ogTitle = String(metas["og:title"] || title || "").trim();
+  if (ogTitle && !/<meta\b[^>]*\bproperty=["']og:title["']/i.test(out)) {
+    out = out.replace(/(<head\b[^>]*>)/i, `$1\n  <meta property="og:title" content="${escapeHtmlAttribute(ogTitle)}">`);
+  }
+
+  const ogDescription = String(metas["og:description"] || description || "").trim();
+  if (ogDescription && !/<meta\b[^>]*\bproperty=["']og:description["']/i.test(out)) {
+    out = out.replace(/(<head\b[^>]*>)/i, `$1\n  <meta property="og:description" content="${escapeHtmlAttribute(ogDescription)}">`);
+  }
+
+  return out;
+}
+
+function resolveExportAssets(html) {
+  return decodeAssetProxyEverywhere(String(html || "")).replace(
+    /(["'])(\/\/[a-zA-Z0-9\-._~:/?#[\]@!$&'()*+,;=%]+)(["'])/g,
+    (_match, open, url, close) => `${open}https:${url}${close}`
+  );
+}
+
+function rewriteInternalLinks(html, siteRootUrl) {
+  if (!siteRootUrl) return String(html || "");
+  let origin = "";
+  try {
+    origin = new URL(siteRootUrl).origin;
+  } catch {
+    return String(html || "");
+  }
+  if (!origin || origin === "null") return String(html || "");
+
+  return String(html || "").replace(
+    /(\bhref=["'])([^"']+)(["'])/gi,
+    (match, prefix, href, suffix) => {
+      if (/^(mailto:|tel:|javascript:|#|data:)/i.test(href)) return match;
+      try {
+        const resolved = new URL(href, siteRootUrl);
+        if (resolved.origin !== origin) return match;
+        return `${prefix}${resolved.pathname}${resolved.search}${resolved.hash}${suffix}`;
+      } catch {
+        return match;
+      }
+    }
+  );
+}
+
+const PLATFORM_FORM_GUIDANCE = {
+  wordpress: "Wire forms using Contact Form 7, WPForms, or a custom REST endpoint in your WordPress install.",
+  shopify: "Shopify sections route to /contact via {% form 'contact' %}. Verify the Liquid form tag was injected correctly.",
+  static: "Replace placeholder form actions with your preferred form service (for example Formspree, Basin, or a serverless function).",
+  webflow: "Reconnect form submission targets in Webflow's Form Settings panel after import.",
+  wix: "Reconnect form apps or Wix Automations inside the Wix editor before launch.",
+  unknown: "Configure form submission targets for your deployment environment before going live.",
+  other: "Configure form submission targets for your deployment environment before going live.",
+};
+
+function getPlatformFormGuidance(platform) {
+  return PLATFORM_FORM_GUIDANCE[String(platform || "other")] || PLATFORM_FORM_GUIDANCE.other;
+}
+
+function runHtmlStructureChecks(source) {
+  const issues = [];
+  const missingAltCount = (String(source || "").match(/<img\b(?![^>]*\balt=)[^>]*>/gi) || []).length;
+  if (missingAltCount > 0) {
+    issues.push({
+      code: "html-missing-alt",
+      level: "warning",
+      message: `${missingAltCount} image${missingAltCount === 1 ? "" : "s"} missing alt attribute (WCAG 2.1 §1.1.1).`,
+      detail: `${missingAltCount} img element${missingAltCount === 1 ? "" : "s"} affected`,
+    });
+  }
+
+  const idMatches = Array.from(String(source || "").matchAll(/\bid=["']([^"']+)["']/gi)).map((item) => item[1].toLowerCase());
+  const idCounts = {};
+  for (const id of idMatches) idCounts[id] = (idCounts[id] || 0) + 1;
+  const duplicateIds = Object.entries(idCounts).filter(([, count]) => count > 1).map(([id]) => id);
+  if (duplicateIds.length > 0) {
+    issues.push({
+      code: "html-duplicate-ids",
+      level: "warning",
+      message: `Duplicate id values: ${duplicateIds.slice(0, 5).join(", ")}${duplicateIds.length > 5 ? " …" : ""}. Duplicate IDs break DOM queries and assistive technology.`,
+      detail: `${duplicateIds.length} duplicate id${duplicateIds.length === 1 ? "" : "s"}`,
+    });
+  }
+
+  if (/<html\b(?![^>]*\blang=)[^>]*>/i.test(String(source || ""))) {
+    issues.push({
+      code: "html-missing-lang",
+      level: "info",
+      message: 'The <html> element is missing a lang attribute. Add lang="en" (or the appropriate BCP-47 code) for screen-reader compatibility.',
+    });
+  }
+
+  return issues;
+}
+
+function cleanupStyleBlocks(html) {
+  function findMatchingBrace(source, openIndex) {
+    let depth = 0;
+    for (let index = openIndex; index < source.length; index += 1) {
+      const char = source[index];
+      if (char === "{") depth += 1;
+      if (char === "}") {
+        depth -= 1;
+        if (depth === 0) return index;
+      }
+    }
+    return -1;
+  }
+
+  function dedupeDeclarationBlock(source) {
+    const seen = new Map();
+    for (const raw of String(source || "").split(";")) {
+      const declaration = raw.trim();
+      if (!declaration) continue;
+      const colonIndex = declaration.indexOf(":");
+      if (colonIndex < 0) continue;
+      const property = declaration.slice(0, colonIndex).trim();
+      const value = declaration.slice(colonIndex + 1).trim();
+      if (!property || !value) continue;
+      const key = property.startsWith("--") ? property : property.toLowerCase();
+      seen.set(key, { property, value });
+    }
+    return Array.from(seen.values())
+      .map(({ property, value }) => `  ${property}: ${value};`)
+      .join("\n");
+  }
+
+  function cleanupCss(source) {
+    let cursor = 0;
+    let output = "";
+    const css = String(source || "");
+
+    while (cursor < css.length) {
+      const openIndex = css.indexOf("{", cursor);
+      if (openIndex === -1) {
+        output += css.slice(cursor);
+        break;
+      }
+
+      const closeIndex = findMatchingBrace(css, openIndex);
+      if (closeIndex === -1) {
+        output += css.slice(cursor);
+        break;
+      }
+
+      const selector = css.slice(cursor, openIndex);
+      const trimmedSelector = selector.trim();
+      const body = css.slice(openIndex + 1, closeIndex);
+
+      if (!trimmedSelector) {
+        cursor = closeIndex + 1;
+        continue;
+      }
+
+      if (trimmedSelector.startsWith("@")) {
+        const nested = cleanupCss(body);
+        if (nested.trim()) output += `${selector}{${nested}}`;
+      } else {
+        const declarations = dedupeDeclarationBlock(body);
+        if (declarations.trim()) output += `${selector}{\n${declarations}\n}`;
+      }
+
+      cursor = closeIndex + 1;
+    }
+
+    return output.replace(/\n{3,}/g, "\n\n");
+  }
+
+  return String(html || "").replace(
+    /<style(\b[^>]*)>([\s\S]*?)<\/style>/gi,
+    (_match, attrs, css) => `<style${attrs}>${cleanupCss(css)}</style>`
+  );
+}
+
+function addEditabilityHints(html, mode, platform) {
+  const source = String(html || "");
+  if (mode === "wp-theme" || (mode === "wp-placeholder" && platform === "wordpress")) {
+    return source.replace(
+      /(<(?:section|article|div|main|header|footer|aside)\b(?![^>]*\bdata-wp-block)[^>]*)>/gi,
+      '$1 data-wp-block="core/html">'
+    );
+  }
+  return source;
+}
+
+function looksLikeDocumentHtml(html) {
+  return /<!doctype/i.test(String(html || "")) || /<html[\s>]/i.test(String(html || ""));
+}
+
+function normalizeArtifactAlternates(alternates) {
+  const seen = new Set();
+  return Array.from(Array.isArray(alternates) ? alternates : [])
+    .map((item) => ({
+      hreflang: String(item?.hreflang || "").trim(),
+      href: String(item?.href || "").trim(),
+    }))
+    .filter((item) => {
+      if (!item.hreflang || !item.href) return false;
+      const key = `${item.hreflang.toLowerCase()}|${item.href}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function buildAlternateHeadLinks(alternates = [], canonicalUrl = "") {
+  const lines = [];
+  if (canonicalUrl) {
+    lines.push(`<link rel="canonical" href="${escapeHtmlAttribute(canonicalUrl)}">`);
+  }
+  for (const item of normalizeArtifactAlternates(alternates)) {
+    lines.push(
+      `<link rel="alternate" hreflang="${escapeHtmlAttribute(item.hreflang)}" href="${escapeHtmlAttribute(item.href)}">`
+    );
+  }
+  return lines.join("\n");
+}
+
+function injectAlternateLinks(html, alternates = [], canonicalUrl = "") {
+  if (!looksLikeDocumentHtml(html)) return String(html || "");
+  const dom = new JSDOM(String(html || ""));
+  const doc = dom.window.document;
+  const head = doc.head || doc.documentElement.insertBefore(doc.createElement("head"), doc.body || null);
+  Array.from(head.querySelectorAll("link[rel='alternate'][hreflang], link[rel='canonical']")).forEach((node) => node.remove());
+
+  if (canonicalUrl) {
+    const canonical = doc.createElement("link");
+    canonical.setAttribute("rel", "canonical");
+    canonical.setAttribute("href", canonicalUrl);
+    canonical.setAttribute("data-site-editor-generated", "1");
+    head.appendChild(canonical);
+  }
+
+  for (const item of normalizeArtifactAlternates(alternates)) {
+    const link = doc.createElement("link");
+    link.setAttribute("rel", "alternate");
+    link.setAttribute("hreflang", item.hreflang);
+    link.setAttribute("href", item.href);
+    link.setAttribute("data-site-editor-generated", "1");
+    head.appendChild(link);
+  }
+
+  return dom.serialize();
+}
+
 const DEFAULT_FORM_ACTION_URL = process.env.EXPORT_FORM_ACTION_URL || "https://formspree.io/f/your-form-id"
 const DEFAULT_CTA_URL = process.env.EXPORT_CTA_URL || "https://example.com/contact"
 
@@ -367,6 +649,18 @@ export function validateDeliveryArtifact({ html, url, platform, mode }) {
     push("wix-dynamic", "warning", "Wix-specific widgets were detected. Expect manual follow-up for apps and dynamic content.");
   }
 
+  if (/data-site-editor-form-placeholder=["']1["']/i.test(source)) {
+    const count = (source.match(/data-site-editor-form-placeholder=["']1["']/gi) || []).length;
+    push(
+      "form-target-platform",
+      "warning",
+      `${count} form${count === 1 ? "" : "s"} use placeholder submission targets. ${getPlatformFormGuidance(normalizedPlatform)}`,
+      `${count} form${count === 1 ? "" : "s"} need wiring`
+    );
+  }
+
+  warnings.push(...runHtmlStructureChecks(source));
+
   return {
     guide,
     warnings,
@@ -376,10 +670,25 @@ export function validateDeliveryArtifact({ html, url, platform, mode }) {
   };
 }
 
-export function buildDeliveryArtifact({ html, url, platform, mode, project, versionId }) {
+export function buildDeliveryArtifact({ html, url, platform, mode, project, versionId, alternates = [], canonicalUrl = "", language = "" }) {
   const normalizedPlatform = normalizeSupportedPlatform(platform);
-  const normalizedHtml = injectResponsiveViewport(transformExportHtml(html, mode));
-  const transformedHtml = getModeSpecificHtml(normalizedHtml, mode);
+  const normalizedAlternates = normalizeArtifactAlternates(alternates);
+  const earlyValidation = validateDeliveryArtifact({
+    html: String(html || ""),
+    url,
+    platform: normalizedPlatform,
+    mode,
+  });
+  const seo = extractSeoMetadata(html);
+  const step1 = transformExportHtml(html, mode);
+  const step2 = injectResponsiveViewport(step1);
+  const step3 = injectSeoMetadata(step2, seo);
+  const step4 = resolveExportAssets(step3);
+  const step5 = rewriteInternalLinks(step4, earlyValidation.sourceUrl);
+  const step6 = getModeSpecificHtml(step5, mode);
+  const step7 = cleanupStyleBlocks(step6);
+  const step8 = addEditabilityHints(step7, mode, normalizedPlatform);
+  const transformedHtml = injectAlternateLinks(step8, normalizedAlternates, canonicalUrl);
   const validation = validateDeliveryArtifact({
     html: transformedHtml,
     url,
@@ -392,6 +701,7 @@ export function buildDeliveryArtifact({ html, url, platform, mode, project, vers
     exportedAt: new Date().toISOString(),
     mode: String(mode || "wp-placeholder"),
     platform: normalizedPlatform,
+    language: String(language || ""),
     project: project ? {
       id: project.id ?? null,
       name: project.name ?? "",
@@ -401,10 +711,12 @@ export function buildDeliveryArtifact({ html, url, platform, mode, project, vers
     source: {
       url: validation.sourceUrl || "",
       versionId: versionId ?? null,
+      canonicalUrl: canonicalUrl || "",
     },
     readiness: validation.readiness,
     guide: validation.guide,
     warnings: validation.warnings,
+    alternates: normalizedAlternates,
   };
 
   const notes = [
@@ -415,6 +727,10 @@ export function buildDeliveryArtifact({ html, url, platform, mode, project, vers
     `Exported at: ${manifest.exportedAt}`,
     validation.sourceUrl ? `Source URL: ${validation.sourceUrl}` : "Source URL: not set",
     versionId ? `Linked version snapshot: ${versionId}` : "Linked version snapshot: none",
+    canonicalUrl ? `Canonical export path: ${canonicalUrl}` : "Canonical export path: index.html",
+    normalizedAlternates.length
+      ? `Alternate language files: ${normalizedAlternates.map((item) => `${item.hreflang} -> ${item.href}`).join(", ")}`
+      : "Alternate language files: none",
     "",
     "Safe edit scope:",
     validation.guide.safeEditScope,
@@ -507,10 +823,11 @@ ${JSON.stringify(schema, null, 2)}
 {% endschema %}`.trim();
 }
 
-export function prepareWordPressThemeFiles({ html, project }) {
+export function prepareWordPressThemeFiles({ html, project, alternates = [], canonicalUrl = "" }) {
   const themeName = project?.name || "Site Editor Exported Theme";
   const themeSlug = slugify(themeName, "site-editor-theme");
   const { bodyHtml, inlineCss, externalStylesheets, title } = extractPortableDocumentParts(html);
+  const alternateHeadLinks = buildAlternateHeadLinks(alternates, canonicalUrl);
   const externalEnqueues = externalStylesheets
     .map((href, index) => `  wp_enqueue_style('${themeSlug}-remote-${index + 1}', '${escapePhpSingleQuoted(href)}', ['${themeSlug}-export'], null);`)
     .join("\n");
@@ -542,6 +859,7 @@ add_action('wp_enqueue_scripts', '${themeSlug}_enqueue_styles');
   <meta charset="<?php bloginfo('charset'); ?>">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <?php wp_head(); ?>
+  ${alternateHeadLinks}
 </head>
 <body <?php body_class(); ?>>
 <?php wp_body_open(); ?>
@@ -664,7 +982,7 @@ ${remoteStyleEnqueues || "  // No remote stylesheets were detected in the source
   ];
 }
 
-export function prepareWebComponentFile({ html, project }) {
+export function prepareWebComponentFile({ html, project, alternates = [], canonicalUrl = "" }) {
   const { bodyHtml, inlineCss, externalStylesheets } = extractPortableDocumentParts(html);
   const componentName = `site-editor-${slugify(project?.name || "embed", "embed")}`;
   const bodyContent = wrapPortableFragment({
@@ -673,6 +991,7 @@ export function prepareWebComponentFile({ html, project }) {
     externalStylesheets,
     wrapperClass: "site-editor-web-component",
   });
+  const alternateHeadLinks = buildAlternateHeadLinks(alternates, canonicalUrl);
   const jsContent = `class SiteEditorEmbed extends HTMLElement {
   constructor() {
     super();
@@ -693,6 +1012,7 @@ if (!customElements.get(${JSON.stringify(componentName)})) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>${project?.name || "Site Editor Embed"}</title>
+    ${alternateHeadLinks}
     <script type="module" src="./embed.js"></script>
   </head>
   <body style="margin:0;background:#0b0f14">
@@ -709,6 +1029,190 @@ if (!customElements.get(${JSON.stringify(componentName)})) {
     jsFile: { name: "embed.js", content: jsContent },
     demoFile: { name: "demo.html", content: demoHtml },
     readmeFile: { name: "README.md", content: readme },
+  };
+}
+
+export function prepareReactComponentFile({ html, project }) {
+  const { bodyHtml, inlineCss, externalStylesheets, title } = extractPortableDocumentParts(html);
+  const componentName = getExportComponentName(project);
+  const slug = getExportSlug(project);
+  const cssContent = buildPortableCss(inlineCss);
+  const remoteImports = externalStylesheets
+    .map((href, index) => `// Remote stylesheet ${index + 1}: ${href}\nimport "./${slug}-remote-${index + 1}.css";`)
+    .join("\n");
+
+  const files = [
+    {
+      name: `${componentName}.jsx`,
+      content: `import React from "react";
+import "./${slug}.css";
+${remoteImports}
+
+/**
+ * ${componentName}
+ * Exported from Site Editor. Edit the JSX or CSS to customise.
+ */
+export default function ${componentName}() {
+  return (
+    <div
+      className="site-editor-export site-editor-export--${slug}"
+      dangerouslySetInnerHTML={{ __html: \`${escapeTemplateLiteral(bodyHtml)}\` }}
+    />
+  );
+}
+`,
+    },
+    { name: `${slug}.css`, content: cssContent },
+    {
+      name: "demo.jsx",
+      content: `import React from "react";
+import { createRoot } from "react-dom/client";
+import ${componentName} from "./${componentName}";
+
+createRoot(document.getElementById("root")).render(<${componentName} />);
+`,
+    },
+    {
+      name: "demo.html",
+      content: `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${escapeHtmlAttribute(title || project?.name || "Site Editor Export")}</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./demo.jsx"></script>
+  </body>
+</html>`,
+    },
+    {
+      name: "README.md",
+      content: `# ${project?.name || componentName}
+
+React component exported from Site Editor.
+
+## Usage
+
+\`\`\`jsx
+import ${componentName} from "./${componentName}";
+
+export default function App() {
+  return <${componentName} />;
+}
+\`\`\`
+
+## Notes
+- HTML is rendered via \`dangerouslySetInnerHTML\`. Review content before production use.
+- Peer deps: \`react >= 17\`, \`react-dom >= 17\`
+- For strict CSP environments, convert the JSX to static markup manually.
+`,
+    },
+  ];
+
+  for (let index = 0; index < externalStylesheets.length; index += 1) {
+    files.push({
+      name: `${slug}-remote-${index + 1}.css`,
+      content: `/* Remote stylesheet placeholder. Fetch and paste content here for offline use:\n   ${externalStylesheets[index]}\n*/\n`,
+    });
+  }
+
+  return files;
+}
+
+export function prepareWebflowJsonFile({ html, project }) {
+  const { bodyHtml, inlineCss, title } = extractPortableDocumentParts(html);
+  const dom = new JSDOM(`<body>${bodyHtml}</body>`);
+  const doc = dom.window.document;
+  const slug = getExportSlug(project);
+  let nodeCounter = 1;
+
+  function nextId() {
+    const hex = (nodeCounter++).toString(16).padStart(6, "0");
+    return `se-${hex}-${Math.random().toString(16).slice(2, 8)}`;
+  }
+
+  function domNodeToWebflow(node) {
+    if (node.nodeType === 3) {
+      const text = (node.textContent || "").trim();
+      return text ? { _id: nextId(), tag: "span", children: [], data: { xattr: [] }, text } : null;
+    }
+    if (node.nodeType !== 1) return null;
+    const tag = node.tagName.toLowerCase();
+    if (["script", "style", "noscript", "template"].includes(tag)) return null;
+
+    const children = Array.from(node.childNodes).map(domNodeToWebflow).filter(Boolean);
+    const classes = (node.getAttribute("class") || "").split(/\s+/).filter(Boolean);
+    const dataAttrs = {};
+    for (const attr of Array.from(node.attributes)) {
+      if (attr.name !== "class" && attr.name !== "id") dataAttrs[attr.name] = attr.value;
+    }
+
+    return {
+      _id: nextId(),
+      tag,
+      classes,
+      children,
+      data: { attr: dataAttrs, xattr: [] },
+    };
+  }
+
+  const bodyChildren = Array.from(doc.body.childNodes).map(domNodeToWebflow).filter(Boolean);
+  const payload = {
+    type: "page",
+    name: title || project?.name || "Exported Page",
+    slug,
+    createdOn: new Date().toISOString(),
+    publishedOn: null,
+    updatedOn: new Date().toISOString(),
+    _id: nextId(),
+    body: {
+      _id: nextId(),
+      tag: "body",
+      classes: [],
+      children: bodyChildren,
+      data: { xattr: [] },
+    },
+    styles: inlineCss
+      ? [{
+          _id: nextId(),
+          fake: false,
+          type: "class",
+          name: "site-editor-inline",
+          styleLess: inlineCss,
+          comb: "",
+          namespace: "",
+          origin: null,
+          selector: null,
+        }]
+      : [],
+    assets: [],
+    ix1: [],
+    ix2: { interactions: [], events: [], actionLists: [] },
+  };
+
+  return {
+    jsonFile: {
+      name: `${slug}.webflow.json`,
+      content: JSON.stringify(payload, null, 2),
+    },
+    readmeFile: {
+      name: "README.md",
+      content: `# Webflow Import - ${project?.name || "Exported Page"}
+
+## Import steps
+1. Open your Webflow project.
+2. Go to Project Settings -> Backups -> Import.
+3. Upload \`${slug}.webflow.json\`.
+4. Review the imported page and reconnect any CMS bindings.
+
+## Notes
+- Dynamic CMS content, IX2 interactions, and commerce bindings are not transferred.
+- Inline styles are preserved as a single Webflow class named \`site-editor-inline\`.
+- Replace \`data:\` URI image sources with hosted asset URLs before publishing.
+`,
+    },
   };
 }
 

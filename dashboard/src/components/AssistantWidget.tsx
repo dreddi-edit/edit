@@ -18,7 +18,7 @@ function readTheme() {
   return document.body.getAttribute("data-theme") === "light" ? "light" : "dark"
 }
 
-function buildWelcomeMessage(context: AssistantContext, plan: Plan): WidgetMessage {
+function buildWelcomeMessage(context: AssistantContext): WidgetMessage {
   const focus =
     context.surface === "editor"
       ? context.projectName || "the current page"
@@ -54,11 +54,13 @@ export default function AssistantWidget({
   context,
   onUsage,
   avoidOverlay = false,
+  onAction,
 }: {
   plan: Plan
   context: AssistantContext
   onUsage?: (payload: unknown) => void
   avoidOverlay?: boolean
+  onAction?: (command: string) => Promise<string | null> | string | null
 }) {
   const { t } = useTranslation()
   const [theme, setTheme] = useState<"dark" | "light">(readTheme)
@@ -68,7 +70,7 @@ export default function AssistantWidget({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const allowedModels = useMemo(() => getAllowedAssistantModels(plan), [plan])
   const [model, setModel] = useState<AssistantModelId>(getDefaultAssistantModel(plan).id)
-  const [messages, setMessages] = useState<WidgetMessage[]>(() => [buildWelcomeMessage(context, plan)])
+  const [messages, setMessages] = useState<WidgetMessage[]>(() => [buildWelcomeMessage(context)])
 
   useEffect(() => {
     setModel((current) => (allowedModels.some((item) => item.id === current) ? current : allowedModels[0].id))
@@ -77,9 +79,9 @@ export default function AssistantWidget({
   useEffect(() => {
     setMessages((previous) => {
       if (previous.length > 1) return previous
-      return [buildWelcomeMessage(context, plan)]
+      return [buildWelcomeMessage(context)]
     })
-  }, [context.projectName, context.surface, context.workspace, plan])
+  }, [context])
 
   useEffect(() => {
     if (typeof document === "undefined") return
@@ -128,6 +130,26 @@ export default function AssistantWidget({
     setLoading(true)
 
     try {
+      if (context.surface === "editor" && onAction) {
+        const reply = await onAction(text)
+        if (reply) {
+          setMessages((previous) => [
+            ...previous,
+            {
+              id: `assistant_${Date.now()}`,
+              role: "assistant",
+              content: reply,
+            },
+          ])
+          return
+        }
+        if (text.startsWith("/")) {
+          toast.error(t("Unknown action. Try /preview, /share, /audit seo, /translate de, or /export html-clean."))
+          setMessages((previous) => previous.filter((message) => message.id !== nextUserMessage.id))
+          return
+        }
+      }
+
       const response = await apiAssistantChat({
         model,
         messages: nextMessages.map(({ role, content }) => ({ role, content })),
@@ -175,7 +197,7 @@ export default function AssistantWidget({
                 <button
                   type="button"
                   className="assistant-widget__icon-button"
-                  onClick={() => setMessages([buildWelcomeMessage(context, plan)])}
+                  onClick={() => setMessages([buildWelcomeMessage(context)])}
                   title={t("Clear chat")}
                 >
                   ↺
@@ -248,7 +270,13 @@ export default function AssistantWidget({
             </div>
           </div>
 
-          <div className="assistant-widget__messages">
+          <div
+            className="assistant-widget__messages"
+            role="log"
+            aria-live="polite"
+            aria-label={t("AI assistant conversation")}
+            aria-relevant="additions"
+          >
             {messages.map((message) => (
               <div
                 key={message.id}
@@ -283,6 +311,7 @@ export default function AssistantWidget({
             <textarea
               ref={textareaRef}
               className="assistant-widget__textarea"
+              aria-label={t("Message to AI assistant")}
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={(event) => {
@@ -300,6 +329,7 @@ export default function AssistantWidget({
             <button
               type="button"
               className="assistant-widget__send"
+              aria-label={t("Send message")}
               onClick={() => void sendMessage()}
               disabled={loading || !input.trim()}
             >

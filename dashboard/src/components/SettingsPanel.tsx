@@ -1,6 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { toast } from "./Toast"
 import { errMsg } from "../utils/errMsg"
+import {
+  apiGetStripeInvoices,
+  apiGetStripePackages,
+  apiStripeSubscriptionCheckout,
+} from "../api/credits"
+import { fetchWithAuth } from "../api/client"
+import type { StripeSubscriptionPlan, UserInvoice } from "../api/types"
 import { getRequireApproval, getApprovalThreshold, setRequireApproval, setApprovalThreshold } from "../approval-settings"
 import { AVAILABLE_UI_LANGUAGES, useTranslation, type Language } from "../i18n/useTranslation"
 import { MODEL_CATEGORIES, getCategoryModels, type ModelCategoryId } from "../utils/modelCatalog"
@@ -25,10 +32,11 @@ import {
 
 const BASE = ""
 
-type TabId = "general" | "apikeys" | "org" | "google"
+type TabId = "general" | "profile" | "apikeys" | "org" | "google"
 type GoogleSectionId = "seo" | "ai" | "media" | "export"
 type GoogleResult = Record<string, any>
 type Settings = { theme: string; disabled_models: string[] }
+type NotificationPrefs = { email_updates: boolean; team_mentions: boolean }
 type ApiKey = {
   id: number
   provider: string
@@ -51,9 +59,22 @@ type DetectedKey = {
   providerLabel: string
   models: Array<{ value: string; label: string }>
 }
+type CurrentUser = {
+  id: number
+  email: string
+  name: string
+  created_at?: string
+  avatar_url?: string
+  email_verified?: boolean
+  totp_enabled?: boolean
+  plan_id?: string
+  plan_status?: string
+  notification_prefs?: NotificationPrefs
+}
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: "general", label: "General" },
+  { id: "profile", label: "Profile & Billing" },
   { id: "apikeys", label: "API Keys" },
   { id: "org", label: "Organisation" },
   { id: "google", label: "Google AI Suite" },
@@ -94,7 +115,7 @@ async function parseJson(response: Response) {
 }
 
 async function request(path: string, init?: RequestInit) {
-  const response = await fetch(`${BASE}${path}`, { credentials: "include", ...init })
+  const response = await fetchWithAuth(`${BASE}${path}`, init)
   return parseJson(response)
 }
 
@@ -124,6 +145,19 @@ export default function SettingsPanel({
   const [seoLoading, setSeoLoading] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
+  const [notificationPrefs, setNotificationPrefs] = useState<NotificationPrefs>({ email_updates: true, team_mentions: true })
+  const [subscriptionPlans, setSubscriptionPlans] = useState<StripeSubscriptionPlan[]>([])
+  const [invoiceRows, setInvoiceRows] = useState<UserInvoice[]>([])
+  const [avatarDraft, setAvatarDraft] = useState("")
+  const [currentPasswordInput, setCurrentPasswordInput] = useState("")
+  const [newPasswordInput, setNewPasswordInput] = useState("")
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState("")
+  const [twoFaSetup, setTwoFaSetup] = useState<{ secret: string; otpauth_uri: string } | null>(null)
+  const [twoFaCode, setTwoFaCode] = useState("")
+  const [twoFaDisablePassword, setTwoFaDisablePassword] = useState("")
+  const [deletePassword, setDeletePassword] = useState("")
+  const [accountBusy, setAccountBusy] = useState<string | null>(null)
   const [languageChoice, setLanguageChoice] = useState<Language>(lang)
   const [languageSaving, setLanguageSaving] = useState(false)
   const [modelBrowserOpen, setModelBrowserOpen] = useState(true)
@@ -181,19 +215,35 @@ export default function SettingsPanel({
     void load()
   }, [])
 
+  const applyCurrentUser = (user: CurrentUser | null) => {
+    setCurrentUser(user)
+    setAvatarDraft(user?.avatar_url || "")
+    setNotificationPrefs({
+      email_updates: user?.notification_prefs?.email_updates !== false,
+      team_mentions: user?.notification_prefs?.team_mentions !== false,
+    })
+  }
+
   const load = async () => {
     setLoading(true)
     try {
-      const [settingsData, keysData, orgsData] = await Promise.all([
+      const [settingsData, keysData, orgsData, meData, billingData, invoicesData] = await Promise.all([
         request("/api/settings"),
         request("/api/keys"),
         request("/api/orgs"),
+        request("/api/auth/me"),
+        apiGetStripePackages(),
+        apiGetStripeInvoices(),
       ])
 
       setSettings(settingsData.settings as Settings)
       setMyKeys((keysData.keys || []) as ApiKey[])
       setOwnedOrg((orgsData.owned?.[0] || null) as Org | null)
       setMemberOrgs((orgsData.member || []) as Org[])
+      const me = (meData.user || null) as CurrentUser | null
+      applyCurrentUser(me)
+      setSubscriptionPlans(billingData.ok ? billingData.subscription_plans || [] : [])
+      setInvoiceRows(invoicesData.ok ? invoicesData.invoices || [] : [])
 
       const nextOwned = (orgsData.owned?.[0] || null) as Org | null
       if (nextOwned) {
@@ -205,6 +255,192 @@ export default function SettingsPanel({
       toast.error(errMsg(error))
     } finally {
       setLoading(false)
+    }
+  }
+
+  const saveProfile = async (
+    patch: Partial<Pick<CurrentUser, "name" | "email" | "avatar_url">> & {
+      notification_prefs?: NotificationPrefs
+      current_password?: string
+      new_password?: string
+    },
+    successMessage = "Gespeichert"
+  ) => {
+    try {
+      const data = await requestJson("/api/auth/me", "PUT", patch)
+      if (data?.user) {
+        applyCurrentUser(data.user as CurrentUser)
+      }
+      toast.success(successMessage)
+    } catch (error) {
+      toast.error(errMsg(error))
+    }
+  }
+
+  const copyValue = async (value: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(value)
+      toast.success(`${label} copied`)
+    } catch (error) {
+      toast.error(errMsg(error))
+    }
+  }
+
+  const startSubscription = async (planId: "starter" | "pro" | "scale") => {
+    setAccountBusy(`subscribe-${planId}`)
+    try {
+      const url = await apiStripeSubscriptionCheckout(planId)
+      window.location.href = url
+    } catch (error) {
+      toast.error(errMsg(error))
+      setAccountBusy(null)
+    }
+  }
+
+  const openBillingPortal = async () => {
+    setAccountBusy("portal")
+    try {
+      const res = await request("/api/stripe/portal", { method: "POST" })
+      if (res?.url) window.open(res.url as string, "_blank", "noopener,noreferrer")
+    } catch (error) {
+      toast.error(errMsg(error))
+    } finally {
+      setAccountBusy(null)
+    }
+  }
+
+  const saveAvatar = async () => {
+    setAccountBusy("avatar")
+    try {
+      await saveProfile({ avatar_url: avatarDraft.trim() }, "Avatar updated")
+    } finally {
+      setAccountBusy(null)
+    }
+  }
+
+  const changePassword = async () => {
+    if (!currentPasswordInput || !newPasswordInput) {
+      toast.warning("Current and new password are required")
+      return
+    }
+    if (newPasswordInput !== confirmPasswordInput) {
+      toast.warning("New passwords do not match")
+      return
+    }
+    setAccountBusy("password")
+    try {
+      await saveProfile(
+        {
+          current_password: currentPasswordInput,
+          new_password: newPasswordInput,
+        },
+        "Password updated"
+      )
+      setCurrentPasswordInput("")
+      setNewPasswordInput("")
+      setConfirmPasswordInput("")
+    } finally {
+      setAccountBusy(null)
+    }
+  }
+
+  const setupTwoFactor = async () => {
+    setAccountBusy("2fa-setup")
+    try {
+      const data = await request("/api/auth/2fa/setup", { method: "POST" })
+      setTwoFaSetup({
+        secret: String(data.secret || ""),
+        otpauth_uri: String(data.otpauth_uri || ""),
+      })
+      setTwoFaCode("")
+      toast.success("Authenticator setup started")
+    } catch (error) {
+      toast.error(errMsg(error))
+    } finally {
+      setAccountBusy(null)
+    }
+  }
+
+  const verifyTwoFactorSetup = async () => {
+    if (twoFaCode.length !== 6) {
+      toast.warning("Enter the 6-digit authenticator code")
+      return
+    }
+    setAccountBusy("2fa-verify")
+    try {
+      await requestJson("/api/auth/2fa/verify-setup", "POST", { code: twoFaCode })
+      setTwoFaSetup(null)
+      setTwoFaCode("")
+      await load()
+      toast.success("Two-factor authentication enabled")
+    } catch (error) {
+      toast.error(errMsg(error))
+    } finally {
+      setAccountBusy(null)
+    }
+  }
+
+  const disableTwoFactor = async () => {
+    if (!twoFaDisablePassword) {
+      toast.warning("Enter your password to disable 2FA")
+      return
+    }
+    setAccountBusy("2fa-disable")
+    try {
+      await requestJson("/api/auth/2fa", "DELETE", { password: twoFaDisablePassword })
+      setTwoFaDisablePassword("")
+      setTwoFaSetup(null)
+      await load()
+      toast.success("Two-factor authentication disabled")
+    } catch (error) {
+      toast.error(errMsg(error))
+    } finally {
+      setAccountBusy(null)
+    }
+  }
+
+  const downloadGdprExport = async () => {
+    setAccountBusy("export")
+    try {
+      const response = await fetchWithAuth(`${BASE}/api/auth/export`)
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload?.error || `Export failed (${response.status})`)
+      }
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const anchor = document.createElement("a")
+      anchor.href = url
+      anchor.download = "gdpr-export.json"
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      window.URL.revokeObjectURL(url)
+      toast.success("GDPR export downloaded")
+    } catch (error) {
+      toast.error(errMsg(error))
+    } finally {
+      setAccountBusy(null)
+    }
+  }
+
+  const deleteAccount = async () => {
+    if (!deletePassword) {
+      toast.warning("Enter your password to delete the account")
+      return
+    }
+    const confirmed = window.confirm("Delete this account permanently? This cannot be undone.")
+    if (!confirmed) return
+
+    setAccountBusy("delete")
+    try {
+      await requestJson("/api/auth/me", "DELETE", { password: deletePassword })
+      toast.success("Account deleted")
+      window.location.replace("/")
+    } catch (error) {
+      toast.error(errMsg(error))
+    } finally {
+      setAccountBusy(null)
     }
   }
 
@@ -522,11 +758,36 @@ export default function SettingsPanel({
           </button>
         </div>
 
-        <div className="draft-settings-tabs">
+        <div
+          className="draft-settings-tabs"
+          role="tablist"
+          aria-label={t("Settings Categories")}
+          onKeyDown={(event) => {
+            const tabs = TABS.map((entry) => entry.id)
+            const index = tabs.indexOf(tab)
+            if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+              event.preventDefault()
+              setTab(tabs[(index + 1) % tabs.length])
+            } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+              event.preventDefault()
+              setTab(tabs[(index - 1 + tabs.length) % tabs.length])
+            } else if (event.key === "Home") {
+              event.preventDefault()
+              setTab(tabs[0])
+            } else if (event.key === "End") {
+              event.preventDefault()
+              setTab(tabs[tabs.length - 1])
+            }
+          }}
+        >
           {TABS.map(entry => (
             <button
               key={entry.id}
               type="button"
+              role="tab"
+              id={`tab-${entry.id}`}
+              aria-selected={tab === entry.id}
+              aria-controls={`tabpanel-${entry.id}`}
               className={`draft-settings-tab ${tab === entry.id ? "active" : ""}`}
               onClick={() => setTab(entry.id)}
             >
@@ -538,7 +799,7 @@ export default function SettingsPanel({
 
         <div className="draft-settings-content">
           {tab === "general" ? (
-            <>
+            <div className="draft-settings-pane" role="tabpanel" id="tabpanel-general" aria-labelledby="tab-general">
               <Section label={t("Appearance")}>
                 <div className="draft-settings-button-group">
                   {[
@@ -731,11 +992,437 @@ export default function SettingsPanel({
                   </ResultCard>
                 ) : null}
               </Section>
-            </>
+            </div>
+          ) : null}
+
+          {tab === "profile" ? (
+            <div className="draft-settings-pane" role="tabpanel" id="tabpanel-profile" aria-labelledby="tab-profile">
+              <Section label={t("Profile Details")}>
+                <div className="draft-settings-list-card draft-settings-list-card--highlight" style={{ marginBottom: 14 }}>
+                  <div className="draft-settings-list-main">
+                    <strong>{currentUser?.name || currentUser?.email || "Account"}</strong>
+                    <div className="draft-settings-list-meta">
+                      {currentUser?.created_at
+                        ? `Member since ${new Date(currentUser.created_at).toLocaleDateString("de-DE")}`
+                        : "Account details"}
+                    </div>
+                  </div>
+                  <div className="draft-settings-inline" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <span
+                      className={`draft-settings-pill ${
+                        currentUser?.email_verified ? "draft-settings-pill--success" : "draft-settings-pill--pending"
+                      }`}
+                    >
+                      {currentUser?.email_verified ? "Email verified" : "Email pending"}
+                    </span>
+                    <span className="draft-settings-pill">{String(currentUser?.plan_id || "basis").toUpperCase()}</span>
+                    <span className="draft-settings-pill">
+                      {String(currentUser?.plan_status || "active").replace(/_/g, " ")}
+                    </span>
+                    <span
+                      className={`draft-settings-pill ${
+                        currentUser?.totp_enabled ? "draft-settings-pill--success" : "draft-settings-pill--pending"
+                      }`}
+                    >
+                      {currentUser?.totp_enabled ? "2FA on" : "2FA off"}
+                    </span>
+                  </div>
+                </div>
+
+                <SettingRow
+                  title={t("Display Name")}
+                  subtitle={t("Update how your name appears across the app")}
+                  control={
+                    <input
+                      aria-label={t("Display Name")}
+                      className="draft-settings-text-input"
+                      placeholder={t("Your Name")}
+                      value={currentUser?.name || ""}
+                      onChange={(event) =>
+                        setCurrentUser((previous) => (previous ? { ...previous, name: event.target.value } : previous))
+                      }
+                      onBlur={(event) => {
+                        const value = event.target.value.trim()
+                        if (value) void saveProfile({ name: value })
+                      }}
+                    />
+                  }
+                />
+                <SettingRow
+                  title={t("Email Address")}
+                  subtitle={t("Changing your email sends a verification link before the new address becomes active")}
+                  control={
+                    <input
+                      aria-label={t("Email Address")}
+                      className="draft-settings-text-input"
+                      type="email"
+                      placeholder="email@example.com"
+                      value={currentUser?.email || ""}
+                      onChange={(event) =>
+                        setCurrentUser((previous) => (previous ? { ...previous, email: event.target.value } : previous))
+                      }
+                      onBlur={(event) => {
+                        const value = event.target.value.trim()
+                        if (value) void saveProfile({ email: value })
+                      }}
+                    />
+                  }
+                />
+
+                <div className="draft-settings-input-row draft-settings-input-row--stack-mobile" style={{ marginTop: 14 }}>
+                  <input
+                    aria-label={t("Avatar URL")}
+                    className="draft-settings-text-input"
+                    type="url"
+                    placeholder="https://images.example.com/avatar.jpg"
+                    value={avatarDraft}
+                    onChange={(event) => setAvatarDraft(event.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className="draft-settings-action-button"
+                    disabled={accountBusy === "avatar"}
+                    onClick={() => void saveAvatar()}
+                  >
+                    {accountBusy === "avatar" ? "Saving..." : "Save avatar"}
+                  </button>
+                </div>
+                {avatarDraft ? (
+                  <div className="draft-settings-list-card" style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 14 }}>
+                    <img
+                      src={avatarDraft}
+                      alt="Avatar preview"
+                      style={{ width: 56, height: 56, borderRadius: 14, objectFit: "cover", border: "1px solid rgba(255,255,255,0.12)" }}
+                    />
+                    <div className="draft-settings-list-main">
+                      <strong>Avatar preview</strong>
+                      <div className="draft-settings-list-meta">The image URL is saved on your account profile.</div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="draft-settings-description" style={{ marginTop: 10, marginBottom: 0 }}>
+                    Add an image URL if you want your account avatar to appear in account and activity surfaces.
+                  </p>
+                )}
+              </Section>
+
+              <Section label={t("Security")}>
+                <div className="draft-settings-list">
+                  <div className="draft-settings-list-card">
+                    <div className="draft-settings-list-main">
+                      <strong>Password</strong>
+                      <div className="draft-settings-list-meta">Change your password with your current credentials.</div>
+                    </div>
+                    <div className="draft-settings-input-row draft-settings-input-row--stack-mobile" style={{ marginTop: 12 }}>
+                      <input
+                        className="draft-settings-text-input"
+                        type="password"
+                        placeholder="Current password"
+                        value={currentPasswordInput}
+                        onChange={(event) => setCurrentPasswordInput(event.target.value)}
+                      />
+                      <input
+                        className="draft-settings-text-input"
+                        type="password"
+                        placeholder="New password"
+                        value={newPasswordInput}
+                        onChange={(event) => setNewPasswordInput(event.target.value)}
+                      />
+                      <input
+                        className="draft-settings-text-input"
+                        type="password"
+                        placeholder="Confirm new password"
+                        value={confirmPasswordInput}
+                        onChange={(event) => setConfirmPasswordInput(event.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="draft-settings-action-button"
+                        disabled={accountBusy === "password"}
+                        onClick={() => void changePassword()}
+                      >
+                        {accountBusy === "password" ? "Updating..." : "Update password"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="draft-settings-list-card">
+                    <div className="draft-settings-list-main">
+                      <strong>Two-factor authentication</strong>
+                      <div className="draft-settings-list-meta">
+                        {currentUser?.totp_enabled
+                          ? "Authenticator protection is enabled for login."
+                          : "Protect login with an authenticator app."}
+                      </div>
+                    </div>
+
+                    {twoFaSetup ? (
+                      <div style={{ marginTop: 12 }}>
+                        <div className="draft-settings-list-meta" style={{ marginBottom: 10 }}>
+                          Save this secret in your authenticator app, then enter the first 6-digit code to confirm setup.
+                        </div>
+                        <div className="draft-settings-list-card" style={{ marginBottom: 10 }}>
+                          <div className="draft-settings-list-main">
+                            <strong>Secret</strong>
+                            <div className="draft-settings-list-meta" style={{ wordBreak: "break-all" }}>{twoFaSetup.secret}</div>
+                          </div>
+                          <button
+                            type="button"
+                            className="draft-settings-action-button"
+                            onClick={() => void copyValue(twoFaSetup.secret, "2FA secret")}
+                          >
+                            Copy
+                          </button>
+                        </div>
+                        <div className="draft-settings-list-card" style={{ marginBottom: 10 }}>
+                          <div className="draft-settings-list-main">
+                            <strong>Authenticator URI</strong>
+                            <div className="draft-settings-list-meta" style={{ wordBreak: "break-all" }}>{twoFaSetup.otpauth_uri}</div>
+                          </div>
+                          <button
+                            type="button"
+                            className="draft-settings-action-button"
+                            onClick={() => void copyValue(twoFaSetup.otpauth_uri, "Authenticator URI")}
+                          >
+                            Copy
+                          </button>
+                        </div>
+                        <div className="draft-settings-input-row draft-settings-input-row--stack-mobile">
+                          <input
+                            className="draft-settings-text-input"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            maxLength={6}
+                            placeholder="000000"
+                            value={twoFaCode}
+                            onChange={(event) => setTwoFaCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+                          />
+                          <button
+                            type="button"
+                            className="draft-settings-action-button"
+                            disabled={accountBusy === "2fa-verify"}
+                            onClick={() => void verifyTwoFactorSetup()}
+                          >
+                            {accountBusy === "2fa-verify" ? "Verifying..." : "Enable 2FA"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : currentUser?.totp_enabled ? (
+                      <div className="draft-settings-input-row draft-settings-input-row--stack-mobile" style={{ marginTop: 12 }}>
+                        <input
+                          className="draft-settings-text-input"
+                          type="password"
+                          placeholder="Password to disable 2FA"
+                          value={twoFaDisablePassword}
+                          onChange={(event) => setTwoFaDisablePassword(event.target.value)}
+                        />
+                        <button
+                          type="button"
+                          className="draft-settings-delete-button"
+                          disabled={accountBusy === "2fa-disable"}
+                          onClick={() => void disableTwoFactor()}
+                        >
+                          {accountBusy === "2fa-disable" ? "Disabling..." : "Disable 2FA"}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="draft-settings-input-row" style={{ marginTop: 12 }}>
+                        <button
+                          type="button"
+                          className="draft-settings-action-button"
+                          disabled={accountBusy === "2fa-setup"}
+                          onClick={() => void setupTwoFactor()}
+                        >
+                          {accountBusy === "2fa-setup" ? "Preparing..." : "Set up 2FA"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </Section>
+
+              <Section label={t("Billing & Subscription")}>
+                <div className="draft-settings-list-card draft-settings-list-card--highlight">
+                  <div className="draft-settings-list-main">
+                    <strong>Current plan</strong>
+                    <div className="draft-settings-list-meta">
+                      {String(currentUser?.plan_id || "basis").toUpperCase()} · {String(currentUser?.plan_status || "active").replace(/_/g, " ")}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    className="draft-settings-action-button"
+                    disabled={accountBusy === "portal"}
+                    onClick={() => void openBillingPortal()}
+                  >
+                    {accountBusy === "portal" ? "Opening..." : t("Open Billing Portal")}
+                  </button>
+                </div>
+
+                {subscriptionPlans.length ? (
+                  <div className="draft-settings-list" style={{ marginTop: 12 }}>
+                    {subscriptionPlans.map((plan) => {
+                      const isCurrent = currentUser?.plan_id === plan.id && currentUser?.plan_status !== "canceled"
+                      return (
+                        <div key={plan.id} className="draft-settings-list-card">
+                          <div className="draft-settings-list-main">
+                            <div className="draft-settings-inline" style={{ marginBottom: 4 }}>
+                              <strong>{plan.label}</strong>
+                              <span className="draft-settings-pill">€{plan.amount_eur}/mo</span>
+                              <span className="draft-settings-pill">{plan.project_limit} projects</span>
+                            </div>
+                            <div className="draft-settings-list-meta">
+                              {plan.description} · Includes €{plan.credits_eur.toFixed(2)} monthly AI credit allowance.
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="draft-settings-action-button"
+                            disabled={isCurrent || accountBusy === `subscribe-${plan.id}`}
+                            onClick={() => void startSubscription(plan.id as "starter" | "pro" | "scale")}
+                          >
+                            {isCurrent ? "Current plan" : accountBusy === `subscribe-${plan.id}` ? "Redirecting..." : `Start ${plan.label}`}
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                ) : (
+                  <p className="draft-settings-description" style={{ marginTop: 10, marginBottom: 0 }}>
+                    Subscription plans load from the Stripe billing configuration.
+                  </p>
+                )}
+
+                <div style={{ marginTop: 16 }}>
+                  <div className="draft-settings-label">Recent invoices</div>
+                  {invoiceRows.length ? (
+                    <div className="draft-settings-list">
+                      {invoiceRows.map((invoice) => (
+                        <div key={invoice.id} className="draft-settings-list-card">
+                          <div className="draft-settings-list-main">
+                            <div className="draft-settings-inline" style={{ marginBottom: 4 }}>
+                              <strong>{invoice.stripe_invoice_id || `Invoice #${invoice.id}`}</strong>
+                              <span className="draft-settings-pill">€{Number(invoice.amount_eur || 0).toFixed(2)}</span>
+                              <span
+                                className={`draft-settings-pill ${
+                                  invoice.refunded ? "draft-settings-pill--pending" : "draft-settings-pill--success"
+                                }`}
+                              >
+                                {invoice.refunded ? "Refunded" : invoice.status || "paid"}
+                              </span>
+                            </div>
+                            <div className="draft-settings-list-meta">
+                              {new Date(invoice.created_at).toLocaleString("de-DE")}
+                            </div>
+                          </div>
+                          {invoice.receipt_url ? (
+                            <a
+                              href={invoice.receipt_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="draft-settings-action-button"
+                              style={{ textDecoration: "none" }}
+                            >
+                              Receipt
+                            </a>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="draft-settings-description" style={{ marginTop: 10, marginBottom: 0 }}>
+                      Invoices will appear here after successful Stripe charges.
+                    </p>
+                  )}
+                </div>
+              </Section>
+
+              <Section label={t("Notification Preferences")}>
+                <SettingRow
+                  title={t("Email Updates")}
+                  subtitle={t("Receive product news, tips, and feature announcements")}
+                  control={
+                    <input
+                      aria-label={t("Enable email updates")}
+                      type="checkbox"
+                      checked={notificationPrefs.email_updates}
+                      onChange={(event) => {
+                        const next = { ...notificationPrefs, email_updates: event.target.checked }
+                        setNotificationPrefs(next)
+                        void saveProfile({ notification_prefs: next })
+                      }}
+                    />
+                  }
+                />
+                <SettingRow
+                  title={t("Team Mentions")}
+                  subtitle={t("Get notified when someone comments on your projects")}
+                  control={
+                    <input
+                      aria-label={t("Enable team mention notifications")}
+                      type="checkbox"
+                      checked={notificationPrefs.team_mentions}
+                      onChange={(event) => {
+                        const next = { ...notificationPrefs, team_mentions: event.target.checked }
+                        setNotificationPrefs(next)
+                        void saveProfile({ notification_prefs: next })
+                      }}
+                    />
+                  }
+                />
+              </Section>
+
+              <Section label={t("Data & Privacy")}>
+                <div className="draft-settings-list">
+                  <div className="draft-settings-list-card">
+                    <div className="draft-settings-list-main">
+                      <strong>GDPR export</strong>
+                      <div className="draft-settings-list-meta">
+                        Download the account, project, billing, and audit data currently stored for this user.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="draft-settings-action-button"
+                      disabled={accountBusy === "export"}
+                      onClick={() => void downloadGdprExport()}
+                    >
+                      {accountBusy === "export" ? "Preparing..." : "Download export"}
+                    </button>
+                  </div>
+
+                  <div className="draft-settings-list-card">
+                    <div className="draft-settings-list-main">
+                      <strong>Delete account</strong>
+                      <div className="draft-settings-list-meta">
+                        Permanently deletes this user and owned data. This action cannot be undone.
+                      </div>
+                    </div>
+                    <div className="draft-settings-input-row draft-settings-input-row--stack-mobile" style={{ marginTop: 12 }}>
+                      <input
+                        className="draft-settings-text-input"
+                        type="password"
+                        placeholder="Password to confirm deletion"
+                        value={deletePassword}
+                        onChange={(event) => setDeletePassword(event.target.value)}
+                      />
+                      <button
+                        type="button"
+                        className="draft-settings-delete-button"
+                        disabled={accountBusy === "delete"}
+                        onClick={() => void deleteAccount()}
+                      >
+                        {accountBusy === "delete" ? "Deleting..." : "Delete account"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </Section>
+            </div>
           ) : null}
 
           {tab === "apikeys" ? (
-            <>
+            <div className="draft-settings-pane" role="tabpanel" id="tabpanel-apikeys" aria-labelledby="tab-apikeys">
               <p className="draft-settings-description">
                 Füge eigene API Keys hinzu. Der Key wird automatisch erkannt und getestet. Deine Keys haben Vorrang vor den
                 System-Keys.
@@ -854,11 +1541,11 @@ export default function SettingsPanel({
               ) : null}
 
               {!myKeys.length && !loading ? <EmptyState message="Noch keine eigenen Keys gespeichert." /> : null}
-            </>
+            </div>
           ) : null}
 
           {tab === "org" ? (
-            <>
+            <div className="draft-settings-pane" role="tabpanel" id="tabpanel-org" aria-labelledby="tab-org">
               {memberOrgs.length ? (
                 <Section label="Mitglied in">
                   <div className="draft-settings-list">
@@ -971,11 +1658,11 @@ export default function SettingsPanel({
                   ) : null}
                 </>
               )}
-            </>
+            </div>
           ) : null}
 
           {tab === "google" ? (
-            <>
+            <div className="draft-settings-pane" role="tabpanel" id="tabpanel-google" aria-labelledby="tab-google">
               <p className="draft-settings-description">
                 15 Google APIs für SEO, KI-Inhalte, Bilder/Videos und Export/Deployment.
               </p>
@@ -1131,7 +1818,7 @@ export default function SettingsPanel({
                 {renderGoogleResult("Cloud Storage")}
                 {renderGoogleResult("BigQuery")}
               </GoogleSection>
-            </>
+            </div>
           ) : null}
         </div>
       </div>

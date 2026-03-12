@@ -13,12 +13,14 @@ export type AssistantContext = {
   surface: AssistantSurface
   plan: Plan
   workspace?: string
+  projectId?: number | string
   projectName?: string
   projectUrl?: string
   platform?: string
   exportMode?: string
   selectedBlock?: string | null
   warnings?: string[]
+  brandContext?: string
 }
 
 type AssistantChatRes = {

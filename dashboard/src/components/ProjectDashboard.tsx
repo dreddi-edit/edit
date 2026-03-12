@@ -11,7 +11,7 @@ import {
   type ProjectPage,
 } from "../api/projects"
 import { apiGetPlan, apiGetBalance, apiGetCreditsTransactions } from "../api/credits"
-import { apiFetch } from "../api/client"
+import { apiFetch, fetchWithAuth } from "../api/client"
 import CreditsPanel from "./CreditsPanel"
 import SettingsPanel from "./SettingsPanel"
 import ReferralInvite from "./ReferralInvite"
@@ -32,6 +32,7 @@ import {
 } from "../utils/planAccess"
 import { getTopActiveModelsByCategory } from "../utils/modelCatalog"
 import { buildAutoImportPayload, collectDroppedUploadItems, summarizeImportPreview } from "../utils/projectImport"
+import { useShortcuts } from "../hooks/useShortcuts"
 import "./project-dashboard-dark.css"
 
 const BASE = ""
@@ -96,6 +97,24 @@ type StudioToolMeta = {
   extraFieldLabel?: string
   extraFieldPlaceholder?: string
   extraFieldPresets?: string[]
+}
+type SearchResult = { id: number; name: string; url: string; type: string; thumbnail?: string }
+type ReviewComment = {
+  id: string
+  block_id: string
+  comment_text: string
+  author_name: string
+  author_email?: string
+  resolved: number
+}
+type StudioRun = {
+  id: string
+  tool_name: string
+  project_id?: string | null
+  status: string
+  created_at: string
+  input_payload: Record<string, unknown>
+  output_result: Record<string, unknown>
 }
 
 function titleCaseFallback(value: string): string {
@@ -817,24 +836,12 @@ function displayMemberName(member?: Pick<ProjectAssignee, "name" | "email"> | nu
   return member.name || member.email.split("@")[0] || member.email
 }
 
-function fileNameWithoutExtension(name: string) {
-  return name.replace(/\.[^.]+$/, "")
-}
-
 function formatImportPathLabel(value: string) {
   const normalized = String(value || "").replace(/^\/+/, "")
   if (!normalized) return "/"
   const segments = normalized.split("/").filter(Boolean)
   if (segments.length <= 2) return normalized
   return `${segments.slice(0, 2).join("/")}/.../${segments.at(-1)}`
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
 }
 
 function plainTextFromHtml(html?: string | null) {
@@ -844,38 +851,6 @@ function plainTextFromHtml(html?: string | null) {
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim()
-}
-
-function wrapLocalMarkup(filename: string, text: string) {
-  const title = escapeHtml(fileNameWithoutExtension(filename) || "Imported file")
-  if (/<svg[\s>]/i.test(text)) {
-    return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${title}</title>
-    <style>
-      html, body { margin: 0; min-height: 100%; background: #101010; }
-      body { display: grid; place-items: center; padding: 24px; }
-      svg { max-width: 100%; max-height: calc(100vh - 48px); height: auto; }
-    </style>
-  </head>
-  <body>${text}</body>
-</html>`
-  }
-
-  if (/<html[\s>]/i.test(text) || /<!doctype html/i.test(text)) return text
-
-  return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${title}</title>
-  </head>
-  <body>${text}</body>
-</html>`
 }
 
 function normalizeThumbnailUrl(thumbnail?: string | null) {
@@ -1199,11 +1174,19 @@ function ProjectCard({
   project,
   onInspect,
   onDelete,
+  onShare,
+  onReview,
+  currentUserId,
+  currentUserEmail,
   rt,
 }: {
   project: Project
   onInspect: () => void
   onDelete: () => void
+  onShare: () => void
+  onReview: () => void
+  currentUserId: number
+  currentUserEmail: string
   rt: (text: string) => string
 }) {
   const platformMeta = getPlatformMeta(project.platform)
@@ -1217,6 +1200,15 @@ function ProjectCard({
   const assigneeSummary = project.assignees?.length
     ? `${displayMemberName(project.assignees[0])}${project.assignees.length > 1 ? ` +${project.assignees.length - 1}` : ""}`
     : ""
+  const approvalStatus = project.approvalStatus || "draft"
+  const ownAssignment = (project.assignees || []).find(
+    (entry) => entry.email?.toLowerCase() === currentUserEmail.toLowerCase()
+  )
+  const canDelete =
+    Number(project.ownerUserId || 0) === currentUserId ||
+    ownAssignment?.role === "owner" ||
+    ownAssignment?.role === "admin" ||
+    !(project.assignees || []).length
 
   useEffect(() => {
     setImageFailed(false)
@@ -1231,6 +1223,14 @@ function ProjectCard({
       role="button"
       aria-label={`Inspect project ${displayName}`}
     >
+      {approvalStatus !== "draft" ? (
+        <div
+          className={`pd-approval-badge pd-approval-badge--${approvalStatus}`}
+          aria-label={`Approval status: ${approvalStatus}`}
+        >
+          {approvalStatus.replace(/_/g, " ")}
+        </div>
+      ) : null}
       <div
         className="pd-card-thumb"
         style={{
@@ -1251,16 +1251,18 @@ function ProjectCard({
             {initials}
           </span>
         ) : null}
-        <button
-          className="pd-card-delete"
-          onClick={event => {
-            event.stopPropagation()
-            onDelete()
-          }}
-          aria-label={`Delete ${project.name}`}
-        >
-          X
-        </button>
+        {canDelete ? (
+          <button
+            className="pd-card-delete"
+            onClick={event => {
+              event.stopPropagation()
+              onDelete()
+            }}
+            aria-label={`Delete ${project.name}`}
+          >
+            X
+          </button>
+        ) : null}
         <span className="pd-card-platform">{platformMeta.label}</span>
         {seoScore != null ? (
           <div className="pd-card-seo">
@@ -1281,6 +1283,54 @@ function ProjectCard({
           {project.lastExportAt
             ? `${rt("Last export")} · ${formatExportDate(project.lastExportAt)}`
             : `${rt("Updated")} ${formatUpdatedDate(project.updated_at)}`}
+        </div>
+        <div className="pd-card-actions">
+          <button
+            className="pd-card-btn"
+            type="button"
+            aria-label={rt("Open Project")}
+            onClick={(event) => {
+              event.stopPropagation()
+              onInspect()
+            }}
+          >
+            {rt("Open")}
+          </button>
+          <button
+            className="pd-card-btn"
+            type="button"
+            aria-label={rt("Copy client share link")}
+            onClick={(event) => {
+              event.stopPropagation()
+              onShare()
+            }}
+          >
+            {rt("Share")}
+          </button>
+          <button
+            className="pd-card-btn"
+            type="button"
+            aria-label={rt("Open review comments")}
+            onClick={(event) => {
+              event.stopPropagation()
+              onReview()
+            }}
+          >
+            {rt("Review")}
+          </button>
+          {canDelete ? (
+            <button
+              className="pd-card-btn"
+              type="button"
+              aria-label={rt("Delete Project")}
+              onClick={(event) => {
+                event.stopPropagation()
+                onDelete()
+              }}
+            >
+              {rt("Delete")}
+            </button>
+          ) : null}
         </div>
       </div>
     </article>
@@ -1771,7 +1821,6 @@ export default function ProjectDashboard({
   const [studioMarkets, setStudioMarkets] = useState("Germany, Austria, Switzerland")
   const [studioNotes, setStudioNotes] = useState("")
   const [studioResult, setStudioResult] = useState<StudioResult | null>(null)
-  const [applyingTemplateId, setApplyingTemplateId] = useState<number | null>(null)
   const [newName, setNewName] = useState("")
   const [newUrl, setNewUrl] = useState("")
   const [newClientName, setNewClientName] = useState("")
@@ -1799,6 +1848,11 @@ export default function ProjectDashboard({
   const [newNote, setNewNote] = useState("")
   const [assignableMembers, setAssignableMembers] = useState<AssignableMember[]>([])
   const [loadingAssignableMembers, setLoadingAssignableMembers] = useState(false)
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [reviewPanelProjectId, setReviewPanelProjectId] = useState<number | null>(null)
+  const [reviewComments, setReviewComments] = useState<ReviewComment[]>([])
+  const [studioRuns, setStudioRuns] = useState<StudioRun[]>([])
   const requestedThumbnailIds = useRef<Set<number>>(new Set())
 
   useEffect(() => {
@@ -1894,10 +1948,6 @@ export default function ProjectDashboard({
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault()
-        setCommandPaletteOpen(open => !open)
-      }
       if (event.key === "?" && !event.metaKey && !event.ctrlKey && !event.altKey) {
         const target = event.target as HTMLElement
         if (target.tagName !== "INPUT" && target.tagName !== "TEXTAREA" && target.tagName !== "SELECT") {
@@ -1910,12 +1960,34 @@ export default function ProjectDashboard({
     return () => window.removeEventListener("keydown", handler)
   }, [])
 
+  useEffect(() => {
+    if (activeWorkspace !== "ai-studio") return
+    void apiFetch<{ ok: boolean; runs: StudioRun[] }>("/api/studio/runs")
+      .then((response) => {
+        if (response?.ok) setStudioRuns(response.runs || [])
+      })
+      .catch(() => {})
+  }, [activeWorkspace])
+
+  useEffect(() => {
+    if (!reviewPanelProjectId) {
+      setReviewComments([])
+      return
+    }
+    void apiFetch<{ ok: boolean; comments: ReviewComment[] }>(`/api/projects/${reviewPanelProjectId}/comments`)
+      .then((response) => {
+        if (response?.ok) setReviewComments(response.comments || [])
+      })
+      .catch((error) => toast.error(errMsg(error)))
+  }, [reviewPanelProjectId])
+
   const currentPlanMeta = PLAN_META[plan]
   const unlockedStudioServices = AI_STUDIO_SERVICES.filter(service => hasStudioAccess(plan, service.id))
   const featuredStudioService = unlockedStudioServices[0] || AI_STUDIO_SERVICES[0]
   const normalizedProjects = projects
   const selectedStudioProject =
     typeof studioProjectId === "number" ? normalizedProjects.find(project => project.id === studioProjectId) : undefined
+  const quickStudioProject = selectedStudioProject || normalizedProjects.find(project => Boolean(project.html || project.url))
   const studioToolMeta = activeStudioTool ? STUDIO_TOOL_META[activeStudioTool] : null
   const selectedStudioProjectText = plainTextFromHtml(selectedStudioProject?.html)
   const effectiveStudioUrl = (studioUrl.trim() || selectedStudioProject?.url || "").trim()
@@ -2088,6 +2160,65 @@ export default function ProjectDashboard({
   const openAssistant = () => {
     window.dispatchEvent(new CustomEvent("assistant:open"))
   }
+
+  useShortcuts([
+    {
+      key: "k",
+      modifiers: ["meta"],
+      handler: () => {
+        document.getElementById("pd-global-search-input")?.focus()
+      },
+    },
+    {
+      key: "k",
+      modifiers: ["ctrl"],
+      handler: () => {
+        document.getElementById("pd-global-search-input")?.focus()
+      },
+    },
+    {
+      key: "/",
+      modifiers: ["meta"],
+      handler: () => {
+        openAssistant()
+      },
+    },
+    {
+      key: "/",
+      modifiers: ["ctrl"],
+      handler: () => {
+        openAssistant()
+      },
+    },
+    {
+      key: "p",
+      modifiers: ["meta"],
+      handler: () => {
+        if (projectExplorerId || normalizedProjects[0]?.id) {
+          setActiveWorkspace("exports")
+        }
+      },
+    },
+    {
+      key: "p",
+      modifiers: ["ctrl"],
+      handler: () => {
+        if (projectExplorerId || normalizedProjects[0]?.id) {
+          setActiveWorkspace("exports")
+        }
+      },
+    },
+    {
+      key: "Escape",
+      allowInInput: true,
+      handler: () => {
+        setReviewPanelProjectId(null)
+        setSearchResults([])
+        setCommandPaletteOpen(false)
+        setShortcutsOpen(false)
+      },
+    },
+  ])
 
   const resetNewProjectForm = () => {
     setShowNewProject(false)
@@ -2733,7 +2864,7 @@ export default function ProjectDashboard({
   const deleteTemplate = async (id: number) => {
     if (!window.confirm(rt("Delete template?"))) return
     try {
-      await fetch(`/api/templates/${id}`, { method: "DELETE", credentials: "include" })
+      await fetchWithAuth(`/api/templates/${id}`, { method: "DELETE" })
       await loadTemplates()
     } catch (error) {
       toast.error(errMsg(error))
@@ -2760,10 +2891,9 @@ export default function ProjectDashboard({
   const downloadExport = async (project: Project) => {
     setDownloadingExportId(project.id)
     try {
-      const response = await fetch("/api/export", {
+      const response = await fetchWithAuth("/api/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "include",
         body: JSON.stringify({
           html: project.html,
           url: project.url,
@@ -2815,6 +2945,53 @@ export default function ProjectDashboard({
       return
     }
     openStudioTool(service.id)
+  }
+
+  const refreshStudioRuns = async () => {
+    const response = await apiFetch<{ ok: boolean; runs: StudioRun[] }>("/api/studio/runs")
+    if (response?.ok) setStudioRuns(response.runs || [])
+  }
+
+  const runStudioAgent = async (
+    toolName: StudioRun["tool_name"],
+    inputPayload: Record<string, unknown> = {},
+    projectId?: number | null
+  ) => {
+    setStudioRunning(true)
+    try {
+      await apiFetch("/api/studio/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tool_name: toolName,
+          input_payload: inputPayload,
+          project_id: projectId ?? null,
+        }),
+      })
+      await refreshStudioRuns()
+      toast.success(`${toolName.replace(/_/g, " ")} ready`)
+    } catch (error) {
+      toast.error(errMsg(error))
+    } finally {
+      setStudioRunning(false)
+    }
+  }
+
+  const copyClientShareLink = async (project: Project) => {
+    try {
+      const response = await apiFetch<{ ok: boolean; share_url: string }>(`/api/projects/${project.id}/client-share`, {
+        method: "POST",
+      })
+      const shareUrl = response.share_url
+      try {
+        await navigator.clipboard.writeText(shareUrl)
+        toast.success(rt("Client share link copied"))
+      } catch {
+        window.prompt(rt("Client share link:"), shareUrl)
+      }
+    } catch (error) {
+      toast.error(errMsg(error))
+    }
   }
 
   const logout = async () => {
@@ -3026,16 +3203,65 @@ export default function ProjectDashboard({
             ))}
           </div>
 
-          <div className="pd-toolbar">
+          <div className="pd-toolbar" role="search" aria-label="Global Dashboard Toolbar">
+            <nav className="pd-breadcrumbs" aria-label="Breadcrumb">
+              <span className="pd-breadcrumb-item">{rt("Workspace")}</span>
+              <span className="pd-breadcrumb-sep" aria-hidden="true"> / </span>
+              <span className="pd-breadcrumb-item pd-breadcrumb-current" aria-current="page">
+                {workspaceTitle}
+              </span>
+            </nav>
             <span className="pd-toolbar-title">{workspaceTitle}</span>
             <span className="pd-toolbar-count">{activeItemsCount} {rt("items")}</span>
             <div className="pd-toolbar-spacer" />
-            <input
-              className="pd-filter-input"
-              placeholder={rt("Filter...")}
-              value={projectSearch}
-              onChange={event => setProjectSearch(event.target.value)}
-            />
+            <div className="pd-toolbar-search">
+              <input
+                id="pd-global-search-input"
+                className="pd-filter-input"
+                placeholder={rt("Search projects… (⌘K)")}
+                aria-label={rt("Search all projects and files")}
+                value={projectSearch}
+                onChange={(event) => {
+                  const value = event.target.value
+                  setProjectSearch(value)
+                  const query = value.trim()
+                  if (query.length >= 2) {
+                    setSearchLoading(true)
+                    void apiFetch<{ ok: boolean; results: SearchResult[] }>(`/api/search?q=${encodeURIComponent(query)}`)
+                      .then((response) => {
+                        if (response?.ok) setSearchResults(response.results || [])
+                      })
+                      .catch(() => setSearchResults([]))
+                      .finally(() => setSearchLoading(false))
+                  } else {
+                    setSearchResults([])
+                    setSearchLoading(false)
+                  }
+                }}
+              />
+              {searchResults.length > 0 || searchLoading ? (
+                <div className="pd-search-dropdown" role="listbox" aria-label="Search results">
+                  {searchLoading ? <div className="pd-search-empty">{rt("Searching...")}</div> : null}
+                  {searchResults.map((result) => (
+                    <button
+                      key={`${result.type}-${result.id}`}
+                      type="button"
+                      role="option"
+                      aria-selected="false"
+                      className="pd-search-result-item"
+                      onClick={() => {
+                        setProjectSearch("")
+                        setSearchResults([])
+                        setProjectExplorerId(result.id)
+                      }}
+                    >
+                      <span className="pd-search-result-name">{result.name}</span>
+                      <span className="pd-search-result-url">{result.url}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             {activeWorkspace === "ai-studio" ? (
               <button
                 className="pd-btn pd-btn-primary"
@@ -3189,17 +3415,150 @@ export default function ProjectDashboard({
                 ))}
               </div>
             ) : activeWorkspace === "ai-studio" && filteredAIStudioServices.length > 0 ? (
-              <div className="pd-projects-grid">
-                {filteredAIStudioServices.map(service => (
-                  <AIStudioCard
-                    key={service.id}
-                    service={service}
-                    rt={rt}
-                    locked={!hasStudioAccess(plan, service.id)}
-                    requiredPlan={hasStudioAccess(plan, service.id) ? undefined : getRequiredPlanForTool(service.id)}
-                    onOpen={() => openAIStudioService(service)}
-                  />
-                ))}
+              <div className="pd-ai-studio-layout">
+                <div className="pd-studio-tools">
+                  <div className="pd-studio-quickrun">
+                    <h2 className="pd-studio-section-title">{rt("Autonomous Agents")}</h2>
+                    <div className="pd-projects-grid">
+                      <button
+                        type="button"
+                        className="pd-card pd-studio-agent-card"
+                        disabled={studioRunning}
+                        onClick={() => {
+                          const brief = window.prompt(rt("Describe the company or product:"))
+                          if (!brief) return
+                          void runStudioAgent("company_in_a_box", { brief })
+                        }}
+                      >
+                        <div className="pd-card-body">
+                          <div className="pd-card-name">{rt("Company-in-a-Box")}</div>
+                          <div className="pd-card-client">{rt("Brand kit + sitemap from one brief")}</div>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        className="pd-card pd-studio-agent-card"
+                        disabled={studioRunning}
+                        onClick={() => {
+                          if (!quickStudioProject?.id) {
+                            window.alert(rt("Choose or open a project first"))
+                            return
+                          }
+                          void runStudioAgent("cro_agent", { project_id: quickStudioProject.id }, quickStudioProject.id)
+                        }}
+                      >
+                        <div className="pd-card-body">
+                          <div className="pd-card-name">{rt("CRO Agent")}</div>
+                          <div className="pd-card-client">{rt("Identify 3 conversion improvements")}</div>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        className="pd-card pd-studio-agent-card"
+                        disabled={studioRunning}
+                        onClick={() => {
+                          const goal = window.prompt(rt("Describe the funnel goal (e.g. lead generation, product sale):"))
+                          if (!goal) return
+                          void runStudioAgent("funnel_generator", { goal }, quickStudioProject?.id)
+                        }}
+                      >
+                        <div className="pd-card-body">
+                          <div className="pd-card-name">{rt("Full Funnel Generator")}</div>
+                          <div className="pd-card-client">{rt("Landing → form → thank-you + email sequence")}</div>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        className="pd-card pd-studio-agent-card"
+                        disabled={studioRunning}
+                        onClick={() => {
+                          const html = String(quickStudioProject?.html || "").trim()
+                          if (!quickStudioProject?.id || !html) {
+                            window.alert(rt("Open a project with imported content first"))
+                            return
+                          }
+                          void runStudioAgent("brand_brain", { html }, quickStudioProject.id)
+                        }}
+                      >
+                        <div className="pd-card-body">
+                          <div className="pd-card-name">{rt("Brand Brain")}</div>
+                          <div className="pd-card-client">{rt("Extract colours, fonts, and tone from a project")}</div>
+                        </div>
+                      </button>
+                    </div>
+                    {studioRunning ? (
+                      <div className="pd-studio-running-indicator" aria-live="polite" aria-busy="true">
+                        {rt("Agent running...")}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="pd-studio-catalog">
+                    <h2 className="pd-studio-section-title">{rt("AI Studio Catalog")}</h2>
+                    <div className="pd-projects-grid">
+                      {filteredAIStudioServices.map(service => (
+                        <AIStudioCard
+                          key={service.id}
+                          service={service}
+                          rt={rt}
+                          locked={!hasStudioAccess(plan, service.id)}
+                          requiredPlan={hasStudioAccess(plan, service.id) ? undefined : getRequiredPlanForTool(service.id)}
+                          onOpen={() => openAIStudioService(service)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <aside className="pd-studio-history">
+                  <div className="pd-studio-history-header">
+                    <h2 className="pd-studio-section-title">{rt("Run History")}</h2>
+                    {studioRuns.length >= 2 ? (
+                      <button
+                        className="pd-btn pd-btn-secondary"
+                        type="button"
+                        onClick={() => {
+                          const [a, b] = studioRuns.slice(0, 2)
+                          window.alert(
+                            `Run A (${a.tool_name}):\n${JSON.stringify(a.output_result, null, 2)}\n\n---\n\nRun B (${b.tool_name}):\n${JSON.stringify(b.output_result, null, 2)}`
+                          )
+                        }}
+                      >
+                        {rt("Compare latest 2")}
+                      </button>
+                    ) : null}
+                  </div>
+                  {studioRuns.length === 0 ? (
+                    <div className="pd-card-client">{rt("No runs yet. Launch an agent above.")}</div>
+                  ) : (
+                    <div className="pd-studio-run-list">
+                      {studioRuns.map((run) => (
+                        <div key={run.id} className="pd-card pd-studio-run-card">
+                          <div className="pd-studio-run-title">{run.tool_name.replace(/_/g, " ")}</div>
+                          <div className="pd-studio-run-meta">
+                            {new Date(run.created_at).toLocaleString()} · {run.status}
+                          </div>
+                          <div className="pd-studio-run-actions">
+                            <button
+                              type="button"
+                              className="pd-btn"
+                              onClick={() => window.alert(JSON.stringify(run.output_result, null, 2))}
+                            >
+                              {rt("Output")}
+                            </button>
+                            <button
+                              type="button"
+                              className="pd-btn pd-btn-secondary"
+                              onClick={() => void runStudioAgent(run.tool_name, run.input_payload, Number(run.project_id || 0) || undefined)}
+                            >
+                              {rt("Re-run")}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </aside>
               </div>
             ) : activeWorkspace === "projects" && filteredProjects.length > 0 ? (
               <div className="pd-projects-grid">
@@ -3208,7 +3567,11 @@ export default function ProjectDashboard({
                     key={project.id}
                     project={project}
                     rt={rt}
+                    currentUserId={user.id}
+                    currentUserEmail={user.email}
                     onInspect={() => openProjectExplorer(project)}
+                    onShare={() => void copyClientShareLink(project)}
+                    onReview={() => setReviewPanelProjectId(project.id)}
                     onDelete={() => deleteProject(project.id, project.name)}
                   />
                 ))}
@@ -3358,6 +3721,100 @@ export default function ProjectDashboard({
         />
       ) : null}
 
+      {reviewPanelProjectId !== null ? (
+        <div className="pd-modal-backdrop" onClick={() => setReviewPanelProjectId(null)}>
+          <div className="pd-review-panel" role="dialog" aria-modal="true" aria-label={rt("Project Review Panel")} onClick={(event) => event.stopPropagation()}>
+            <div className="pd-review-panel-header">
+              <h2>{rt("Project Review")}</h2>
+              <button className="pd-btn pd-btn-secondary" type="button" onClick={() => setReviewPanelProjectId(null)}>
+                {rt("Close")}
+              </button>
+            </div>
+            <p className="pd-card-client">{rt("Block-level comments and approval controls.")}</p>
+            <div className="pd-review-panel-actions">
+              <button
+                className="pd-btn pd-btn-primary"
+                type="button"
+                onClick={() => {
+                  void apiFetch(`/api/projects/${reviewPanelProjectId}/approval`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ status: "approved" }),
+                  })
+                    .then(() => {
+                      setProjects((previous) =>
+                        previous.map((project) =>
+                          project.id === reviewPanelProjectId ? { ...project, approvalStatus: "approved" } : project
+                        )
+                      )
+                      setReviewPanelProjectId(null)
+                    })
+                    .catch((error) => toast.error(errMsg(error)))
+                }}
+              >
+                {rt("Approve")}
+              </button>
+              <button
+                className="pd-btn"
+                type="button"
+                onClick={() => {
+                  void apiFetch(`/api/projects/${reviewPanelProjectId}/approval`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ status: "pending_review" }),
+                  })
+                    .then(() => {
+                      setProjects((previous) =>
+                        previous.map((project) =>
+                          project.id === reviewPanelProjectId ? { ...project, approvalStatus: "pending_review" } : project
+                        )
+                      )
+                    })
+                    .catch((error) => toast.error(errMsg(error)))
+                }}
+              >
+                {rt("Request Changes")}
+              </button>
+            </div>
+            <div className="pd-review-comments-list">
+              {reviewComments.length === 0 ? (
+                <div className="pd-card-client">{rt("No comments yet.")}</div>
+              ) : (
+                reviewComments.map((comment) => (
+                  <div key={comment.id} className="pd-review-comment" style={{ opacity: comment.resolved ? 0.45 : 1 }}>
+                    <div className="pd-review-comment-meta">
+                      {rt("Block")}: <code>{comment.block_id}</code> · {comment.author_name || rt("Unknown")}
+                    </div>
+                    <div>{comment.comment_text}</div>
+                    {!comment.resolved ? (
+                      <button
+                        className="pd-btn"
+                        type="button"
+                        onClick={() => {
+                          void apiFetch(`/api/projects/${reviewPanelProjectId}/comments/${comment.id}`, {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ resolved: true }),
+                          })
+                            .then(() => {
+                              setReviewComments((previous) =>
+                                previous.map((entry) => (entry.id === comment.id ? { ...entry, resolved: 1 } : entry))
+                              )
+                            })
+                            .catch((error) => toast.error(errMsg(error)))
+                        }}
+                      >
+                        {rt("Resolve")}
+                      </button>
+                    ) : null}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <CommandPalette
         open={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
@@ -3423,6 +3880,7 @@ export default function ProjectDashboard({
           surface: "dashboard",
           plan,
           workspace: workspaceTitle,
+          projectId: selectedStudioProject?.id,
           projectName: selectedStudioProject?.name,
           projectUrl: effectiveStudioUrl,
           platform: selectedStudioProject?.platform || "",

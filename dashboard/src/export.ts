@@ -1,3 +1,5 @@
+import { fetchWithAuth } from "./api/client";
+
 export type ExportMode =
   | "html-clean"
   | "html-raw"
@@ -6,6 +8,8 @@ export type ExportMode =
   | "wp-theme"
   | "wp-block"
   | "web-component"
+  | "react-component"
+  | "webflow-json"
   | "email-newsletter"
   | "markdown-content"
   | "pdf-print";
@@ -18,6 +22,8 @@ const EXPORT_FILENAME_MAP: Record<ExportMode, string> = {
   "wp-theme": "wordpress_theme.zip",
   "wp-block": "wordpress_block_plugin.zip",
   "web-component": "web_component_embed.zip",
+  "react-component": "react_component.zip",
+  "webflow-json": "webflow_import.zip",
   "email-newsletter": "email_newsletter.zip",
   "markdown-content": "content_markdown.zip",
   "pdf-print": "design_preview.pdf",
@@ -26,7 +32,7 @@ const EXPORT_FILENAME_MAP: Record<ExportMode, string> = {
 export async function exportSite(args: { url?: string; html?: string; mode?: ExportMode }) {
   const { url, html, mode = "html-clean" } = args;
 
-  const r = await fetch("/api/export", {
+  const r = await fetchWithAuth("/api/export", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ url, html, mode }),

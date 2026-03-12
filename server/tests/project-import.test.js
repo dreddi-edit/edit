@@ -92,3 +92,74 @@ test("asset library mode keeps uploaded assets out of the page detector", async 
   assert.equal(preview.pages[0]?.id, "assets")
   assert.equal(preview.analysis?.pageCount, 0)
 })
+
+test("ai import analysis cannot replace detected homepage with support files", async () => {
+  const originalFetch = global.fetch
+  process.env.GEMINI_API_KEY = "test-key"
+  global.fetch = async () =>
+    ({
+      ok: true,
+      json: async () => ({
+        candidates: [
+          {
+            content: {
+              parts: [
+                {
+                  text: JSON.stringify({
+                    projectType: "WordPress theme",
+                    platform: "wordpress",
+                    confidence: "high",
+                    homepageFile: "functions.php",
+                    pageCandidates: [
+                      { file: "functions.php", path: "/", title: "Functions" },
+                    ],
+                    supportFiles: ["front-page.php", "index.php"],
+                    contentSources: [],
+                    warnings: ["AI guessed the wrong homepage."],
+                    overview: "Test overview",
+                  }),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    })
+
+  try {
+    const preview = await buildProjectImportPreview({
+      kind: "entries",
+      title: "theme-preview",
+      entryMode: "folder",
+      entries: [
+        {
+          name: "theme-preview/front-page.php",
+          mimeType: "text/x-php",
+          buffer: Buffer.from(`<!doctype html>
+<html>
+  <head><title>Chout</title></head>
+  <body><section><h1>Hero</h1></section></body>
+</html>`),
+        },
+        {
+          name: "theme-preview/index.php",
+          mimeType: "text/x-php",
+          buffer: Buffer.from("<?php // silence"),
+        },
+        {
+          name: "theme-preview/functions.php",
+          mimeType: "text/x-php",
+          buffer: Buffer.from("<?php function theme_setup() {}"),
+        },
+      ],
+    })
+
+    assert.equal(preview.analysis?.homepageFile, "front-page.php")
+    assert.deepEqual(preview.analysis?.pageCandidates, ["front-page.php"])
+    assert.equal(preview.pages[0]?.path, "/")
+    assert.match(preview.pages[0]?.html || "", /<h1>Hero<\/h1>/)
+  } finally {
+    global.fetch = originalFetch
+    delete process.env.GEMINI_API_KEY
+  }
+})

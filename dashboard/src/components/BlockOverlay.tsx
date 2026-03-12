@@ -1,6 +1,7 @@
 import { useTranslation } from "../i18n/useTranslation";
 import React, { useCallback, useEffect, useRef,
 useState } from "react";
+import { fetchWithAuth } from "../api/client";
 import { toast } from "./Toast";
 import { getRequireApproval } from "../approval-settings";
 import { ENDPOINTS } from "../config";
@@ -809,10 +810,21 @@ function findImageLinkNode(el: HTMLElement, imageNode: HTMLImageElement | null):
   return link && el.contains(link) ? link : null;
 }
 
+function findImageFigure(el: HTMLElement, imageNode: HTMLImageElement | null): HTMLElement | null {
+  const figure = imageNode?.closest("figure") as HTMLElement | null;
+  return figure && el.contains(figure) ? figure : null;
+}
+
 function rgbToHex(rgb: string): string {
   const m = rgb.match(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/);
   if (!m) return rgb.startsWith("#") ? rgb : "#3b82f6";
   return "#" + [m[1], m[2], m[3]].map(x => parseInt(x).toString(16).padStart(2, "0")).join("");
+}
+
+function normalizeStyleColor(value: string, fallback = ""): string {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized || normalized === "transparent" || normalized === "rgba(0, 0, 0, 0)") return fallback;
+  return rgbToHex(value);
 }
 
 function serializeIframeHtml(doc: Document): string {
@@ -1570,8 +1582,24 @@ useEffect(() => {
   const [editLink, setEditLink] = useState("");
   const [editBg, setEditBg] = useState("#3b82f6");
   const [editColor, setEditColor] = useState("#ffffff");
+  const [editBorderColor, setEditBorderColor] = useState("#94a3b8");
+  const [editFontFamily, setEditFontFamily] = useState("");
   const [editFontSize, setEditFontSize] = useState("16px");
+  const [editFontWeight, setEditFontWeight] = useState("400");
+  const [editLineHeight, setEditLineHeight] = useState("1.5");
+  const [editPadding, setEditPadding] = useState("");
+  const [editMargin, setEditMargin] = useState("");
   const [editImgSrc, setEditImgSrc] = useState("");
+  const [editImgWidth, setEditImgWidth] = useState("");
+  const [editImgHeight, setEditImgHeight] = useState("");
+  const [editImgFit, setEditImgFit] = useState("cover");
+  const [editImgPosition, setEditImgPosition] = useState("center center");
+  const [editImgAlt, setEditImgAlt] = useState("");
+  const [editImgCaption, setEditImgCaption] = useState("");
+  const [imagePrompt, setImagePrompt] = useState("");
+  const [imageGenerating, setImageGenerating] = useState(false);
+  const [showRawHtml, setShowRawHtml] = useState(false);
+  const [rawHtmlValue, setRawHtmlValue] = useState("");
   const [isButtonSelected, setIsButtonSelected] = useState(false);
   // Heading + List Panel
   const [panelType, setPanelType] = useState<PanelType>("generic");
@@ -1595,6 +1623,7 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
   const selectedIdRef = useRef<string | null>(null);
   const pendingExpandRootRef = useRef<string | null>(null);
   const onClickLabelRef = useRef<(id: string) => void>(() => {});
+  const inlineEditRef = useRef<{ element: HTMLElement; originalText: string } | null>(null);
   blocksRef.current = blocks;
   hoverIdRef.current = hoverId;
   selectedIdRef.current = selectedId;
@@ -1613,9 +1642,25 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
     setEditNavLinks([]);
     setEditFormFields([]);
     setEditImgSrc("");
+    setEditImgWidth("");
+    setEditImgHeight("");
+    setEditImgFit("cover");
+    setEditImgPosition("center center");
+    setEditImgAlt("");
+    setEditImgCaption("");
+    setImagePrompt("");
+    setImageGenerating(false);
+    setShowRawHtml(false);
+    setRawHtmlValue("");
     setEditBg("#3b82f6");
     setEditColor("#ffffff");
+    setEditBorderColor("#94a3b8");
+    setEditFontFamily("");
     setEditFontSize("16px");
+    setEditFontWeight("400");
+    setEditLineHeight("1.5");
+    setEditPadding("");
+    setEditMargin("");
     setGroupPreviewHtml("");
   }, []);
 
@@ -1632,6 +1677,8 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
     setEditNavLinks([]);
     setEditFormFields([]);
     setEditImgSrc("");
+    setEditImgAlt("");
+    setEditImgCaption("");
   }, []);
 
   const selectBlock = useCallback((id: string) => {
@@ -1691,6 +1738,27 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
     const imgNode = findImageNode(el);
     const imageLinkNode = findImageLinkNode(el, imgNode);
     const isBtn = b.isButton || !!btnNode;
+    const styleTarget = (btnNode as HTMLElement | null) || (imgNode as HTMLElement | null) || el;
+    const computed = el.ownerDocument?.defaultView?.getComputedStyle(styleTarget);
+    setRawHtmlValue(el.outerHTML);
+    setShowRawHtml(false);
+    setEditBg(normalizeStyleColor(computed?.backgroundColor || "", ""));
+    setEditColor(normalizeStyleColor(computed?.color || "", "#ffffff"));
+    setEditBorderColor(normalizeStyleColor(computed?.borderColor || "", ""));
+    setEditFontFamily(computed?.fontFamily || "");
+    setEditFontSize(computed?.fontSize || "16px");
+    setEditFontWeight(computed?.fontWeight || "400");
+    setEditLineHeight(computed?.lineHeight || "1.5");
+    setEditPadding(computed?.padding || "");
+    setEditMargin(computed?.margin || "");
+    if (imgNode) {
+      setEditImgWidth(imgNode.style.width || computed?.width || "");
+      setEditImgHeight(imgNode.style.height || computed?.height || "");
+      setEditImgFit(imgNode.style.objectFit || "cover");
+      setEditImgPosition(imgNode.style.objectPosition || computed?.objectPosition || "center center");
+      setEditImgAlt((imgNode.getAttribute("alt") || "").trim());
+      setEditImgCaption((findImageFigure(el, imgNode)?.querySelector("figcaption")?.textContent || "").trim());
+    }
 
     const heading = el.querySelector("h1,h2,h3,h4") as HTMLElement | null;
     const list = el.querySelector("ul,ol") as HTMLElement | null;
@@ -1756,6 +1824,8 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
       setIsButtonSelected(false);
       setEditImgSrc((imgNode.getAttribute("src") || "").trim());
       setEditLink((imageLinkNode?.getAttribute("href") || "").trim());
+      setEditImgAlt((imgNode.getAttribute("alt") || "").trim());
+      setEditImgCaption((findImageFigure(el, imgNode)?.querySelector("figcaption")?.textContent || "").trim());
       return;
     }
 
@@ -1767,9 +1837,8 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
       // Always show existing link URL
       const existingHref = (btnNode as HTMLAnchorElement).getAttribute("href") || "";
       setEditLink(existingHref);
-      const computed = el.ownerDocument?.defaultView?.getComputedStyle(btnNode);
-      setEditBg(rgbToHex(computed?.backgroundColor || "#3b82f6"));
-      setEditColor(rgbToHex(computed?.color || "#ffffff"));
+      setEditBg(normalizeStyleColor(computed?.backgroundColor || "", ""));
+      setEditColor(normalizeStyleColor(computed?.color || "", "#ffffff"));
       setEditFontSize(computed?.fontSize || "16px");
     } else if (el.tagName === "A") {
       // Standalone link - show as button panel with href
@@ -1777,9 +1846,8 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
       setIsButtonSelected(true);
       setEditValue((el.textContent || "").trim());
       setEditLink((el as HTMLAnchorElement).getAttribute("href") || "");
-      const computed = el.ownerDocument?.defaultView?.getComputedStyle(el);
-      setEditBg(rgbToHex(computed?.backgroundColor || "#transparent"));
-      setEditColor(rgbToHex(computed?.color || "#000000"));
+      setEditBg(normalizeStyleColor(computed?.backgroundColor || "", ""));
+      setEditColor(normalizeStyleColor(computed?.color || "", "#000000"));
       setEditFontSize(computed?.fontSize || "16px");
     } else if (hasHeadingAndList || isListEl) {
       setPanelType("heading-list");
@@ -1797,6 +1865,130 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
   }, [getDoc, resetEditorPanelState]);
 
   onClickLabelRef.current = selectBlock;
+
+  useEffect(() => {
+    if (!enabled) return;
+    const doc = getDoc();
+    if (!doc) return;
+
+    const cleanupInlineEdit = (restore = false) => {
+      const active = inlineEditRef.current;
+      if (!active) return;
+      if (restore) {
+        active.element.textContent = active.originalText;
+      }
+      active.element.removeAttribute("contenteditable");
+      active.element.removeAttribute("spellcheck");
+      inlineEditRef.current = null;
+    };
+
+    const commitInlineEdit = () => {
+      const active = inlineEditRef.current;
+      if (!active) return;
+      const before = active.originalText.trim();
+      const after = (active.element.innerText || active.element.textContent || "").trim();
+      cleanupInlineEdit(false);
+      if (before === after) return;
+      pushHistorySnapshot(doc);
+      commitDocumentMutation(doc, { preserveSelectionId: selectedIdRef.current });
+    };
+
+    const beginInlineEdit = (blockId: string) => {
+      const entry = blocksRef.current.find((block) => block.id === blockId);
+      if (!entry) return;
+      const blockEl = doc.querySelector(entry.selector) as HTMLElement | null;
+      if (!blockEl) return;
+      const target = findPrimaryTextTarget(blockEl);
+      if (!target) return;
+      cleanupInlineEdit(false);
+      selectBlock(blockId);
+      inlineEditRef.current = {
+        element: target,
+        originalText: target.innerText || target.textContent || "",
+      };
+      target.setAttribute("contenteditable", "true");
+      target.setAttribute("spellcheck", "true");
+      target.focus();
+      const selection = doc.defaultView?.getSelection();
+      const range = doc.createRange();
+      range.selectNodeContents(target);
+      range.collapse(false);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    };
+
+    const onDoubleClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target) return;
+      const block = target.closest("[data-block-id]") as HTMLElement | null;
+      const blockId = block?.getAttribute("data-block-id") || "";
+      if (!blockId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      beginInlineEdit(blockId);
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!inlineEditRef.current) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        cleanupInlineEdit(true);
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        commitInlineEdit();
+      }
+    };
+
+    const onFocusOut = (event: FocusEvent) => {
+      if (!inlineEditRef.current) return;
+      if (event.target === inlineEditRef.current.element) {
+        commitInlineEdit();
+      }
+    };
+
+    doc.addEventListener("dblclick", onDoubleClick, true);
+    doc.addEventListener("keydown", onKeyDown, true);
+    doc.addEventListener("focusout", onFocusOut, true);
+    return () => {
+      doc.removeEventListener("dblclick", onDoubleClick, true);
+      doc.removeEventListener("keydown", onKeyDown, true);
+      doc.removeEventListener("focusout", onFocusOut, true);
+      cleanupInlineEdit(false);
+    };
+  }, [commitDocumentMutation, enabled, getDoc, pushHistorySnapshot, selectBlock]);
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const onPrefillImage = (event: Event) => {
+      const url = String((event as CustomEvent).detail?.url || "").trim();
+      if (!url) return;
+      setEditImgSrc(url);
+
+      const doc = getDoc();
+      const selectedBlockId = selectedIdRef.current;
+      if (!doc || !selectedBlockId) return;
+
+      const chosen = blocksRef.current.find((entry) => entry.id === selectedBlockId);
+      if (!chosen) return;
+      const el = doc.querySelector(chosen.selector) as HTMLElement | null;
+      if (!el) return;
+      const img = findImageNode(el);
+      if (!img) return;
+
+      pushHistorySnapshot(doc);
+      img.setAttribute("src", url);
+      img.setAttribute("data-bo-local-src", "1");
+      img.removeAttribute("data-bo-placeholder");
+      commitDocumentMutation(doc, { preserveSelectionId: selectedBlockId });
+      toast.success("Project asset applied to the selected image block");
+    };
+
+    window.addEventListener("bo:prefill-image-src", onPrefillImage as EventListener);
+    return () => window.removeEventListener("bo:prefill-image-src", onPrefillImage as EventListener);
+  }, [commitDocumentMutation, enabled, getDoc, pushHistorySnapshot]);
 
   // --- Drag & Drop: insert new blocks into iframe ---
   useEffect(() => {
@@ -2905,7 +3097,7 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
 
 
         // Streaming fetch
-        const streamResp = await fetch(ENDPOINTS.rewriteStream, {
+        const streamResp = await fetchWithAuth(ENDPOINTS.rewriteStream, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -3119,6 +3311,11 @@ const applyEdit = useCallback(() => {
     if (!chosen) return;
     const el = doc.querySelector(chosen.selector) as HTMLElement | null;
     if (!el) return;
+    const applyStyleValue = (target: HTMLElement, property: string, value: string) => {
+      const trimmed = String(value || "").trim();
+      if (trimmed) target.style.setProperty(property, trimmed);
+      else target.style.removeProperty(property);
+    };
 
     if (panelType === "button") {
       const btnNode = findButtonNode(el);
@@ -3131,9 +3328,6 @@ const applyEdit = useCallback(() => {
           if (nextHref) (btnNode as HTMLAnchorElement).setAttribute("href", nextHref);
           else (btnNode as HTMLAnchorElement).removeAttribute("href");
         }
-        (btnNode as HTMLElement).style.backgroundColor = editBg;
-        (btnNode as HTMLElement).style.color = editColor;
-        if (editFontSize) (btnNode as HTMLElement).style.fontSize = editFontSize;
       }
     } else if (panelType === "heading-list") {
       const heading = ["H1","H2","H3","H4"].includes(el.tagName)
@@ -3163,13 +3357,35 @@ const applyEdit = useCallback(() => {
         if (v) {
           img.src = v;
           img.setAttribute("data-bo-local-src", "1");
+          img.removeAttribute("data-bo-placeholder");
         }
+        const nextAlt = (editImgAlt || "").trim();
+        if (nextAlt) img.setAttribute("alt", nextAlt);
+        else img.removeAttribute("alt");
         const linkedImage = findImageLinkNode(el, img);
         if (linkedImage) {
           const nextHref = (editLink || "").trim();
           if (nextHref) linkedImage.setAttribute("href", nextHref);
           else linkedImage.removeAttribute("href");
         }
+        const figure = findImageFigure(el, img);
+        const nextCaption = (editImgCaption || "").trim();
+        let caption = figure?.querySelector("figcaption") as HTMLElement | null;
+        if (figure) {
+          if (nextCaption) {
+            if (!caption) {
+              caption = doc.createElement("figcaption");
+              figure.appendChild(caption);
+            }
+            caption.textContent = nextCaption;
+          } else if (caption) {
+            caption.remove();
+          }
+        }
+        applyStyleValue(img, "width", editImgWidth);
+        applyStyleValue(img, "height", editImgHeight);
+        applyStyleValue(img, "object-fit", editImgFit);
+        applyStyleValue(img, "object-position", editImgPosition);
       }
     } else if (panelType === "nav-links") {
       const anchors = Array.from(el.querySelectorAll("a[href], a")) as HTMLAnchorElement[];
@@ -3263,9 +3479,72 @@ const applyEdit = useCallback(() => {
       target.textContent = text;
     }
 
+    const styleTarget = (findButtonNode(el) as HTMLElement | null) || (findImageNode(el) as unknown as HTMLElement | null) || el;
+    applyStyleValue(styleTarget, "background-color", editBg);
+    applyStyleValue(styleTarget, "color", editColor);
+    applyStyleValue(styleTarget, "border-color", editBorderColor);
+    applyStyleValue(styleTarget, "font-family", editFontFamily);
+    applyStyleValue(styleTarget, "font-size", editFontSize);
+    applyStyleValue(styleTarget, "font-weight", editFontWeight);
+    applyStyleValue(styleTarget, "line-height", editLineHeight);
+    applyStyleValue(el, "padding", editPadding);
+    applyStyleValue(el, "margin", editMargin);
+
     commitDocumentMutation(doc, { preserveSelectionId: selectedId });
   }, [getDoc, selectedId, editValue, editLink, editBg, editColor, editFontSize,
-      panelType, editHeading, editBullets, editImgSrc, editNavLinks, editFormFields, commitDocumentMutation, pushHistorySnapshot]);
+      panelType, editHeading, editBullets, editImgSrc, editImgWidth, editImgHeight, editImgFit, editImgPosition,
+      editImgAlt, editImgCaption,
+      editNavLinks, editFormFields, editBorderColor, editFontFamily, editFontWeight, editLineHeight,
+      editPadding, editMargin, commitDocumentMutation, pushHistorySnapshot]);
+
+  const applyRawHtmlEdit = useCallback(() => {
+    const doc = getDoc();
+    if (!doc || !selectedId) return;
+    const chosen = blocksRef.current.find((entry) => entry.id === selectedId);
+    if (!chosen) return;
+    const el = doc.querySelector(chosen.selector) as HTMLElement | null;
+    if (!el || !el.parentElement) return;
+
+    const wrapper = doc.createElement("div");
+    wrapper.innerHTML = rawHtmlValue.trim();
+    const nextNode = wrapper.firstElementChild as HTMLElement | null;
+    if (!nextNode) {
+      toast.error("Raw HTML must contain one root element.")
+      return;
+    }
+
+    pushHistorySnapshot(doc);
+    el.parentElement.insertBefore(nextNode, el);
+    el.remove();
+    commitDocumentMutation(doc);
+    setShowRawHtml(false);
+  }, [commitDocumentMutation, getDoc, pushHistorySnapshot, rawHtmlValue, selectedId]);
+
+  const generateImageFromPrompt = useCallback(async () => {
+    if (!imagePrompt.trim()) {
+      toast.error("Enter an image prompt first.");
+      return;
+    }
+    setImageGenerating(true);
+    try {
+      const response = await fetchWithAuth("/api/google/imagen", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: imagePrompt.trim(), count: 1, quality: "standard" }),
+      });
+      const data = await response.json();
+      const image = data?.images?.[0];
+      if (!data?.ok || !image?.base64) {
+        throw new Error(data?.error || "Image generation failed");
+      }
+      setEditImgSrc(`data:${image.mimeType || "image/png"};base64,${image.base64}`);
+      toast.success("Image generated");
+    } catch (error: any) {
+      toast.error(`Image generation failed: ${error?.message || error}`);
+    } finally {
+      setImageGenerating(false);
+    }
+  }, [imagePrompt]);
 
   const aiLayoutAnalyze = async () => {
     const doc = getDoc();
@@ -3308,7 +3587,7 @@ const applyEdit = useCallback(() => {
 
     try {
       console.log("AI Layout: sending", sameLevel.length, "blocks");
-      const res = await fetch(ENDPOINTS.rewrite, {
+      const res = await fetchWithAuth(ENDPOINTS.rewrite, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -3826,6 +4105,16 @@ return (
                 marginTop: 4, width: "100%", height: 34, borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)",
                 background: "rgba(0,0,0,0.25)", color: "white", padding: "0 10px", outline: "none", fontSize: 13, boxSizing: "border-box",
               }} />
+              <label style={{ fontSize: 11, color: "rgba(148,163,184,0.8)", fontWeight: 700, display: "block", marginTop: 10 }}>ALT TEXT</label>
+              <input value={editImgAlt} onChange={e => setEditImgAlt(e.target.value)} placeholder="Describe the image for accessibility and SEO" style={{
+                marginTop: 4, width: "100%", height: 34, borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)",
+                background: "rgba(0,0,0,0.25)", color: "white", padding: "0 10px", outline: "none", fontSize: 13, boxSizing: "border-box",
+              }} />
+              <label style={{ fontSize: 11, color: "rgba(148,163,184,0.8)", fontWeight: 700, display: "block", marginTop: 10 }}>CAPTION</label>
+              <input value={editImgCaption} onChange={e => setEditImgCaption(e.target.value)} placeholder="Optional figure caption" style={{
+                marginTop: 4, width: "100%", height: 34, borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)",
+                background: "rgba(0,0,0,0.25)", color: "white", padding: "0 10px", outline: "none", fontSize: 13, boxSizing: "border-box",
+              }} />
               <label style={{ fontSize: 11, color: "rgba(148,163,184,0.8)", fontWeight: 700, display: "block", marginTop: 10 }}>LINK URL</label>
               <input
                 value={editLink}
@@ -3842,6 +4131,50 @@ return (
                 const url = URL.createObjectURL(f);
                 setEditImgSrc(url);
               }} style={{ marginTop: 8, width: "100%", color: "white" }} />
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 10 }}>
+                <input value={editImgWidth} onChange={e => setEditImgWidth(e.target.value)} placeholder="Width" style={{
+                  height: 34, borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)",
+                  background: "rgba(0,0,0,0.25)", color: "white", padding: "0 10px", outline: "none", fontSize: 12,
+                }} />
+                <input value={editImgHeight} onChange={e => setEditImgHeight(e.target.value)} placeholder="Height" style={{
+                  height: 34, borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)",
+                  background: "rgba(0,0,0,0.25)", color: "white", padding: "0 10px", outline: "none", fontSize: 12,
+                }} />
+                <select value={editImgFit} onChange={e => setEditImgFit(e.target.value)} style={{
+                  height: 34, borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)",
+                  background: "rgba(0,0,0,0.25)", color: "white", padding: "0 10px", outline: "none", fontSize: 12,
+                }}>
+                  <option value="cover">Cover</option>
+                  <option value="contain">Contain</option>
+                  <option value="fill">Fill</option>
+                  <option value="scale-down">Scale down</option>
+                </select>
+              </div>
+              <select value={editImgPosition} onChange={e => setEditImgPosition(e.target.value)} style={{
+                marginTop: 8, width: "100%", height: 34, borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)",
+                background: "rgba(0,0,0,0.25)", color: "white", padding: "0 10px", outline: "none", fontSize: 12,
+              }}>
+                <option value="center center">Crop focus: Center</option>
+                <option value="center top">Crop focus: Top</option>
+                <option value="center bottom">Crop focus: Bottom</option>
+                <option value="left center">Crop focus: Left</option>
+                <option value="right center">Crop focus: Right</option>
+                <option value="left top">Crop focus: Top left</option>
+                <option value="right top">Crop focus: Top right</option>
+                <option value="left bottom">Crop focus: Bottom left</option>
+                <option value="right bottom">Crop focus: Bottom right</option>
+              </select>
+              <label style={{ fontSize: 11, color: "rgba(148,163,184,0.8)", fontWeight: 700, display: "block", marginTop: 10 }}>AI IMAGE PROMPT</label>
+              <textarea value={imagePrompt} onChange={e => setImagePrompt(e.target.value)} placeholder="Generate a replacement image..." style={{
+                marginTop: 4, width: "100%", height: 72, resize: "vertical",
+                borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)", background: "rgba(0,0,0,0.25)",
+                color: "white", padding: 8, outline: "none", fontSize: 12, boxSizing: "border-box",
+              }} />
+              <button onClick={() => void generateImageFromPrompt()} disabled={imageGenerating} style={{
+                marginTop: 8, width: "100%", height: 34, borderRadius: 10,
+                border: "1px solid rgba(34,197,94,0.32)", background: "rgba(34,197,94,0.14)",
+                color: "white", cursor: imageGenerating ? "wait" : "pointer", fontSize: 12, fontWeight: 800,
+              }}>{imageGenerating ? "Generating..." : "Generate image"}</button>
               <div style={{ marginTop: 8, fontSize: 11, color: "rgba(148,163,184,0.7)", lineHeight: 1.25 }}>
                 Upload ist nur für Preview/Editor. Beim Export wird daraus ein Platzhalter (Bild später in WordPress Media Library ersetzen).
               </div>
@@ -3895,6 +4228,81 @@ return (
               background: "rgba(0,0,0,0.25)", color: "white", padding: "0 10px", outline: "none", fontSize: 13, boxSizing: "border-box",
             }} />
           </>)}
+
+          {panelType !== "group" && (
+            <div style={{
+              marginTop: 12,
+              paddingTop: 12,
+              borderTop: "1px solid rgba(148,163,184,0.16)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}>
+              <div style={{ fontSize: 11, color: "rgba(148,163,184,0.82)", fontWeight: 800 }}>STYLE CONTROLS</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+                {[
+                  { label: "Text", value: editColor, set: setEditColor, fallback: "#ffffff" },
+                  { label: "Background", value: editBg, set: setEditBg, fallback: "#3b82f6" },
+                  { label: "Border", value: editBorderColor, set: setEditBorderColor, fallback: "#94a3b8" },
+                ].map((item) => (
+                  <div key={item.label}>
+                    <label style={{ fontSize: 10, color: "rgba(148,163,184,0.72)", fontWeight: 700, display: "block" }}>{item.label}</label>
+                    <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                      <input type="color" value={item.value.startsWith("#") ? item.value : item.fallback} onChange={e => item.set(e.target.value)}
+                        style={{ width: 32, height: 32, borderRadius: 8, border: "none", cursor: "pointer" }} />
+                      <input value={item.value} onChange={e => item.set(e.target.value)} style={{
+                        flex: 1, height: 32, borderRadius: 8, border: "1px solid rgba(148,163,184,0.22)",
+                        background: "rgba(0,0,0,0.22)", color: "white", padding: "0 8px", outline: "none", fontSize: 11,
+                      }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
+                <input value={editFontFamily} onChange={e => setEditFontFamily(e.target.value)} placeholder="Font family" style={{
+                  height: 34, borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)",
+                  background: "rgba(0,0,0,0.25)", color: "white", padding: "0 10px", outline: "none", fontSize: 12,
+                }} />
+                <input value={editFontSize} onChange={e => setEditFontSize(e.target.value)} placeholder="Font size" style={{
+                  height: 34, borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)",
+                  background: "rgba(0,0,0,0.25)", color: "white", padding: "0 10px", outline: "none", fontSize: 12,
+                }} />
+                <input value={editFontWeight} onChange={e => setEditFontWeight(e.target.value)} placeholder="Font weight" style={{
+                  height: 34, borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)",
+                  background: "rgba(0,0,0,0.25)", color: "white", padding: "0 10px", outline: "none", fontSize: 12,
+                }} />
+                <input value={editLineHeight} onChange={e => setEditLineHeight(e.target.value)} placeholder="Line height" style={{
+                  height: 34, borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)",
+                  background: "rgba(0,0,0,0.25)", color: "white", padding: "0 10px", outline: "none", fontSize: 12,
+                }} />
+                <input value={editPadding} onChange={e => setEditPadding(e.target.value)} placeholder="Padding" style={{
+                  height: 34, borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)",
+                  background: "rgba(0,0,0,0.25)", color: "white", padding: "0 10px", outline: "none", fontSize: 12,
+                }} />
+                <input value={editMargin} onChange={e => setEditMargin(e.target.value)} placeholder="Margin" style={{
+                  height: 34, borderRadius: 10, border: "1px solid rgba(148,163,184,0.25)",
+                  background: "rgba(0,0,0,0.25)", color: "white", padding: "0 10px", outline: "none", fontSize: 12,
+                }} />
+              </div>
+              <button onClick={() => setShowRawHtml((value) => !value)} style={{
+                height: 32, borderRadius: 10, border: "1px solid rgba(148,163,184,0.22)",
+                background: "rgba(255,255,255,0.04)", color: "white", cursor: "pointer", fontWeight: 800, fontSize: 11,
+              }}>{showRawHtml ? "Hide raw HTML" : "Edit raw HTML"}</button>
+              {showRawHtml && (
+                <>
+                  <textarea value={rawHtmlValue} onChange={e => setRawHtmlValue(e.target.value)} style={{
+                    width: "100%", minHeight: 140, resize: "vertical",
+                    borderRadius: 10, border: "1px solid rgba(148,163,184,0.24)", background: "rgba(0,0,0,0.28)",
+                    color: "white", padding: 10, outline: "none", fontSize: 11, fontFamily: "ui-monospace, SFMono-Regular, monospace", boxSizing: "border-box",
+                  }} />
+                  <button onClick={applyRawHtmlEdit} style={{
+                    height: 32, borderRadius: 10, border: "1px solid rgba(59,130,246,0.32)",
+                    background: "rgba(59,130,246,0.14)", color: "white", cursor: "pointer", fontWeight: 800, fontSize: 11,
+                  }}>Apply raw HTML</button>
+                </>
+              )}
+            </div>
+          )}
 
           {panelType !== "group" && (
           <div style={{ display: "flex", gap: 8, marginTop: 12 }}>

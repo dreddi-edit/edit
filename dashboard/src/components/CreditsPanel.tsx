@@ -6,12 +6,14 @@ import {
   apiGetCreditsTransactions,
   apiGetStripePackages,
   apiStripeCheckout,
+  apiStripeSubscriptionCheckout,
 } from "../api/credits"
-import type { StripePackage, CreditTransaction } from "../api/types"
+import type { StripePackage, StripeSubscriptionPlan, CreditTransaction } from "../api/types"
 
 export default function CreditsPanel({ onClose }: { onClose: () => void }) {
   const [balance, setBalance] = useState<number | null>(null)
   const [packages, setPackages] = useState<StripePackage[]>([])
+  const [subscriptionPlans, setSubscriptionPlans] = useState<StripeSubscriptionPlan[]>([])
   const [transactions, setTransactions] = useState<CreditTransaction[]>([])
   const [loading, setLoading] = useState<string | null>(null)
 
@@ -40,15 +42,29 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
         apiGetCreditsTransactions(),
       ])
       if (b != null) setBalance(b)
-      if (p.ok) setPackages(p.packages)
+      if (p.ok) {
+        setPackages(p.packages)
+        setSubscriptionPlans(p.subscription_plans || [])
+      }
       if (t.ok) setTransactions(t.transactions)
     } catch (e) { toast.error(errMsg(e)) }
   }
 
   const checkout = async (pkg: StripePackage) => {
-    setLoading(pkg.id)
+    setLoading(`credits:${pkg.id}`)
     try {
       const url = await apiStripeCheckout(pkg.id)
+      window.location.href = url
+    } catch (e: unknown) {
+      toast.error(errMsg(e))
+      setLoading(null)
+    }
+  }
+
+  const subscribe = async (plan: StripeSubscriptionPlan) => {
+    setLoading(`plan:${plan.id}`)
+    try {
+      const url = await apiStripeSubscriptionCheckout(plan.id as "starter" | "pro" | "scale")
       window.location.href = url
     } catch (e: unknown) {
       toast.error(errMsg(e))
@@ -136,11 +152,10 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
             <div style={sectionTitle}>Plans</div>
 
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-
               <div style={PLAN_STYLE.basis}>
                 <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
                   <div style={{ fontWeight:800, fontSize:16 }}>Basis</div>
-                  <div style={{ fontSize:12, fontWeight:800, color:"var(--text-secondary)" }}>€9/mo</div>
+                  <div style={{ fontSize:12, fontWeight:800, color:"var(--text-secondary)" }}>Current default</div>
                 </div>
                 <div style={{ fontSize:12, color:"var(--text-secondary)", lineHeight:1.45 }}>
                   Platform access with manual credit loading.
@@ -153,64 +168,50 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
                   • Cloud AI via credits
                 </div>
               </div>
+              {subscriptionPlans.map((plan) => {
+                const style =
+                  plan.id === "pro" ? PLAN_STYLE.pro :
+                  plan.id === "scale" ? PLAN_STYLE.scale :
+                  PLAN_STYLE.starter
 
-              <div style={PLAN_STYLE.starter}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
-                  <div style={{ fontWeight:800, fontSize:16 }}>Starter</div>
-                  <div style={{ fontSize:12, fontWeight:800, color:"var(--text-secondary)" }}>€29/mo</div>
-                </div>
-                <div style={{ fontSize:12, color:"var(--text-secondary)", lineHeight:1.45 }}>
-                  Subscription with AI included for regular use.
-                </div>
-                <div style={{ marginTop:10, fontSize:11, color:"var(--text-muted)", lineHeight:1.5 }}>
-                  • 1 user<br/>
-                  • 10 active projects<br/>
-                  • Up to 2 team members<br/>
-                  • Priority AI queue<br/>
-                  • Full coverage fair use
-                </div>
-              </div>
-
-              <div style={PLAN_STYLE.pro}>
-                <div style={{
-                  position:"absolute", top:-10, right:12,
-                  fontSize:10, fontWeight:800, padding:"3px 8px", borderRadius:999,
-                  border: "1px solid rgba(138,164,255,0.24)",
-                  background:"rgba(138,164,255,0.12)", color:"#a7baff", letterSpacing:0.7,
-                }}>Recommended</div>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
-                  <div style={{ fontWeight:800, fontSize:16 }}>Pro</div>
-                  <div style={{ fontSize:12, fontWeight:800, color:"var(--text-secondary)" }}>€79/mo</div>
-                </div>
-                <div style={{ fontSize:12, color:"var(--text-secondary)", lineHeight:1.45 }}>
-                  Best for freelancers and small agencies.
-                </div>
-                <div style={{ marginTop:10, fontSize:11, color:"var(--text-muted)", lineHeight:1.5 }}>
-                  • 3 users<br/>
-                  • 30 active projects<br/>
-                  • Up to 10 team members<br/>
-                  • Faster support<br/>
-                  • Full coverage fair use
-                </div>
-              </div>
-
-              <div style={PLAN_STYLE.scale}>
-                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
-                  <div style={{ fontWeight:800, fontSize:16 }}>Scale</div>
-                  <div style={{ fontSize:12, fontWeight:800, color:"var(--text-secondary)" }}>€149/mo</div>
-                </div>
-                <div style={{ fontSize:12, color:"var(--text-secondary)", lineHeight:1.45 }}>
-                  For teams handling many websites in parallel.
-                </div>
-                <div style={{ marginTop:10, fontSize:11, color:"var(--text-muted)", lineHeight:1.5 }}>
-                  • 10 users<br/>
-                  • 100 active projects<br/>
-                  • Up to 50 team members<br/>
-                  • Highest limits<br/>
-                  • Full coverage fair use
-                </div>
-              </div>
-
+                return (
+                  <div key={plan.id} style={style}>
+                    {plan.id === "pro" ? (
+                      <div style={{
+                        position:"absolute", top:-10, right:12,
+                        fontSize:10, fontWeight:800, padding:"3px 8px", borderRadius:999,
+                        border: "1px solid rgba(138,164,255,0.24)",
+                        background:"rgba(138,164,255,0.12)", color:"#a7baff", letterSpacing:0.7,
+                      }}>Recommended</div>
+                    ) : null}
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:6 }}>
+                      <div style={{ fontWeight:800, fontSize:16 }}>{plan.label}</div>
+                      <div style={{ fontSize:12, fontWeight:800, color:"var(--text-secondary)" }}>€{plan.amount_eur}/mo</div>
+                    </div>
+                    <div style={{ fontSize:12, color:"var(--text-secondary)", lineHeight:1.45 }}>
+                      {plan.description}
+                    </div>
+                    <div style={{ marginTop:10, fontSize:11, color:"var(--text-muted)", lineHeight:1.5 }}>
+                      • {plan.project_limit} active projects<br/>
+                      • € {plan.credits_eur.toFixed(2)} monthly AI allowance<br/>
+                      • Stripe-managed billing portal<br/>
+                      • VAT handled at checkout
+                    </div>
+                    <div
+                      onClick={() => void subscribe(plan)}
+                      style={{
+                        marginTop: 14, width: "100%", height: 38, borderRadius: 12, border: "1px solid rgba(138,164,255,0.26)",
+                        background: loading === `plan:${plan.id}` ? "rgba(138,164,255,0.16)" : "linear-gradient(180deg, #9bb1ff 0%, #7f99f6 100%)",
+                        color: loading === `plan:${plan.id}` ? "var(--text-primary)" : "#0d1320", fontWeight: 700, fontSize: 13,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {loading === `plan:${plan.id}` ? "Loading..." : `Start ${plan.label}`}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
           <div style={{ marginBottom: 28 }}>
@@ -222,7 +223,7 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
                   border: pkg.id === "pro" ? "1px solid rgba(138,164,255,0.26)" : "1px solid var(--border)",
                   background: pkg.id === "pro" ? "rgba(138,164,255,0.08)" : "rgba(255,255,255,0.03)",
                   position: "relative", transition: "transform 0.15s",
-                  opacity: loading === pkg.id ? 0.6 : 1,
+                  opacity: loading === `credits:${pkg.id}` ? 0.6 : 1,
                 }}>
                   {pkg.id === "pro" && (
                     <div style={{
@@ -248,12 +249,12 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
                   )}
                   <div style={{
                     marginTop: 14, width: "100%", height: 38, borderRadius: 12, border: "1px solid rgba(138,164,255,0.26)",
-                    background: loading === pkg.id ? "rgba(138,164,255,0.16)" : "linear-gradient(180deg, #9bb1ff 0%, #7f99f6 100%)",
-                    color: loading === pkg.id ? "var(--text-primary)" : "#0d1320", fontWeight: 700, fontSize: 13,
+                    background: loading === `credits:${pkg.id}` ? "rgba(138,164,255,0.16)" : "linear-gradient(180deg, #9bb1ff 0%, #7f99f6 100%)",
+                    color: loading === `credits:${pkg.id}` ? "var(--text-primary)" : "#0d1320", fontWeight: 700, fontSize: 13,
                     display: "flex", alignItems: "center", justifyContent: "center",
                     cursor: "pointer",
                   }}>
-                    {loading === pkg.id ? "Loading..." : "Buy now"}
+                    {loading === `credits:${pkg.id}` ? "Loading..." : "Buy now"}
                   </div>
                 </div>
               ))}

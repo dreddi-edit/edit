@@ -22,3 +22,16 @@ export function canAdvanceWorkflow(role, stage) {
 export function canExportProject(role) {
   return normalizeAgencyRole(role, "owner") !== "client_reviewer";
 }
+
+export function ownerOnly(req, res, next) {
+  if (!req.user) {
+    return res.status(401).json({ ok: false, error: "not authenticated" })
+  }
+
+  const owner = process.env.OWNER_EMAIL
+  if (!owner || req.user.email !== owner) {
+    return res.status(403).json({ ok: false, error: "not owner" })
+  }
+
+  next()
+}

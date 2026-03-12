@@ -21,7 +21,12 @@ const ASSISTANT_MODELS_BY_PLAN = {
 }
 
 function getUserPlan(userId) {
-  const row = db.prepare("SELECT plan FROM user_settings WHERE user_id = ?").get(userId)
+  const row = db.prepare(`
+    SELECT COALESCE(NULLIF(u.plan_id, ''), s.plan, 'basis') AS plan
+    FROM users u
+    LEFT JOIN user_settings s ON s.user_id = u.id
+    WHERE u.id = ?
+  `).get(userId)
   return row?.plan || "basis"
 }
 
@@ -40,6 +45,39 @@ function normalizeMessages(rawMessages) {
     .slice(-12)
 }
 
+function stripJsonFences(value) {
+  const text = String(value || "").trim()
+  if (!text) return text
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i)
+  return (fenced ? fenced[1] : text).trim()
+}
+
+function parseLooseJson(value, fallback) {
+  try {
+    return JSON.parse(stripJsonFences(value))
+  } catch {
+    return fallback
+  }
+}
+
+function parseStudioRunRow(row) {
+  if (!row) return row
+  return {
+    ...row,
+    input_payload: parseLooseJson(row.input_payload, {}),
+    output_result: parseLooseJson(row.output_result, {}),
+  }
+}
+
+async function runAnthropicJsonPrompt({ prompt, system, fallback }) {
+  const result = await callAnthropicChat({
+    model: "claude-haiku-4-5-20251001",
+    messages: [{ role: "user", content: prompt }],
+    system,
+  })
+  return parseLooseJson(result.reply, fallback)
+}
+
 function buildSystemPrompt(context, plan) {
   const surface = String(context?.surface || "dashboard")
   const workspace = String(context?.workspace || "").trim()
@@ -47,6 +85,7 @@ function buildSystemPrompt(context, plan) {
   const projectUrl = String(context?.projectUrl || "").trim()
   const platform = String(context?.platform || "").trim()
   const exportMode = String(context?.exportMode || "").trim()
+  const brandContext = String(context?.brandContext || "").trim()
   const selectedBlock = String(context?.selectedBlock || "").trim()
   const warnings = Array.isArray(context?.warnings)
     ? context.warnings.map((warning) => String(warning || "").trim()).filter(Boolean).slice(0, 6)
@@ -65,6 +104,7 @@ function buildSystemPrompt(context, plan) {
     projectUrl ? `Current URL: ${projectUrl}` : "",
     platform ? `Current platform: ${platform}` : "",
     exportMode ? `Current export mode: ${exportMode}` : "",
+    brandContext ? `Brand context: ${brandContext}` : "",
     selectedBlock ? `Selected block: ${selectedBlock}` : "",
     warnings.length ? `Current warnings: ${warnings.join(" | ")}` : "Current warnings: none",
   ]
@@ -212,6 +252,16 @@ export function registerAssistantRoutes(app, { aiRateLimit }) {
       const requestedModel = String(req.body?.model || ASSISTANT_MODELS_BY_PLAN[plan][0]).trim()
       const context = req.body?.context && typeof req.body.context === "object" ? req.body.context : {}
 
+      if (context?.projectId) {
+        const projectId = Number(context.projectId)
+        if (Number.isFinite(projectId) && projectId > 0) {
+          const project = db.prepare("SELECT brand_context FROM projects WHERE id = ? AND user_id = ?").get(projectId, req.user.id)
+          if (project?.brand_context && project.brand_context !== "{}") {
+            context.brandContext = project.brand_context
+          }
+        }
+      }
+
       if (!messages.length) {
         return res.status(400).json({ ok: false, error: "Missing messages" })
       }
@@ -272,6 +322,162 @@ export function registerAssistantRoutes(app, { aiRateLimit }) {
       })
     } catch (error) {
       res.status(500).json({ ok: false, error: error?.message || "Assistant request failed" })
+    }
+  })
+
+  app.get("/api/studio/runs", authMiddleware, (req, res) => {
+    try {
+      const rows = db.prepare(
+        `SELECT id, tool_name, project_id, status, created_at, input_payload, output_result
+         FROM ai_studio_runs
+         WHERE user_id = ?
+         ORDER BY datetime(created_at) DESC, id DESC
+         LIMIT 50`
+      ).all(req.user.id)
+      res.json({ ok: true, runs: rows.map(parseStudioRunRow) })
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error?.message || "Failed to load runs" })
+    }
+  })
+
+  app.get("/api/studio/runs/:runId", authMiddleware, (req, res) => {
+    try {
+      const row = db.prepare("SELECT * FROM ai_studio_runs WHERE id = ? AND user_id = ?").get(req.params.runId, req.user.id)
+      if (!row) return res.status(404).json({ ok: false, error: "Run not found" })
+      res.json({ ok: true, run: parseStudioRunRow(row) })
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error?.message || "Failed to load run" })
+    }
+  })
+
+  app.post("/api/studio/runs", authMiddleware, aiRateLimit, async (req, res) => {
+    const toolName = String(req.body?.tool_name || "").trim()
+    const inputPayload = req.body?.input_payload && typeof req.body.input_payload === "object" ? req.body.input_payload : {}
+    const projectId = req.body?.project_id == null || req.body?.project_id === ""
+      ? null
+      : String(req.body.project_id)
+
+    if (!toolName) {
+      return res.status(400).json({ ok: false, error: "tool_name is required" })
+    }
+
+    const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+    db.prepare(
+      `INSERT INTO ai_studio_runs (id, user_id, project_id, tool_name, input_payload, output_result, status)
+       VALUES (?, ?, ?, ?, ?, '{}', 'running')`
+    ).run(runId, req.user.id, projectId, toolName, JSON.stringify(inputPayload))
+
+    try {
+      let outputResult = {}
+
+      if (toolName === "company_in_a_box") {
+        const brief = String(inputPayload?.brief || "").trim()
+        if (!brief) throw new Error("brief is required for company_in_a_box")
+
+        const brandKit = await runAnthropicJsonPrompt({
+          system: "You are a brand designer. Respond only with valid JSON.",
+          prompt: `Generate a JSON brand kit for this company brief: "${brief}". Return {"primary_color":"#hex","secondary_color":"#hex","font_heading":"Font Name","font_body":"Font Name","tone_of_voice":"string"}.`,
+          fallback: {},
+        })
+        let sitemap = await runAnthropicJsonPrompt({
+          system: "You are a web architect. Respond only with a valid JSON array.",
+          prompt: `Generate a 4-page sitemap for this company brief: "${brief}". Return a JSON array of page name strings.`,
+          fallback: ["Home", "About", "Services", "Contact"],
+        })
+        if (!Array.isArray(sitemap) || !sitemap.length) {
+          sitemap = ["Home", "About", "Services", "Contact"]
+        }
+
+        outputResult = {
+          message: "Brand kit and sitemap generated successfully",
+          brand_kit: brandKit,
+          sitemap,
+          actions_taken: [
+            "Generated colour palette and typography pair",
+            `Drafted ${sitemap.length}-page sitemap`,
+            "Prepared reusable brand context for future assistant prompts",
+          ],
+        }
+      } else if (toolName === "cro_agent") {
+        const resolvedProjectId = Number(inputPayload?.project_id || projectId || 0)
+        if (!Number.isFinite(resolvedProjectId) || resolvedProjectId <= 0) {
+          throw new Error("project_id is required for cro_agent")
+        }
+        const project = db.prepare("SELECT html FROM projects WHERE id = ? AND user_id = ?").get(resolvedProjectId, req.user.id)
+        if (!project) throw new Error("Project not found")
+        const htmlSnippet = String(project.html || "").slice(0, 6000)
+        const cro = await runAnthropicJsonPrompt({
+          system: "You are a CRO expert. Respond only with valid JSON.",
+          prompt: `Identify exactly 3 conversion opportunities in this page HTML. Return JSON: {"suggestions":[{"block_id":"string","issue":"string","rewritten_html":"string"}]}\n\nHTML:\n${htmlSnippet}`,
+          fallback: { suggestions: [] },
+        })
+        outputResult = {
+          message: "CRO analysis complete",
+          suggestions: Array.isArray(cro?.suggestions) ? cro.suggestions : [],
+          actions_taken: [
+            `Analysed page HTML (${htmlSnippet.length} chars)`,
+            `Identified ${Array.isArray(cro?.suggestions) ? cro.suggestions.length : 0} CRO opportunities`,
+          ],
+        }
+      } else if (toolName === "funnel_generator") {
+        const goal = String(inputPayload?.goal || "lead generation").trim()
+        const funnel = await runAnthropicJsonPrompt({
+          system: "You are a conversion funnel designer. Respond only with valid JSON.",
+          prompt: `Design a 3-step funnel for the goal "${goal}". Return JSON: {"pages":[{"name":"Landing Page","purpose":"string"},{"name":"Form / Checkout","purpose":"string"},{"name":"Thank You","purpose":"string"}],"email_sequence":[{"subject":"string","body_preview":"string"},{"subject":"string","body_preview":"string"},{"subject":"string","body_preview":"string"}]}`,
+          fallback: { pages: [], email_sequence: [] },
+        })
+        outputResult = {
+          message: "Funnel generated successfully",
+          pages: Array.isArray(funnel?.pages) ? funnel.pages : [],
+          email_sequence: Array.isArray(funnel?.email_sequence) ? funnel.email_sequence : [],
+          actions_taken: [
+            `Generated ${Array.isArray(funnel?.pages) ? funnel.pages.length : 0}-page funnel structure`,
+            `Drafted ${Array.isArray(funnel?.email_sequence) ? funnel.email_sequence.length : 0}-email follow-up sequence`,
+          ],
+        }
+      } else if (toolName === "brand_brain") {
+        const html = String(inputPayload?.html || "").trim()
+        if (!html) throw new Error("html is required for brand_brain")
+        const brandContext = await runAnthropicJsonPrompt({
+          system: "You are a brand analyst. Respond only with valid JSON.",
+          prompt: `Extract brand context from this HTML. Return JSON: {"primary_color":"#hex or null","secondary_color":"#hex or null","font_families":["string"],"logo_url":"string or null","tone_summary":"string"}\n\nHTML (first 4000 chars):\n${html.slice(0, 4000)}`,
+          fallback: {},
+        })
+        if (projectId) {
+          db.prepare("UPDATE projects SET brand_context = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?")
+            .run(JSON.stringify(brandContext), Number(projectId), req.user.id)
+        }
+        outputResult = {
+          message: "Brand context extracted and saved",
+          brand_context: brandContext,
+          actions_taken: [
+            "Extracted primary and secondary colours",
+            "Detected font families and tone summary",
+            "Saved brand context to the project for assistant prompt injection",
+          ],
+        }
+      } else {
+        outputResult = { message: `Tool "${toolName}" is not yet implemented`, actions_taken: [] }
+      }
+
+      db.prepare("UPDATE ai_studio_runs SET output_result = ?, status = 'completed' WHERE id = ?")
+        .run(JSON.stringify(outputResult), runId)
+
+      res.json({
+        ok: true,
+        run: {
+          id: runId,
+          tool_name: toolName,
+          project_id: projectId,
+          input_payload: inputPayload,
+          output_result: outputResult,
+          status: "completed",
+        },
+      })
+    } catch (error) {
+      db.prepare("UPDATE ai_studio_runs SET output_result = ?, status = 'failed' WHERE id = ?")
+        .run(JSON.stringify({ error: error?.message || "Unknown error" }), runId)
+      res.status(500).json({ ok: false, error: error?.message || "Studio run failed" })
     }
   })
 }
