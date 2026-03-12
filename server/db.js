@@ -53,7 +53,7 @@ db.exec(`
     last_export_mode TEXT,
     last_export_warning_count INTEGER DEFAULT 0,
     brand_context TEXT DEFAULT '{}',
-    share_token TEXT UNIQUE,
+    share_token TEXT,
     approval_status TEXT NOT NULL DEFAULT 'draft',
     status TEXT NOT NULL DEFAULT 'active',
     approved_at TEXT,
@@ -569,7 +569,8 @@ runMigration("20260313_lane2_block_comments", () => {
   execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_block_comments_project ON block_comments(project_id, resolved)`)
 })
 runMigration("20260313_lane2_projects_share_approval", () => {
-  execMigrationSql(`ALTER TABLE projects ADD COLUMN share_token TEXT UNIQUE`)
+  execMigrationSql(`ALTER TABLE projects ADD COLUMN share_token TEXT`)
+  execMigrationSql(`CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_share_token ON projects(share_token)`)
   execMigrationSql(`ALTER TABLE projects ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'draft'`)
 })
 runMigration("20260313_lane2_projects_brand_context", () => {
