@@ -2065,6 +2065,9 @@ const autoSave = async (html: string) => {
     renderToIframe(currentHtml)
   }, [currentHtml, mode, view, versionPreview]);
 
+  const activePage = activePageId ? projectPages.find((page) => page.id === activePageId) || null : null
+  const comparisonBaseHtml = activeLanguageVariant !== "base" ? String(activePage?.html || "") : ""
+
   useEffect(() => {
     if (view !== "editor") return
     if (!showTranslationSplitView || activeLanguageVariant === "base") {
@@ -2726,8 +2729,6 @@ const autoSave = async (html: string) => {
   const currentPlatformMeta = getPlatformMeta(currentPlatform);
   const editRailWidth = isEdit ? (isEditRailCollapsed ? EDIT_RAIL_COLLAPSED_WIDTH : EDIT_RAIL_EXPANDED_WIDTH) : 0
   const viewportConfig = VIEWPORT_PRESETS[viewportPreset]
-  const activePage = activePageId ? projectPages.find((page) => page.id === activePageId) || null : null
-  const comparisonBaseHtml = activeLanguageVariant !== "base" ? String(activePage?.html || "") : ""
   const availableLanguageVariants = [
     { code: "base", label: "Original" },
     ...Object.keys(activePage?.languageVariants || {}).map((code) => ({
