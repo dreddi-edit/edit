@@ -1,12 +1,5 @@
-import { Header } from "./components/Header";
-import { MainView } from "./components/MainView";
-import { AssistantContainer } from "./components/AssistantContainer";
-import { shortenText, sleep, isValidUrl, readSavedTheme, DEFAULT_CHROME_BACKGROUND, DEFAULT_CHROME_BORDER, VIEWPORT_PRESETS, EXPORT_MODE_OPTIONS, WORKFLOW_STAGE_OPTIONS, PROJECT_VERSION_SOURCE_LABELS, DEFAULT_GLOBAL_STYLE_OVERRIDES, titleCaseFallback, formatEditorDateTime, pickEditorChromeFromDocument, getDownloadFilename, collectProjectAssets, mergeAssetLibraries, collectCssVariables, applyGlobalStylesToHtml, applyTranslationOverridesToHtml, getLanguageVariantEffectiveHtml, buildLocalAudit } from "./editorHelpers";
-import { calculateCost, processAIResponse } from "./assistantLogic";
-import { EditorView } from "./components/EditorView";
+import { readSavedTheme, DEFAULT_CHROME_BACKGROUND, DEFAULT_CHROME_BORDER, VIEWPORT_PRESETS, EXPORT_MODE_OPTIONS, WORKFLOW_STAGE_OPTIONS, PROJECT_VERSION_SOURCE_LABELS, DEFAULT_GLOBAL_STYLE_OVERRIDES, BLOCK_FILTER_OPTIONS, EDIT_RAIL_EXPANDED_WIDTH, EDIT_RAIL_COLLAPSED_WIDTH, titleCaseFallback, formatEditorDateTime, pickEditorChromeFromDocument, getDownloadFilename, collectProjectAssets, mergeAssetLibraries, collectCssVariables, applyGlobalStylesToHtml, applyTranslationOverridesToHtml, getLanguageVariantEffectiveHtml, buildLocalAudit, buildDiffPreview } from "./editorHelpers";
 import { useAdmin } from "./hooks/useAdmin";
-import { EditorAudits } from "./components/EditorAudits";
-import { EditorOverlay } from "./components/EditorOverlay";
 import { apiMe, type User } from "./api/auth"
 import { apiGetPlan } from "./api/credits"
 import { apiFetch, fetchWithAuth } from "./api/client"
@@ -39,7 +32,6 @@ import {
   type PublishTargetInfo,
   type Project,
   type ProjectAsset,
-  type ProjectLanguageVariant,
   type ProjectPage,
   type ProjectShare,
   type ProjectVersion,
@@ -49,14 +41,17 @@ import {
   type WorkflowStage,
 } from "./api/projects"
 import AuthScreen from "./components/AuthScreen"
+import LandingPage from "./components/LandingPage"
 import ResetPasswordScreen from "./components/ResetPasswordScreen"
 import ProjectDashboard from "./components/ProjectDashboard"
 import AssistantWidget from "./components/AssistantWidget"
+import KeyboardShortcuts from "./components/KeyboardShortcuts"
 import { toast, ToastContainer } from "./components/Toast"
 import { useCallback, useRef, useState, useEffect, type CSSProperties } from 'react';
 import BlockOverlay from "./components/BlockOverlay";
 import { ENDPOINTS } from './config';
-import { COMPONENT_LIBRARY, COMPONENT_CATEGORIES } from './components/ComponentLibrary';
+import { COMPONENT_LIBRARY } from './components/ComponentLibrary';
+import { useShortcuts } from "./hooks/useShortcuts"
 import { useTranslation } from "./i18n/useTranslation"
 import { detectSitePlatform, getPlatformMeta, normalizePlatform, type SitePlatform } from "./utils/sitePlatform"
 import {
@@ -189,9 +184,12 @@ export default function App() {
   const [creatingPublishPreview, setCreatingPublishPreview] = useState(false)
   const [publishingTarget, setPublishingTarget] = useState<PublishTarget | null>(null)
   const [rollingBackDeploymentId, setRollingBackDeploymentId] = useState<number | null>(null)
+  const [activeVersionActionId, setActiveVersionActionId] = useState<number | null>(null)
+  const [aiScanLoading, setAiScanLoading] = useState(false)
   const [versionPreview, setVersionPreview] = useState<ProjectVersionDetail | null>(null)
   const [versionCompare, setVersionCompare] = useState<ProjectVersionDetail | null>(null)
-  const [aiState, setAiState] = useState({ loading: false, prompt: "", model: "auto", tone: "neutral", running: false, batchRunning: false, diff: null }); const [aiApprovalQueue, setAiApprovalQueue] = useState<AiApprovalItem[]>([])
+  const [aiDiff, setAiDiff] = useState<AiDiffState | null>(null)
+  const [aiApprovalQueue, setAiApprovalQueue] = useState<AiApprovalItem[]>([])
   const [sessionCost, setSessionCost] = useState(0)
   const [sessionTokens, setSessionTokens] = useState({input: 0, output: 0})
   const [editorChrome, setEditorChrome] = useState({
@@ -213,7 +211,7 @@ export default function App() {
     apiGetPlan().then(p => p != null && setDemoPlan(p))
     apiMe().then(user => {
       if (user) { setAuthUser(user); setView("dashboard") }
-      else { setAuthUser(null); setView("auth") }
+      else { setAuthUser(null); setView("landing") }
     })
   }, [])
 
@@ -266,7 +264,7 @@ export default function App() {
 
   const [isDraggingBlock, setIsDraggingBlock] = useState(false)
   const [authUser, setAuthUser] = useState<User | null | "loading">("loading")
-  const [view, setView] = useState<"auth" | "dashboard" | "editor" | "admin">("auth")
+  const [view, setView] = useState<"auth" | "landing" | "dashboard" | "editor" | "admin">("landing")
   const [currentProject, setCurrentProject] = useState<Project | null>(null)
   const [projectPages, setProjectPages] = useState<ProjectPage[]>([])
   const [activePageId, setActivePageId] = useState<string | null>(null)
@@ -333,6 +331,7 @@ type AdminUser = { id: number; email: string; name?: string; credits?: number; c
   const [activeLanguageVariant, setActiveLanguageVariant] = useState<string>("base")
   const [showTranslationSplitView, setShowTranslationSplitView] = useState(false)
   const [showExportWarnings, setShowExportWarnings] = useState(false)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
 
   const [exportMode, setExportMode] = useState<ExportMode>("wp-placeholder")
   const [exporting, setExporting] = useState(false)
@@ -383,6 +382,16 @@ type AdminUser = { id: number; email: string; name?: string; credits?: number; c
   const [cssVariableOverrides, setCssVariableOverrides] = useState<Record<string, string>>({})
   const [selectedFontAssetId, setSelectedFontAssetId] = useState<string | null>(null)
   const [assetLibraryQuery, setAssetLibraryQuery] = useState("")
+  const leftAiModel = aiConfig.model
+  const leftAiTone = aiConfig.tone
+  const leftAiPrompt = aiConfig.prompt
+  const leftAiRunning = aiConfig.running
+  const batchAiRunning = aiConfig.batchRunning
+  const setLeftAiModel = (value: string) => setAiConfig((previous) => ({ ...previous, model: value }))
+  const setLeftAiTone = (value: string) => setAiConfig((previous) => ({ ...previous, tone: value }))
+  const setLeftAiPrompt = (value: string) => setAiConfig((previous) => ({ ...previous, prompt: value }))
+  const setLeftAiRunning = (value: boolean) => setAiConfig((previous) => ({ ...previous, running: value }))
+  const setBatchAiRunning = (value: boolean) => setAiConfig((previous) => ({ ...previous, batchRunning: value }))
   const lastSignificantSnapshotRef = useRef<{ html: string; createdAt: number }>({ html: "", createdAt: 0 })
   // Auto-save Projekt
   
@@ -1197,6 +1206,14 @@ const autoSave = async (html: string) => {
     )
     commitLiveEditorHtml(nextHtml)
     toast.success("Global style overrides applied")
+  }
+
+  const updateGlobalStyleOverride = (key: keyof GlobalStyleOverrides, value: string) => {
+    setGlobalStyleOverrides((previous) => ({ ...previous, [key]: value }))
+  }
+
+  const updateCssVariableOverride = (name: string, value: string) => {
+    setCssVariableOverrides((previous) => ({ ...previous, [name]: value }))
   }
 
   const runBatchAiAcrossPages = async () => {
@@ -2154,11 +2171,128 @@ const autoSave = async (html: string) => {
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [versionPreview, view])
 
+  useShortcuts([
+    {
+      key: "?",
+      handler: () => {
+        if (view === "editor") setShortcutsOpen((previous) => !previous)
+      },
+    },
+    {
+      key: "e",
+      modifiers: ["meta"],
+      handler: () => {
+        if (view === "editor") handleModeSwitch()
+      },
+    },
+    {
+      key: "e",
+      modifiers: ["ctrl"],
+      handler: () => {
+        if (view === "editor") handleModeSwitch()
+      },
+    },
+    {
+      key: "p",
+      modifiers: ["meta", "shift"],
+      handler: () => {
+        if (view === "editor") openFullPreview()
+      },
+    },
+    {
+      key: "p",
+      modifiers: ["ctrl", "shift"],
+      handler: () => {
+        if (view === "editor") openFullPreview()
+      },
+    },
+    {
+      key: "s",
+      modifiers: ["meta", "shift"],
+      handler: () => {
+        if (view === "editor") void handleManualSnapshot()
+      },
+    },
+    {
+      key: "s",
+      modifiers: ["ctrl", "shift"],
+      handler: () => {
+        if (view === "editor") void handleManualSnapshot()
+      },
+    },
+    {
+      key: "/",
+      modifiers: ["meta"],
+      handler: () => {
+        if (view === "editor") window.dispatchEvent(new CustomEvent("assistant:open"))
+      },
+    },
+    {
+      key: "/",
+      modifiers: ["ctrl"],
+      handler: () => {
+        if (view === "editor") window.dispatchEvent(new CustomEvent("assistant:open"))
+      },
+    },
+    {
+      key: "1",
+      modifiers: ["meta"],
+      handler: () => {
+        if (view === "editor") setViewportPreset("desktop")
+      },
+    },
+    {
+      key: "2",
+      modifiers: ["meta"],
+      handler: () => {
+        if (view === "editor") setViewportPreset("tablet")
+      },
+    },
+    {
+      key: "3",
+      modifiers: ["meta"],
+      handler: () => {
+        if (view === "editor") setViewportPreset("mobile")
+      },
+    },
+    {
+      key: "1",
+      modifiers: ["ctrl"],
+      handler: () => {
+        if (view === "editor") setViewportPreset("desktop")
+      },
+    },
+    {
+      key: "2",
+      modifiers: ["ctrl"],
+      handler: () => {
+        if (view === "editor") setViewportPreset("tablet")
+      },
+    },
+    {
+      key: "3",
+      modifiers: ["ctrl"],
+      handler: () => {
+        if (view === "editor") setViewportPreset("mobile")
+      },
+    },
+    {
+      key: "Escape",
+      allowInInput: true,
+      handler: () => {
+        if (view !== "editor") return
+        if (shortcutsOpen) setShortcutsOpen(false)
+        if (versionCompare) clearVersionCompare()
+      },
+    },
+  ])
+
 
   const isEdit = mode === "edit";
   const isLoading = status === "blocked";
   const currentPlatformMeta = getPlatformMeta(currentPlatform);
-  const editRailWidth = isEdit ? (isEditRailCollapsed ? EDIT_RAIL_COLLAPSED_WIDTH : EDIT_RAIL_EXPANDED_WIDTH) : 0
+  const showEditorRail = view === "editor"
+  const editRailWidth = showEditorRail ? (isEditRailCollapsed ? EDIT_RAIL_COLLAPSED_WIDTH : EDIT_RAIL_EXPANDED_WIDTH) : 0
   const viewportConfig = VIEWPORT_PRESETS[viewportPreset]
   const availableLanguageVariants = [
     { code: "base", label: "Original" },
@@ -2210,6 +2344,29 @@ const autoSave = async (html: string) => {
     return parts.join(" · ")
   }
   const previewVersionTitle = versionTitleFor(versionPreview)
+  const editorIdentityLabel =
+    currentProject?.name || loadedUrl.replace(/^https?:\/\//i, "") || url.replace(/^https?:\/\//i, "") || "Unsaved page"
+  const editorShortcutSections = [
+    {
+      title: "Editor",
+      items: [
+        { keys: "⌘E", desc: "Toggle edit and save mode" },
+        { keys: "⌘⇧P", desc: "Open clean preview" },
+        { keys: "⌘⇧S", desc: "Save a snapshot" },
+        { keys: "⌘1 / ⌘2 / ⌘3", desc: "Switch viewport device" },
+      ],
+    },
+    {
+      title: "Workflow",
+      items: [
+        { keys: "⌘Z", desc: "Undo latest change" },
+        { keys: "⌘⇧Z", desc: "Redo latest change" },
+        { keys: "⌘/", desc: "Open editor assistant" },
+        { keys: "?", desc: "Show keyboard shortcuts" },
+        { keys: "Esc", desc: "Close compare or shortcut help" },
+      ],
+    },
+  ]
   const editorShellStyle: CSSProperties = {
     height: "100vh",
     ["--editor-topbar-height" as string]: "58px",
@@ -2263,6 +2420,13 @@ useEffect(() => {
       </div>
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
     </div>
+  )
+
+  if (view === "landing") return (
+    <>
+      <LandingPage onEnter={() => setView("auth")} />
+      <ToastContainer />
+    </>
   )
 
   // Auth screen
@@ -2380,9 +2544,9 @@ useEffect(() => {
   }
 
   return (
-    <div className="editor-shell">
+    <div className={`editor-shell ${theme === "light" ? "theme-light" : ""}`} style={editorShellStyle}>
 
-      <div className="editor-toolbar">
+      <header className="editor-toolbar" role="banner">
         <div className="editor-toolbar__cluster editor-toolbar__cluster--tight">
           <button
             className="editor-btn editor-btn--back"
@@ -2394,6 +2558,25 @@ useEffect(() => {
 
           <div className="editor-toolbar__identity">
             <div className="editor-toolbar__label">Site Editor</div>
+            <nav className="editor-breadcrumbs" aria-label="Editor breadcrumb">
+              <span className="editor-breadcrumbs__item">Workspace</span>
+              <span className="editor-breadcrumbs__sep" aria-hidden="true">/</span>
+              <span className="editor-breadcrumbs__item">{editorIdentityLabel}</span>
+              {activePage ? (
+                <>
+                  <span className="editor-breadcrumbs__sep" aria-hidden="true">/</span>
+                  <span className="editor-breadcrumbs__item" aria-current={versionPreview ? undefined : "page"}>
+                    {activePage.name}
+                  </span>
+                </>
+              ) : null}
+              {versionPreview ? (
+                <>
+                  <span className="editor-breadcrumbs__sep" aria-hidden="true">/</span>
+                  <span className="editor-breadcrumbs__item editor-breadcrumbs__item--current">Snapshot</span>
+                </>
+              ) : null}
+            </nav>
           </div>
         </div>
 
@@ -2408,10 +2591,13 @@ useEffect(() => {
               onChange={e => setUrl(e.target.value)}
               onKeyDown={e => e.key === "Enter" && load(true)}
               placeholder="https://..."
+              aria-label="Page URL"
             />
             <button
+              type="button"
               className="editor-urlbar__load"
               onClick={() => load(true)}
+              aria-label="Load page URL"
             >
               {isLoading ? "..." : "Load"}
             </button>
@@ -2478,6 +2664,7 @@ useEffect(() => {
             {(Object.keys(VIEWPORT_PRESETS) as ViewportPreset[]).map((preset) => (
               <button
                 key={preset}
+                type="button"
                 className={`editor-btn editor-btn--compact ${viewportPreset === preset ? "editor-btn--primary" : ""}`}
                 onClick={() => setViewportPreset(preset)}
                 title={`${VIEWPORT_PRESETS[preset].label} preview`}
@@ -2488,6 +2675,7 @@ useEffect(() => {
           </div>
 
           <button
+            type="button"
             className="editor-btn"
             onClick={openFullPreview}
             disabled={!currentHtml}
@@ -2497,6 +2685,7 @@ useEffect(() => {
           </button>
 
           <button
+            type="button"
             className="editor-btn"
             onClick={applyUndo}
             title="Undo latest change"
@@ -2505,12 +2694,22 @@ useEffect(() => {
             Undo
           </button>
           <button
+            type="button"
             className="editor-btn"
             onClick={applyRedo}
             title="Redo latest change"
             disabled={!redoHistory.length || Boolean(versionPreview)}
           >
             Redo
+          </button>
+          <button
+            type="button"
+            className="editor-btn"
+            onClick={() => setShortcutsOpen(true)}
+            title="Show editor shortcuts"
+            aria-label="Show editor shortcuts"
+          >
+            ?
           </button>
         </div>
 
@@ -2521,7 +2720,17 @@ useEffect(() => {
             <div
               className="editor-cost-chip"
               title={`Input: ${sessionTokens.input.toLocaleString()} / Output: ${sessionTokens.output.toLocaleString()} tokens\nClick to reset`}
+              role="button"
+              tabIndex={0}
               onClick={() => {
+                if (confirm(t("Reset session costs?"))) {
+                  setSessionCost(0)
+                  setSessionTokens({ input: 0, output: 0 })
+                }
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return
+                event.preventDefault()
                 if (confirm(t("Reset session costs?"))) {
                   setSessionCost(0)
                   setSessionTokens({ input: 0, output: 0 })
@@ -2538,12 +2747,14 @@ useEffect(() => {
           {versionPreview && (
             <>
               <button
+                type="button"
                 className="editor-btn"
                 onClick={() => exitVersionPreview(true)}
               >
                 Exit preview
               </button>
               <button
+                type="button"
                 className="editor-btn editor-btn--primary"
                 onClick={() => restoreProjectVersion(versionPreview.id)}
                 disabled={activeVersionActionId === versionPreview.id}
@@ -2554,6 +2765,7 @@ useEffect(() => {
           )}
 
           <button
+            type="button"
             className={`editor-btn editor-btn--primary ${isEdit ? "is-saving" : ""}`}
             onClick={handleModeSwitch}
             disabled={Boolean(versionPreview)}
@@ -2567,6 +2779,7 @@ useEffect(() => {
               value={exportMode}
               onChange={e => setExportMode(e.target.value as ExportMode)}
               title="Export format"
+              aria-label="Export format"
             >
               {EXPORT_MODE_OPTIONS.map(option => (
                 <option key={option.value} value={option.value}>
@@ -2576,6 +2789,7 @@ useEffect(() => {
             </select>
 
             <button
+              type="button"
               className={`editor-btn editor-btn--export ${exportReadiness === "guarded" ? "is-guarded" : ""}`}
               onClick={handleExport}
               disabled={exporting || Boolean(versionPreview)}
@@ -2587,7 +2801,7 @@ useEffect(() => {
           </div>
 
         </div>
-      </div>
+      </header>
 
       <style>{`
         @keyframes spin { 0% { transform: rotate(0deg) } 100% { transform: rotate(360deg) } }
@@ -2598,6 +2812,259 @@ useEffect(() => {
       <div className={`editor-progress ${isLoading ? "is-visible" : ""}`}>
         <div className="editor-progress__bar" />
       </div>
+
+      {showEditorRail ? (
+        <EditorSidebar
+          isEditRailCollapsed={isEditRailCollapsed}
+          setIsEditRailCollapsed={setIsEditRailCollapsed}
+          isEditMode={isEdit}
+          currentPlatformMeta={currentPlatformMeta}
+          currentPlatformGuide={currentPlatformGuide}
+          handleAiRescan={handleAiRescan}
+          aiScanLoading={aiScanLoading}
+          exportReadiness={exportReadiness}
+          exportWarnings={exportWarnings}
+          showExportWarnings={showExportWarnings}
+          setShowExportWarnings={setShowExportWarnings}
+          currentProject={currentProject}
+          loadedUrl={loadedUrl}
+          titleCaseFallback={titleCaseFallback}
+          workflowHistory={workflowHistory}
+          projectPages={projectPages}
+          activePageId={activePageId}
+          scanningPages={scanningPages}
+          scanProjectPages={() => {
+            if (currentProject) void scanProjectPages(currentProject)
+          }}
+          openProjectPage={(page) => {
+            if (currentProject) void loadScannedProjectPage(currentProject, page)
+          }}
+          versionPreview={versionPreview}
+          previewVersionTitle={previewVersionTitle}
+          versionMetaFor={versionMetaFor}
+          projectVersions={projectVersions}
+          versionTitleFor={versionTitleFor}
+          activeVersionActionId={activeVersionActionId}
+          previewProjectVersion={previewProjectVersion}
+          compareProjectVersion={compareProjectVersion}
+          restoreProjectVersion={restoreProjectVersion}
+          versionCompare={versionCompare}
+          clearVersionCompare={clearVersionCompare}
+          exitVersionPreview={exitVersionPreview}
+          handleManualSnapshot={handleManualSnapshot}
+          savingSnapshot={savingSnapshot}
+          loadingVersions={loadingVersions}
+          currentHtml={currentHtml}
+          runEditorAudit={runEditorAudit}
+          runningAudit={runningAudit}
+          editorAudit={editorAudit}
+          blockFilter={blockFilter}
+          setBlockFilter={(filter) => setBlockFilter(filter as BlockFilter)}
+          BLOCK_FILTER_OPTIONS={BLOCK_FILTER_OPTIONS}
+          structureItems={structureItems}
+          moveStructureItem={moveStructureItem}
+          leftAiModel={leftAiModel}
+          setLeftAiModel={setLeftAiModel}
+          leftAiTone={leftAiTone}
+          setLeftAiTone={setLeftAiTone}
+          leftAiPrompt={leftAiPrompt}
+          setLeftAiPrompt={setLeftAiPrompt}
+          AI_MODELS={AI_MODELS}
+          leftAiRunning={leftAiRunning}
+          batchAiRunning={batchAiRunning}
+          runLeftAiPrompt={runLeftAiPrompt}
+          runBatchAiAcrossPages={runBatchAiAcrossPages}
+          translationTargetLanguage={translationTargetLanguage}
+          setTranslationTargetLanguage={setTranslationTargetLanguage}
+          availableLanguageVariants={availableLanguageVariants}
+          activeLanguageVariant={activeLanguageVariant}
+          switchLanguageVariant={switchLanguageVariant}
+          handleTranslateSite={() => {
+            void handleTranslateSite()
+          }}
+          isTranslatingSite={isTranslatingSite}
+          translationInfo={translationInfo}
+          translationReview={translationReview}
+          translationOverrideDrafts={translationOverrideDrafts}
+          activeTranslationSegmentId={activeTranslationSegmentId}
+          selectTranslationSegment={(id) => setActiveTranslationSegmentId(id)}
+          updateTranslationOverrideDraft={(id, value) =>
+            setTranslationOverrideDrafts((previous) => ({ ...previous, [id]: value }))
+          }
+          applyTranslationOverride={applyTranslationOverride}
+          storeCurrentAsLanguageVariant={storeCurrentAsLanguageVariant}
+          resetLanguageVariantFromBase={resetLanguageVariantFromBase}
+          deleteLanguageVariant={deleteLanguageVariant}
+          showTranslationSplitView={showTranslationSplitView}
+          toggleTranslationSplitView={() => setShowTranslationSplitView((previous) => !previous)}
+          selectedComponent={selectedComponent}
+          setSelectedComponent={setSelectedComponent}
+          addSelectedComponent={addSelectedComponent}
+          shareEmail={shareEmail}
+          setShareEmail={setShareEmail}
+          createSharePreview={createSharePreview}
+          sharingPreview={sharingPreview}
+          loadingShares={loadingShares}
+          projectShares={projectShares}
+          copySharePreviewUrl={copySharePreviewUrl}
+          revokeSharePreview={revokeSharePreview}
+          publishDraft={publishDraft}
+          updatePublishDraft={updatePublishDraft}
+          selectedPublishTargetInfo={selectedPublishTargetInfo}
+          publishTargets={publishTargets}
+          loadingPublishTargets={loadingPublishTargets}
+          createPublishPreview={createPublishPreview}
+          creatingPublishPreview={creatingPublishPreview}
+          lastPublishPreview={lastPublishPreview}
+          publishCurrentProject={publishCurrentProject}
+          publishingTarget={publishingTarget}
+          loadCustomDomainGuide={loadCustomDomainGuide}
+          customDomainGuide={customDomainGuide}
+          loadingPublishHistory={loadingPublishHistory}
+          recentPublishHistory={recentPublishHistory}
+          rollbackPublishedDeployment={rollbackPublishedDeployment}
+          rollingBackDeploymentId={rollingBackDeploymentId}
+          assetLibraryQuery={assetLibraryQuery}
+          setAssetLibraryQuery={setAssetLibraryQuery}
+          filteredAssetLibrary={filteredAssetLibrary}
+          selectedFontAssetId={selectedFontAssetId}
+          setSelectedFontAssetId={setSelectedFontAssetId}
+          handleAssetLibraryUpload={handleAssetLibraryUpload}
+          globalStyleOverrides={globalStyleOverrides}
+          updateGlobalStyleOverride={updateGlobalStyleOverride}
+          cssVariableOverrides={cssVariableOverrides}
+          updateCssVariableOverride={updateCssVariableOverride}
+          applyGlobalStyleOverridesNow={applyGlobalStyleOverridesNow}
+          selectedFontAsset={selectedFontAsset}
+        />
+      ) : null}
+
+      {isDraggingBlock ? (
+        <div className="editor-shell__drag-grid" style={{ left: editRailWidth }}>
+          <div className="editor-shell__drag-grid-label">Drag blocks to reorder them</div>
+        </div>
+      ) : null}
+
+      <main className="editor-viewport" aria-label="Editor canvas">
+        <div className={`editor-viewport__canvas ${showComparisonViewport ? "editor-viewport__canvas--split" : ""}`}>
+          {showComparisonViewport ? (
+            <div className="editor-viewport__split">
+              <div className={`editor-viewport__device editor-viewport__device--${viewportPreset}`}>
+                <div className="editor-viewport__device-meta">
+                  {availableLanguageVariants.find((variant) => variant.code === activeLanguageVariant)?.label ||
+                    activeLanguageVariant.toUpperCase()}
+                </div>
+                <iframe
+                  ref={iframeRef}
+                  className="editor-viewport__frame"
+                  title="Localized page preview"
+                  sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+                />
+                {isEdit && !versionPreview ? (
+                  <BlockOverlay
+                    canvasMode={layoutMode === "canvas"}
+                    iframeRef={iframeRef}
+                    enabled
+                    blockFilter={blockFilter}
+                    onStatus={setStatus}
+                    onHtmlChange={commitLiveEditorHtml}
+                  />
+                ) : null}
+              </div>
+
+              <div className={`editor-viewport__device editor-viewport__device--${viewportPreset}`}>
+                <div className="editor-viewport__device-meta">Original</div>
+                <iframe
+                  ref={comparisonIframeRef}
+                  className="editor-viewport__frame"
+                  title="Base page comparison"
+                  sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className={`editor-viewport__device editor-viewport__device--${viewportPreset}`}>
+              <div className="editor-viewport__device-meta">
+                {versionPreview
+                  ? `Snapshot · ${previewVersionTitle || "Preview"}`
+                  : `${viewportConfig.label} · ${editorIdentityLabel}`}
+              </div>
+              <iframe
+                ref={iframeRef}
+                className="editor-viewport__frame"
+                title="Editor preview"
+                sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
+              />
+              {!currentHtml.trim() && !versionPreview && !isLoading ? (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    textAlign: "center",
+                    padding: 32,
+                    color: theme === "light" ? "#475569" : "rgba(226,232,240,0.78)",
+                    background: theme === "light" ? "rgba(255,255,255,0.72)" : "rgba(2,6,23,0.22)",
+                    pointerEvents: "none",
+                  }}
+                >
+                  Load a live URL or open a saved project to start editing, versioning, sharing, and publishing.
+                </div>
+              ) : null}
+              {isEdit && !versionPreview ? (
+                <BlockOverlay
+                  canvasMode={layoutMode === "canvas"}
+                  iframeRef={iframeRef}
+                  enabled
+                  blockFilter={blockFilter}
+                  onStatus={setStatus}
+                  onHtmlChange={commitLiveEditorHtml}
+                />
+              ) : null}
+            </div>
+          )}
+        </div>
+      </main>
+
+      <EditorModals
+        aiDiff={aiDiff}
+        theme={theme}
+        acceptAiDiff={acceptAiDiff}
+        rejectAiDiff={rejectAiDiff}
+        buildDiffPreview={buildDiffPreview}
+        isLoading={isLoading}
+      />
+
+      <KeyboardShortcuts
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+        theme={theme}
+        title="Editor shortcuts"
+        sections={editorShortcutSections}
+      />
+
+      <AssistantWidget
+        plan={demoPlan}
+        context={{
+          surface: "editor",
+          plan: demoPlan,
+          workspace: currentProject?.name || "Editor",
+          projectId: currentProject?.id,
+          projectName: currentProject?.name || editorIdentityLabel,
+          projectUrl: loadedUrl || currentProject?.url || "",
+          platform: currentPlatform,
+          exportMode,
+          selectedBlock: selectedStructureItem?.displayLabel || undefined,
+          warnings: exportWarnings.slice(0, 4).map((warning) => warning.message),
+        }}
+        avoidOverlay
+        onUsage={trackUsage}
+        onAction={handleAssistantEditorAction}
+      />
+
+      <ToastContainer />
 
       {currentAiApproval && (
         <div style={{
