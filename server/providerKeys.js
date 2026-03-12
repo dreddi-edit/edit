@@ -50,8 +50,14 @@ function getUserSettingsKey(provider, userId) {
   if (!column) return ""
   const normalizedUserId = normalizeUserId(userId)
   if (!normalizedUserId) return ""
-  const row = db.prepare(`SELECT ${column} AS key_value FROM user_settings WHERE user_id = ?`).get(normalizedUserId)
-  return cleanKey(row?.key_value || "")
+  
+  try {
+    const row = db.prepare(`SELECT ${column} AS key_value FROM user_settings WHERE user_id = ?`).get(normalizedUserId)
+    return cleanKey(row?.key_value || "")
+  } catch (error) {
+    // If column or table is missing, swallow the error and fallback
+    return ""
+  }
 }
 
 function getUserApiKey(provider, userId) {
@@ -61,26 +67,34 @@ function getUserApiKey(provider, userId) {
   const aliases = PROVIDER_USER_API_ALIASES[normalized] || [normalized]
   if (!aliases.length) return ""
   const placeholders = aliases.map(() => "?").join(", ")
-  const row = db
-    .prepare(
-      `SELECT key_value
-       FROM user_api_keys
-       WHERE user_id = ? AND active = 1 AND provider IN (${placeholders})
-       ORDER BY datetime(created_at) DESC, id DESC
-       LIMIT 1`,
-    )
-    .get(normalizedUserId, ...aliases)
-  return cleanKey(row?.key_value || "")
+  
+  try {
+    const row = db
+      .prepare(
+        `SELECT key_value
+         FROM user_api_keys
+         WHERE user_id = ? AND active = 1 AND provider IN (${placeholders})
+         ORDER BY datetime(created_at) DESC, id DESC
+         LIMIT 1`,
+      )
+      .get(normalizedUserId, ...aliases)
+    return cleanKey(row?.key_value || "")
+  } catch (error) {
+    // If table is missing, swallow the error and fallback
+    return ""
+  }
 }
 
 export function getProviderApiKey(provider, { userId = null, allowEnvFallback = true } = {}) {
   const normalized = normalizeProvider(provider)
   if (!normalized) return ""
+  
   const fromApiKeys = getUserApiKey(normalized, userId)
   if (fromApiKeys) return fromApiKeys
+  
   const fromSettings = getUserSettingsKey(normalized, userId)
   if (fromSettings) return fromSettings
+  
   if (!allowEnvFallback) return ""
   return getEnvKey(normalized)
 }
-

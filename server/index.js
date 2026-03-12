@@ -167,7 +167,7 @@ app.use(cors({
 }))
 
 app.use(cookieParser())
-const API_BODY_LIMIT = process.env.API_BODY_LIMIT || "100mb"
+const API_BODY_LIMIT = process.env.API_BODY_LIMIT || "20mb"
 app.use(express.urlencoded({ extended: true, limit: API_BODY_LIMIT }))
 const jsonBodyParser = express.json({ limit: API_BODY_LIMIT })
 const rawStripeBodyParser = express.raw({ type: "application/json", limit: API_BODY_LIMIT })
@@ -215,6 +215,12 @@ app.get("/proxy", async (req, res) => {
     const url = normalizeSiteUrl(req.query.url)
     if (!url || typeof url !== "string") {
       return res.status(400).send("Missing url")
+    }
+    const urlObj = new URL(url);
+    const host = urlObj.hostname;
+    const isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|169\.254\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+|::1)$/i.test(host) || host.endsWith('.local');
+    if (isLocal || !['http:', 'https:'].includes(urlObj.protocol)) {
+      return res.status(403).send("Proxying to this destination is forbidden.");
     }
     const r = await fetch(url, {
       headers: {
@@ -880,6 +886,9 @@ app.post("/api/ai/rewrite-block-stream", authMiddleware, aiRateLimit, async (req
     res.setHeader("Cache-Control", "no-cache")
     res.setHeader("Connection", "keep-alive")
 
+    const controller = new AbortController();
+    req.on("close", () => controller.abort());
+
     const isGemini = chosenModel.startsWith("gemini-")
 
     if (isGemini) {
@@ -919,7 +928,8 @@ app.post("/api/ai/rewrite-block-stream", authMiddleware, aiRateLimit, async (req
         stream: true,
         system: systemPrompt,
         messages: [{ role: "user", content: `INSTRUCTION:\n${instruction}\n\nHTML:\n${html}` }]
-      })
+      }),
+      signal: controller.signal
     })
 
     if (!claudeResp.ok) {
@@ -1559,10 +1569,11 @@ app.post("/api/admin/send-reset", authMiddleware, ownerOnly, adminResetRateLimit
     if (!user) return res.status(404).json({ ok: false, error: "User not found" })
 
     const resetToken = crypto.randomBytes(32).toString("hex")
+    const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex')
     const expires = new Date(Date.now() + 3600000).toISOString()
 
     db.prepare("DELETE FROM password_resets WHERE user_id = ? OR used = 1").run(user.id)
-    db.prepare("INSERT INTO password_resets (user_id, token, expires_at) VALUES (?, ?, ?)").run(user.id, resetToken, expires)
+    db.prepare("INSERT INTO password_resets (user_id, token, expires_at) VALUES (?, ?, ?)").run(user.id, hashedToken, expires)
 
     const sent = await sendPasswordReset(user.email, resetToken, user.name || "")
     if (!sent) {
@@ -1776,12 +1787,13 @@ app.get("/reset-password", (req, res) => {
   }
   
   // Check if token exists and is valid
+  const hashedToken = crypto.createHash('sha256').update(token).digest('hex')
   const reset = db.prepare(`
     SELECT pr.user_id, u.email 
     FROM password_resets pr
     JOIN users u ON pr.user_id = u.id
     WHERE pr.token = ? AND pr.expires_at > datetime('now')
-  `).get(token)
+  `).get(hashedToken)
   
   if (!reset) {
     return res.status(400).send(`
@@ -1854,11 +1866,12 @@ app.post("/reset-password", async (req, res) => {
   }
   
   // Get user from token
+  const hashedToken = crypto.createHash('sha256').update(token).digest('hex')
   const reset = db.prepare(`
     SELECT pr.user_id 
     FROM password_resets pr
     WHERE pr.token = ? AND pr.expires_at > datetime('now')
-  `).get(token)
+  `).get(hashedToken)
   
   if (!reset) {
     return res.status(400).send(`
@@ -1878,7 +1891,7 @@ app.post("/reset-password", async (req, res) => {
     .run(passwordHash, reset.user_id)
   
   // Delete used token
-  db.prepare("DELETE FROM password_resets WHERE token = ?").run(token)
+  db.prepare("DELETE FROM password_resets WHERE token = ?").run(hashedToken)
   
   // Success page
   res.send(`

@@ -1246,7 +1246,17 @@ async function readZipEntries(buffer) {
             return
           }
           const chunks = []
-          stream.on("data", (chunk) => chunks.push(chunk))
+          let decompressedSize = 0;
+          const MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024; // 50MB limit
+          stream.on("data", (chunk) => {
+            decompressedSize += chunk.length;
+            if (decompressedSize > MAX_UNCOMPRESSED_BYTES) {
+              stream.destroy();
+              reject(new Error("ZIP file contents exceed maximum allowed size (50MB)"));
+              return;
+            }
+            chunks.push(chunk);
+          })
           stream.on("end", () => {
             entries.push({
               name: entryName,
