@@ -189,6 +189,7 @@ export default function App() {
   const [creatingPublishPreview, setCreatingPublishPreview] = useState(false)
   const [publishingTarget, setPublishingTarget] = useState<PublishTarget | null>(null)
   const [rollingBackDeploymentId, setRollingBackDeploymentId] = useState<number | null>(null)
+  const [versionPreview, setVersionPreview] = useState<ProjectVersionDetail | null>(null)
   const [versionCompare, setVersionCompare] = useState<ProjectVersionDetail | null>(null)
   const [aiState, setAiState] = useState({ loading: false, prompt: "", model: "auto", tone: "neutral", running: false, batchRunning: false, diff: null }); const [aiApprovalQueue, setAiApprovalQueue] = useState<AiApprovalItem[]>([])
   const [sessionCost, setSessionCost] = useState(0)
