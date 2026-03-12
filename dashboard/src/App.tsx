@@ -1,7 +1,7 @@
 import { Header } from "./components/Header";
 import { MainView } from "./components/MainView";
 import { AssistantContainer } from "./components/AssistantContainer";
-import { shortenText, sleep, isValidUrl, readSavedTheme } from "./editorHelpers";
+import { shortenText, sleep, isValidUrl, readSavedTheme, DEFAULT_CHROME_BACKGROUND, DEFAULT_CHROME_BORDER } from "./editorHelpers";
 import { calculateCost, processAIResponse } from "./assistantLogic";
 import { EditorView } from "./components/EditorView";
 import { useAdmin } from "./hooks/useAdmin";
