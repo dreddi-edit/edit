@@ -1,6 +1,7 @@
 import db from "./db.js"
 import { authMiddleware } from "./auth.js"
 import { deductCredits, hasEnoughCredits } from "./credits.js"
+import { getProviderApiKey } from "./providerKeys.js"
 
 const ASSISTANT_MODELS_BY_PLAN = {
   basis: ["claude-haiku-4-5-20251001"],
@@ -69,11 +70,12 @@ function parseStudioRunRow(row) {
   }
 }
 
-async function runAnthropicJsonPrompt({ prompt, system, fallback }) {
+async function runAnthropicJsonPrompt({ prompt, system, fallback, userId = null }) {
   const result = await callAnthropicChat({
     model: "claude-haiku-4-5-20251001",
     messages: [{ role: "user", content: prompt }],
     system,
+    userId,
   })
   return parseLooseJson(result.reply, fallback)
 }
@@ -112,8 +114,8 @@ function buildSystemPrompt(context, plan) {
     .join("\n")
 }
 
-async function callAnthropicChat({ model, messages, system }) {
-  const key = process.env.ANTHROPIC_API_KEY
+async function callAnthropicChat({ model, messages, system, userId = null, apiKey = "" }) {
+  const key = cleanKey(apiKey) || getProviderApiKey("anthropic", { userId })
   if (!key) throw new Error("ANTHROPIC_API_KEY is not set")
 
   const response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -156,8 +158,8 @@ async function callAnthropicChat({ model, messages, system }) {
   }
 }
 
-async function callGeminiChat({ model, messages, system }) {
-  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY
+async function callGeminiChat({ model, messages, system, userId = null, apiKey = "" }) {
+  const key = cleanKey(apiKey) || getProviderApiKey("gemini", { userId })
   if (!key) throw new Error("GEMINI_API_KEY not set")
 
   const parts = []
@@ -199,8 +201,8 @@ async function callGeminiChat({ model, messages, system }) {
   }
 }
 
-async function callGroqChat({ model, messages, system }) {
-  const key = process.env.GROQ_API_KEY
+async function callGroqChat({ model, messages, system, userId = null, apiKey = "" }) {
+  const key = cleanKey(apiKey) || getProviderApiKey("groq", { userId })
   if (!key) throw new Error("GROQ_API_KEY is not set")
 
   const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
@@ -237,10 +239,14 @@ async function callGroqChat({ model, messages, system }) {
   }
 }
 
-async function runAssistantModel({ model, messages, system }) {
-  if (model.startsWith("claude-")) return callAnthropicChat({ model, messages, system })
-  if (model.startsWith("gemini-")) return callGeminiChat({ model, messages, system })
-  if (model.startsWith("groq:")) return callGroqChat({ model, messages, system })
+function cleanKey(value) {
+  return String(value || "").trim()
+}
+
+async function runAssistantModel({ model, messages, system, userId = null }) {
+  if (model.startsWith("claude-")) return callAnthropicChat({ model, messages, system, userId })
+  if (model.startsWith("gemini-")) return callGeminiChat({ model, messages, system, userId })
+  if (model.startsWith("groq:")) return callGroqChat({ model, messages, system, userId })
   throw new Error("Unsupported assistant model")
 }
 
@@ -293,6 +299,7 @@ export function registerAssistantRoutes(app, { aiRateLimit }) {
         model: requestedModel,
         messages,
         system,
+        userId: req.user.id,
       })
 
       const usage = result.usage || {
@@ -378,11 +385,13 @@ export function registerAssistantRoutes(app, { aiRateLimit }) {
           system: "You are a brand designer. Respond only with valid JSON.",
           prompt: `Generate a JSON brand kit for this company brief: "${brief}". Return {"primary_color":"#hex","secondary_color":"#hex","font_heading":"Font Name","font_body":"Font Name","tone_of_voice":"string"}.`,
           fallback: {},
+          userId: req.user.id,
         })
         let sitemap = await runAnthropicJsonPrompt({
           system: "You are a web architect. Respond only with a valid JSON array.",
           prompt: `Generate a 4-page sitemap for this company brief: "${brief}". Return a JSON array of page name strings.`,
           fallback: ["Home", "About", "Services", "Contact"],
+          userId: req.user.id,
         })
         if (!Array.isArray(sitemap) || !sitemap.length) {
           sitemap = ["Home", "About", "Services", "Contact"]
@@ -410,6 +419,7 @@ export function registerAssistantRoutes(app, { aiRateLimit }) {
           system: "You are a CRO expert. Respond only with valid JSON.",
           prompt: `Identify exactly 3 conversion opportunities in this page HTML. Return JSON: {"suggestions":[{"block_id":"string","issue":"string","rewritten_html":"string"}]}\n\nHTML:\n${htmlSnippet}`,
           fallback: { suggestions: [] },
+          userId: req.user.id,
         })
         outputResult = {
           message: "CRO analysis complete",
@@ -425,6 +435,7 @@ export function registerAssistantRoutes(app, { aiRateLimit }) {
           system: "You are a conversion funnel designer. Respond only with valid JSON.",
           prompt: `Design a 3-step funnel for the goal "${goal}". Return JSON: {"pages":[{"name":"Landing Page","purpose":"string"},{"name":"Form / Checkout","purpose":"string"},{"name":"Thank You","purpose":"string"}],"email_sequence":[{"subject":"string","body_preview":"string"},{"subject":"string","body_preview":"string"},{"subject":"string","body_preview":"string"}]}`,
           fallback: { pages: [], email_sequence: [] },
+          userId: req.user.id,
         })
         outputResult = {
           message: "Funnel generated successfully",
@@ -442,6 +453,7 @@ export function registerAssistantRoutes(app, { aiRateLimit }) {
           system: "You are a brand analyst. Respond only with valid JSON.",
           prompt: `Extract brand context from this HTML. Return JSON: {"primary_color":"#hex or null","secondary_color":"#hex or null","font_families":["string"],"logo_url":"string or null","tone_summary":"string"}\n\nHTML (first 4000 chars):\n${html.slice(0, 4000)}`,
           fallback: {},
+          userId: req.user.id,
         })
         if (projectId) {
           db.prepare("UPDATE projects SET brand_context = ?, updated_at = datetime('now') WHERE id = ? AND user_id = ?")

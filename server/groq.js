@@ -1,5 +1,7 @@
-export async function groqRewriteBlock({ html, instruction, systemHint = "", model = "llama-3.1-8b-instant" }) {
-  const key = process.env.GROQ_API_KEY
+import { getProviderApiKey } from "./providerKeys.js"
+
+export async function groqRewriteBlock({ html, instruction, systemHint = "", model = "llama-3.1-8b-instant", userId = null, apiKey = "" }) {
+  const key = String(apiKey || "").trim() || getProviderApiKey("groq", { userId })
   if (!key) throw new Error("GROQ_API_KEY is not set")
 
   const system = [

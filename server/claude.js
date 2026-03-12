@@ -1,4 +1,6 @@
 
+import { getProviderApiKey } from "./providerKeys.js"
+
 function extractJsonFromText(text) {
   if (!text) return text;
   const s = String(text).trim();
@@ -27,8 +29,12 @@ function safeJsonParse(input) {
 }
 
 
-export async function claudeGenerateLandingCopy({ name, description = "", audience = "", language = "english", model = "claude-sonnet-4-6", complexity = 5 }) {
-  const key = process.env.ANTHROPIC_API_KEY
+function resolveAnthropicKey({ userId = null, apiKey = "" } = {}) {
+  return String(apiKey || "").trim() || getProviderApiKey("anthropic", { userId })
+}
+
+export async function claudeGenerateLandingCopy({ name, description = "", audience = "", language = "english", model = "claude-sonnet-4-6", complexity = 5, userId = null, apiKey = "" }) {
+  const key = resolveAnthropicKey({ userId, apiKey })
   if (!key) throw new Error("ANTHROPIC_API_KEY is not set")
 
   const system = [
@@ -99,8 +105,8 @@ export async function claudeGenerateLandingCopy({ name, description = "", audien
   return { copy: parsed, usage: data.usage || null }
 }
 
-export async function claudeGenerateLandingHtml({ name, description = "", audience = "", language = "english", model = "claude-sonnet-4-6", complexity = 5 }) {
-  const key = process.env.ANTHROPIC_API_KEY
+export async function claudeGenerateLandingHtml({ name, description = "", audience = "", language = "english", model = "claude-sonnet-4-6", complexity = 5, userId = null, apiKey = "" }) {
+  const key = resolveAnthropicKey({ userId, apiKey })
   if (!key) throw new Error("ANTHROPIC_API_KEY is not set")
 
   const system = [
@@ -184,8 +190,8 @@ export async function claudeGenerateLandingHtml({ name, description = "", audien
 
 }
 
-export async function claudeRewriteBlock({ html, instruction, systemHint = "", model = "claude-sonnet-4-6" }) {
-  const key = process.env.ANTHROPIC_API_KEY
+export async function claudeRewriteBlock({ html, instruction, systemHint = "", model = "claude-sonnet-4-6", userId = null, apiKey = "" }) {
+  const key = resolveAnthropicKey({ userId, apiKey })
   if (!key) throw new Error("ANTHROPIC_API_KEY is not set")
 
   const system = [

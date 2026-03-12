@@ -1,5 +1,7 @@
 import { GoogleAuth } from "google-auth-library"
 import { Storage } from "@google-cloud/storage"
+import { authMiddleware } from "./auth.js"
+import { getProviderApiKey } from "./providerKeys.js"
 
 function getCredentials() {
   const json = process.env.GOOGLE_SERVICE_ACCOUNT_JSON
@@ -46,11 +48,11 @@ async function authFetch(url, options = {}) {
 
 export function registerGoogleServiceRoutes(app) {
 
-  app.post("/api/google/gemini/generate", async (req, res) => {
+  app.post("/api/google/gemini/generate", authMiddleware, async (req, res) => {
     try {
       const prompt = String(req.body?.prompt || "").trim()
       const model = String(req.body?.model || "gemini-2.5-flash").trim()
-      const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY
+      const key = getProviderApiKey("gemini", { userId: req.user?.id })
       if (!prompt) return res.status(400).json({ ok: false, error: "Missing prompt" })
       if (!key) return res.status(400).json({ ok: false, error: "GEMINI_API_KEY not set" })
 

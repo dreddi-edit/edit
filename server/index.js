@@ -58,6 +58,7 @@ import { groqRewriteBlock } from "./groq.js"
 import { ollamaRewriteBlock, ollamaHealth } from "./ollama.js"
 import { resolveModel } from "./autoRouter.js"
 import { ownerOnly } from "./accessControl.js"
+import { getProviderApiKey } from "./providerKeys.js"
 import archiver from "archiver"
 import db from "./db.js"
 import path from "path"
@@ -593,11 +594,14 @@ app.post("/api/ai/analyze-and-rebuild", authMiddleware, aiRateLimit, async (req,
       }
     }
 
+    const anthropicKey = getProviderApiKey("anthropic", { userId: req.user?.id })
+    if (!anthropicKey) throw new Error("ANTHROPIC_API_KEY is not set")
+
     const resp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "x-api-key": anthropicKey,
         "anthropic-version": "2023-06-01"
       },
       body: JSON.stringify({
@@ -655,7 +659,8 @@ app.post("/api/ai/demo-landing-copy", authMiddleware, aiRateLimit, async (req, r
       audience,
       language,
       complexity,
-      model: "claude-sonnet-4-6"
+      model: "claude-sonnet-4-6",
+      userId: req.user?.id,
     })
 
     let deducted = 0
@@ -757,12 +762,12 @@ app.post("/api/ai/rewrite-block", authMiddleware, aiRateLimit, async (req, res) 
     const useOllama = chosenModel.startsWith("ollama:")
 
     const result = useGemini
-      ? await geminiRewriteBlock({ html, instruction, systemHint, model: chosenModel })
+      ? await geminiRewriteBlock({ html, instruction, systemHint, model: chosenModel, userId: req.user?.id })
       : useGroq
-      ? await groqRewriteBlock({ html, instruction, systemHint, model: chosenModel.replace(/^groq:/, "") })
+      ? await groqRewriteBlock({ html, instruction, systemHint, model: chosenModel.replace(/^groq:/, ""), userId: req.user?.id })
       : useOllama
       ? await ollamaRewriteBlock({ html, instruction, systemHint, model: chosenModel.replace(/^ollama:/, "") })
-      : await claudeRewriteBlock({ html, instruction, systemHint, model: chosenModel })
+      : await claudeRewriteBlock({ html, instruction, systemHint, model: chosenModel, userId: req.user?.id })
 
     const usage = result?.usage || null
 
@@ -854,7 +859,7 @@ app.post("/api/ai/rewrite-block-stream", authMiddleware, aiRateLimit, async (req
       const useOllama = chosenModel.startsWith("ollama:")
       const result = useOllama
         ? await ollamaRewriteBlock({ html, instruction, systemHint, model: chosenModel.replace(/^ollama:/, "") })
-        : await groqRewriteBlock({ html, instruction, systemHint, model: chosenModel.replace(/^groq:/, "") })
+        : await groqRewriteBlock({ html, instruction, systemHint, model: chosenModel.replace(/^groq:/, ""), userId: req.user?.id })
       return res.json({ ok: true, model: chosenModel, html: result?.html ?? result, usage: result?.usage || null })
     }
 
@@ -866,7 +871,7 @@ app.post("/api/ai/rewrite-block-stream", authMiddleware, aiRateLimit, async (req
     const isGemini = chosenModel.startsWith("gemini-")
 
     if (isGemini) {
-      const result = await geminiRewriteBlock({ html, instruction, systemHint, model: chosenModel })
+      const result = await geminiRewriteBlock({ html, instruction, systemHint, model: chosenModel, userId: req.user?.id })
       const usage = result?.usage || null
       let deducted = 0
       if (req.user?.id && usage) {
@@ -885,11 +890,14 @@ app.post("/api/ai/rewrite-block-stream", authMiddleware, aiRateLimit, async (req
       systemHint || ""
     ].filter(Boolean).join("\n")
 
+    const anthropicKey = getProviderApiKey("anthropic", { userId: req.user?.id })
+    if (!anthropicKey) throw new Error("ANTHROPIC_API_KEY is not set")
+
     const claudeResp = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-api-key": process.env.ANTHROPIC_API_KEY,
+        "x-api-key": anthropicKey,
         "anthropic-version": "2023-06-01",
         "anthropic-beta": "messages-2023-06-01"
       },

@@ -1,5 +1,7 @@
-export async function geminiRewriteBlock({ html, instruction, systemHint = "", model = "gemini-2.5-flash" }) {
-  const key = process.env.GEMINI_API_KEY
+import { getProviderApiKey } from "./providerKeys.js"
+
+export async function geminiRewriteBlock({ html, instruction, systemHint = "", model = "gemini-2.5-flash", userId = null, apiKey = "" }) {
+  const key = String(apiKey || "").trim() || getProviderApiKey("gemini", { userId })
   if (!key) throw new Error("GEMINI_API_KEY is not set")
 
   const system = [

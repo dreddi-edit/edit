@@ -544,7 +544,7 @@ function archiveProjectRecord(projectId, userId) {
 export function registerProjectRoutes(app) {
   app.post("/api/projects/import-preview", authMiddleware, async (req, res) => {
     try {
-      const preview = await buildProjectImportPreview(req.body || {})
+      const preview = await buildProjectImportPreview(req.body || {}, { userId: req.user.id })
       res.json({ ok: true, preview })
     } catch (error) {
       if (isValidationError(error)) return res.status(400).json({ ok: false, error: error.message })

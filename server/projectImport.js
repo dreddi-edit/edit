@@ -1,6 +1,7 @@
 import path from "node:path"
 import { JSDOM } from "jsdom"
 import { normalizeProjectDocument, normalizeSiteUrl } from "./siteMeta.js"
+import { getProviderApiKey } from "./providerKeys.js"
 
 const MAX_SITE_PAGES = 16
 const MAX_SITEMAP_FILES = 6
@@ -76,9 +77,15 @@ const BLOCKED_IMPORT_HEADERS = new Set([
   "transfer-encoding",
 ])
 const FIGMA_FRAME_HINT_PATTERN = /(figma|frame|desktop|mobile|tablet|screen|artboard|variant)/i
+const IMPORT_ANALYSIS_MODEL = "claude-sonnet-4-6"
 
 function cleanText(value) {
   return String(value || "").replace(/\s+/g, " ").trim()
+}
+
+function isTestRuntime() {
+  if (String(process.env.NODE_ENV || "").toLowerCase() === "test") return true
+  return process.argv.includes("--test")
 }
 
 function readLimitedText(value, max = 4000) {
@@ -1543,10 +1550,8 @@ function parseJsonObjectCandidate(value) {
 
 function shouldRunAiImportAnalysis(analysis, options = {}) {
   if (options.disableAiAnalysis) return false
-  if (String(process.env.NODE_ENV || "").toLowerCase() === "test") return false
-  if (!process.env.GEMINI_API_KEY && !process.env.GOOGLE_API_KEY) return false
-  if ((analysis.fileCount || 0) > MAX_AI_IMPORT_FILES) return false
-  if (String(options.entryMode || "").toLowerCase() === "assets") return false
+  if (isTestRuntime()) return false
+  if (!options.userId && !options.forceAiAnalysis) return false
   return true
 }
 
@@ -1827,7 +1832,12 @@ async function maybeRunAiImportStructure({ entries, textEntries, analysis, optio
   if (!shouldRunAiImportAnalysis(analysis, options)) return null
   const prompt = buildAiImportPrompt({ entryPaths, textEntries, analysis, options })
   try {
-    const generated = await callGemini({ prompt, model: "gemini-2.5-pro" })
+    const generated = await callImportAnalysisModel({
+      prompt,
+      userId: options.userId,
+      maxTokens: 2200,
+      temperature: 0.2,
+    })
     return parseJsonObjectCandidate(generated)
   } catch {
     return null
@@ -1991,10 +2001,8 @@ function mergeImportAnalysisWithAi({ baseline, aiStructure, entries, textEntries
   }
 }
 
-async function maybeGenerateImportOverview(analysis) {
-  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY
-  if (!key) return analysis.overview
-  if (analysis.fileCount > 80) return analysis.overview
+async function maybeGenerateImportOverview(analysis, options = {}) {
+  if (analysis.fileCount > 120) return analysis.overview
   try {
     const prompt = [
       "You are reviewing an uploaded website package before import.",
@@ -2008,7 +2016,12 @@ async function maybeGenerateImportOverview(analysis) {
       `Support files: ${(analysis.supportFiles || []).slice(0, 12).join(", ") || "none"}`,
       `Warnings: ${(analysis.warnings || []).join(" ") || "none"}`,
     ].join("\n")
-    const generated = await callGemini({ prompt, model: "gemini-2.5-flash" })
+    const generated = await callImportAnalysisModel({
+      prompt,
+      userId: options.userId,
+      maxTokens: 260,
+      temperature: 0.1,
+    })
     const summary = cleanText(stripCodeFence(generated))
     return summary || analysis.overview
   } catch {
@@ -2084,7 +2097,9 @@ async function buildPagesFromEntries(entries, options = {}) {
     return left.path.localeCompare(right.path)
   })
 
-  analysis.overview = aiStructure?.overview ? cleanText(aiStructure.overview) || analysis.overview : await maybeGenerateImportOverview(analysis)
+  analysis.overview = aiStructure?.overview
+    ? cleanText(aiStructure.overview) || analysis.overview
+    : await maybeGenerateImportOverview(analysis, { userId: options.userId })
   const summary =
     pages.length > 0
       ? `${pages.length} structured page${pages.length === 1 ? "" : "s"} from ${analysis.fileCount} file${analysis.fileCount === 1 ? "" : "s"} · ${analysis.styleCount} styles · ${analysis.scriptCount} scripts · ${analysis.assetCount} assets`
@@ -2381,8 +2396,8 @@ function stripCodeFence(value) {
   return text
 }
 
-async function callGemini({ prompt, model = "gemini-2.5-pro", inlineData }) {
-  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY
+async function callGemini({ prompt, model = "gemini-2.5-pro", inlineData, userId = null, apiKey = "" }) {
+  const key = cleanText(apiKey) || getProviderApiKey("gemini", { userId })
   if (!key) throw new Error("GEMINI_API_KEY not set")
   const parts = [{ text: prompt }]
   if (inlineData?.data && inlineData?.mimeType) {
@@ -2409,6 +2424,149 @@ async function callGemini({ prompt, model = "gemini-2.5-pro", inlineData }) {
   return text
 }
 
+async function callImportAnalysisModel({ prompt, userId = null, model = IMPORT_ANALYSIS_MODEL, maxTokens = 1800, temperature = 0.2 }) {
+  const key = getProviderApiKey("anthropic", { userId })
+  if (!key) throw new Error("ANTHROPIC_API_KEY is not set")
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": key,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      temperature,
+      system: "You analyze imported website material and return practical, accurate output.",
+      messages: [{ role: "user", content: prompt }],
+    }),
+  })
+  const data = await response.json()
+  if (!response.ok) {
+    throw new Error(data?.error?.message || `Anthropic error ${response.status}`)
+  }
+  return (data?.content || [])
+    .map((chunk) => (chunk?.type === "text" ? chunk.text : ""))
+    .join("")
+    .trim()
+}
+
+function dedupeCleanList(values, max = 20) {
+  if (!Array.isArray(values)) return []
+  return Array.from(
+    new Set(
+      values
+        .map((value) => cleanText(value))
+        .filter(Boolean)
+        .slice(0, max),
+    ),
+  )
+}
+
+function buildUniversalImportAnalysisPrompt(preview, payload = {}) {
+  const analysis = preview?.analysis && typeof preview.analysis === "object" ? preview.analysis : {}
+  const pages = Array.isArray(preview?.pages) ? preview.pages : []
+  const pageDigest = pages
+    .slice(0, 10)
+    .map((page, index) => {
+      const text = cleanText(stripHtml(page?.html || "")).slice(0, 260)
+      return [
+        `PAGE ${index + 1}`,
+        `path: ${cleanText(page?.path || "/") || "/"}`,
+        `title: ${cleanText(page?.title || page?.name || "") || "untitled"}`,
+        `snippet: ${text || "none"}`,
+      ].join("\n")
+    })
+    .join("\n\n---\n\n")
+
+  return [
+    "You classify imported website content in an editor pipeline.",
+    "Return ONLY valid JSON. No markdown.",
+    'Schema: {"projectType":"string","platform":"wordpress|shopify|static|other","confidence":"low|medium|high","overview":"string","homepagePath":"string","warnings":["..."],"contentSources":["..."],"supportFiles":["..."],"keyFindings":["..."],"uploadKind":"string"}',
+    `Import kind: ${cleanText(payload.kind || "") || "unknown"}`,
+    `Import mode: ${cleanText(payload.mode || "") || "unknown"}`,
+    `Entry mode: ${cleanText(payload.entryMode || "") || "unknown"}`,
+    `Input file name: ${cleanText(payload.fileName || "") || "none"}`,
+    `Input mime type: ${cleanText(payload.mimeType || "") || "none"}`,
+    `Current detected projectType: ${cleanText(analysis.projectType || "") || "unknown"}`,
+    `Current detected platform: ${cleanText(analysis.platform || "") || "unknown"}`,
+    `Current overview: ${cleanText(analysis.overview || "") || "none"}`,
+    `Current warnings: ${Array.isArray(analysis.warnings) && analysis.warnings.length ? analysis.warnings.join(" | ") : "none"}`,
+    `Page count: ${Number(analysis.pageCount || pages.length || 0)}`,
+    `Asset count: ${Number(analysis.assetCount || 0)}`,
+    `Support files: ${Array.isArray(analysis.supportFiles) && analysis.supportFiles.length ? analysis.supportFiles.slice(0, 20).join(", ") : "none"}`,
+    `Content sources: ${Array.isArray(analysis.contentSources) && analysis.contentSources.length ? analysis.contentSources.slice(0, 20).join(", ") : "none"}`,
+    "Page digest:",
+    pageDigest || "none",
+    "Task: identify what was actually uploaded and refine the classification fields. Keep overview under 80 words.",
+  ].join("\n")
+}
+
+async function maybeApplyUniversalImportAnalysis(preview, payload = {}, options = {}) {
+  if (!preview || typeof preview !== "object") return preview
+  if (options.disableAiAnalysis || isTestRuntime()) return preview
+  if (!options.userId && !options.forceAiAnalysis) return preview
+  const prompt = buildUniversalImportAnalysisPrompt(preview, payload)
+  try {
+    const generated = await callImportAnalysisModel({
+      prompt,
+      userId: options.userId,
+      maxTokens: 900,
+      temperature: 0.1,
+    })
+    const parsed = parseJsonObjectCandidate(generated)
+    if (!parsed || typeof parsed !== "object") return preview
+
+    const normalizedPlatform = cleanText(parsed.platform || "").toLowerCase()
+    const normalizedConfidence = cleanText(parsed.confidence || "").toLowerCase()
+    const nextAnalysis = {
+      ...(preview.analysis && typeof preview.analysis === "object" ? preview.analysis : {}),
+    }
+
+    if (cleanText(parsed.projectType)) nextAnalysis.projectType = cleanText(parsed.projectType).slice(0, 140)
+    if (["wordpress", "shopify", "static", "other"].includes(normalizedPlatform)) nextAnalysis.platform = normalizedPlatform
+    if (["low", "medium", "high"].includes(normalizedConfidence)) nextAnalysis.confidence = normalizedConfidence
+    if (cleanText(parsed.overview)) nextAnalysis.overview = cleanText(parsed.overview).slice(0, 600)
+    if (cleanText(parsed.homepagePath)) nextAnalysis.homepagePath = cleanText(parsed.homepagePath)
+
+    const warnings = dedupeCleanList([...(nextAnalysis.warnings || []), ...(Array.isArray(parsed.warnings) ? parsed.warnings : [])], 24)
+    if (warnings.length) nextAnalysis.warnings = warnings
+
+    const contentSources = dedupeCleanList([...(nextAnalysis.contentSources || []), ...(Array.isArray(parsed.contentSources) ? parsed.contentSources : [])], 40)
+    if (contentSources.length) nextAnalysis.contentSources = contentSources
+
+    const supportFiles = dedupeCleanList([...(nextAnalysis.supportFiles || []), ...(Array.isArray(parsed.supportFiles) ? parsed.supportFiles : [])], 40)
+    if (supportFiles.length) nextAnalysis.supportFiles = supportFiles
+
+    nextAnalysis.importClassifier = {
+      model: IMPORT_ANALYSIS_MODEL,
+      uploadKind: cleanText(parsed.uploadKind || payload.kind || "unknown") || "unknown",
+      keyFindings: dedupeCleanList(parsed.keyFindings || [], 8),
+      analyzedAt: new Date().toISOString(),
+    }
+
+    return {
+      ...preview,
+      analysis: nextAnalysis,
+      summary: cleanText(nextAnalysis.overview || preview.summary || "") || preview.summary,
+      platform: cleanText(nextAnalysis.platform || preview.platform || "") || preview.platform,
+    }
+  } catch (error) {
+    if (options.requireImportAnalysis) throw error
+    const warning = cleanText(error?.message || "")
+    if (!warning) return preview
+    const nextAnalysis = {
+      ...(preview.analysis && typeof preview.analysis === "object" ? preview.analysis : {}),
+      warnings: dedupeCleanList([...(preview.analysis?.warnings || []), `AI import analysis unavailable: ${warning}`], 24),
+    }
+    return {
+      ...preview,
+      analysis: nextAnalysis,
+    }
+  }
+}
+
 function extractPdfTextFallback(buffer) {
   const binary = buffer.toString("latin1")
   const snippets = []
@@ -2429,7 +2587,7 @@ function extractPdfTextFallback(buffer) {
   return snippets.join("\n")
 }
 
-async function importPdfBrief(buffer, fileName) {
+async function importPdfBrief(buffer, fileName, options = {}) {
   let html = ""
   try {
     const prompt = [
@@ -2441,6 +2599,7 @@ async function importPdfBrief(buffer, fileName) {
     const generated = await callGemini({
       prompt,
       model: "gemini-2.5-pro",
+      userId: options.userId,
       inlineData: {
         mimeType: "application/pdf",
         data: buffer.toString("base64"),
@@ -2519,7 +2678,7 @@ async function importDocxBrief(buffer, fileName) {
   })
 }
 
-async function importScreenshot(buffer, fileName, mimeType) {
+async function importScreenshot(buffer, fileName, mimeType, options = {}) {
   const prompt = [
     "You are rebuilding a screenshot as a clean static HTML and CSS page.",
     "Return HTML only. No markdown. No explanations.",
@@ -2532,6 +2691,7 @@ async function importScreenshot(buffer, fileName, mimeType) {
   const generated = await callGemini({
     prompt,
     model: "gemini-2.5-pro",
+    userId: options.userId,
     inlineData: {
       mimeType,
       data: buffer.toString("base64"),
@@ -2558,33 +2718,45 @@ async function importScreenshot(buffer, fileName, mimeType) {
   })
 }
 
-export async function buildProjectImportPreview(payload = {}) {
+export async function buildProjectImportPreview(payload = {}, options = {}) {
   const kind = cleanText(payload.kind || "url").toLowerCase()
+  const userId = options.userId ?? payload.userId ?? null
+  const sharedOptions = {
+    ...options,
+    userId,
+    requireImportAnalysis: options.requireImportAnalysis !== false && Boolean(userId || options.forceAiAnalysis),
+  }
+  let preview = null
   if (kind === "url") {
     const mode = cleanText(payload.mode || "crawl").toLowerCase()
-    return importFromUrl(payload.url, mode, {
+    preview = await importFromUrl(payload.url, mode, {
       requestOverrides: payload.requestOverrides,
     })
+    return maybeApplyUniversalImportAnalysis(preview, payload, sharedOptions)
   }
 
   if (kind === "entries") {
     const entries = Array.isArray(payload.entries) ? payload.entries : []
-    return await buildPagesFromEntries(entries, {
+    preview = await buildPagesFromEntries(entries, {
       title: cleanText(payload.title || payload.fileName || "Imported files"),
       summary: cleanText(payload.summary || ""),
       entryMode: cleanText(payload.entryMode || "auto"),
+      userId,
     })
+    return maybeApplyUniversalImportAnalysis(preview, payload, sharedOptions)
   }
 
   if (kind === "zip") {
     const fileName = cleanText(payload.fileName || "site.zip")
     const buffer = readBase64Buffer(payload.contentBase64)
     const entries = await readZipEntries(buffer)
-    return await buildPagesFromEntries(entries, {
+    preview = await buildPagesFromEntries(entries, {
       title: fileName.replace(/\.zip$/i, "") || "Imported ZIP site",
       summary: "ZIP website imported into project pages",
       entryMode: "zip",
+      userId,
     })
+    return maybeApplyUniversalImportAnalysis(preview, payload, sharedOptions)
   }
 
   if (kind === "brief") {
@@ -2592,26 +2764,31 @@ export async function buildProjectImportPreview(payload = {}) {
     const mimeType = guessMimeType(fileName, cleanText(payload.mimeType || ""))
     const buffer = readBase64Buffer(payload.contentBase64)
     if (/pdf/i.test(mimeType) || /\.pdf$/i.test(fileName)) {
-      return importPdfBrief(buffer, fileName)
+      preview = await importPdfBrief(buffer, fileName, { userId })
+      return maybeApplyUniversalImportAnalysis(preview, payload, sharedOptions)
     }
     if (/wordprocessingml/i.test(mimeType) || /\.docx$/i.test(fileName)) {
-      return importDocxBrief(buffer, fileName)
+      preview = await importDocxBrief(buffer, fileName)
+      return maybeApplyUniversalImportAnalysis(preview, payload, sharedOptions)
     }
-    return await buildPagesFromEntries(
+    preview = await buildPagesFromEntries(
       [{ name: fileName, mimeType, buffer }],
       {
         title: fileName.replace(/\.[a-z0-9]+$/i, "") || "Imported brief",
         summary: "Brief imported into one project page",
         entryMode: "single-file",
+        userId,
       },
     )
+    return maybeApplyUniversalImportAnalysis(preview, payload, sharedOptions)
   }
 
   if (kind === "screenshot") {
     const fileName = cleanText(payload.fileName || "screenshot.png")
     const mimeType = guessMimeType(fileName, cleanText(payload.mimeType || "image/png"))
     const buffer = readBase64Buffer(payload.contentBase64)
-    return importScreenshot(buffer, fileName, mimeType)
+    preview = await importScreenshot(buffer, fileName, mimeType, { userId })
+    return maybeApplyUniversalImportAnalysis(preview, payload, sharedOptions)
   }
 
   throw new Error("Unknown import type")
