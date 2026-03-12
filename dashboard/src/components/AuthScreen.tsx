@@ -1,5 +1,6 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import {
+  apiGetAuthProviders,
   apiForgotPassword,
   apiLogin,
   apiLogin2FA,
@@ -20,6 +21,33 @@ export default function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
   const [twoFaState, setTwoFaState] = useState<{ required: boolean; sessionToken: string } | null>(null)
   const [twoFaCode, setTwoFaCode] = useState("")
   const [twoFaError, setTwoFaError] = useState("")
+  const [googleEnabled, setGoogleEnabled] = useState(false)
+
+  useEffect(() => {
+    let active = true
+    apiGetAuthProviders()
+      .then((providers) => {
+        if (active) setGoogleEnabled(Boolean(providers.google?.enabled))
+      })
+      .catch(() => {
+        if (active) setGoogleEnabled(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const params = new URLSearchParams(window.location.search)
+    const error = params.get("error")
+    if (!error) return
+    toast.error(error)
+    params.delete("error")
+    const nextSearch = params.toString()
+    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash || ""}`
+    window.history.replaceState({}, "", nextUrl)
+  }, [])
 
   const switchMode = (nextMode: "login" | "register" | "forgot") => {
     setMode(nextMode)
@@ -202,7 +230,7 @@ export default function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
                 {loading ? "Please wait..." : mode === "login" ? "Sign in" : mode === "forgot" ? "Send reset link" : "Create account"}
               </button>
 
-              {mode !== "forgot" ? (
+              {mode !== "forgot" && googleEnabled ? (
                 <>
                   <div style={{ textAlign: "center", margin: "12px 0", color: "rgba(255,255,255,0.55)", fontSize: "13px" }}>
                     or

@@ -1,4 +1,5 @@
 import type { ProjectAsset as AssetEntry, ProjectPage } from "./api/projects";
+import { resolveThemePreference } from "./utils/theme";
 
 export const BLOCK_FILTER_OPTIONS: Array<{ value: BlockFilter; label: string }> = [
   { value: "all", label: "All blocks" },
@@ -132,10 +133,7 @@ export function getDownloadFilename(response: Response, mode: ExportMode): strin
 }
 
 export function readSavedTheme(): "dark" | "light" {
-  if (typeof window === "undefined") return "dark"
-  const bodyTheme = document.body.getAttribute("data-theme")
-  if (bodyTheme === "light" || bodyTheme === "dark") return bodyTheme
-  return localStorage.getItem("se_theme") === "light" ? "light" : "dark"
+  return resolveThemePreference()
 }
 
 export function serializeEditorHtml(doc: Document, inputIsDocument: boolean) {

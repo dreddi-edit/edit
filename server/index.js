@@ -152,6 +152,7 @@ function localRebuild(html) {
 }
 
 const app = express()
+app.set("trust proxy", 1)
 const corsOrigin = process.env.NODE_ENV === "production"
   ? (process.env.ALLOWED_ORIGIN?.split(",").map(s => s.trim()).filter(Boolean) || [])
   : [`http://localhost:${process.env.PORT || 8787}`, "http://localhost:8788"]
@@ -175,6 +176,17 @@ app.use((req, res, next) => {
     return rawStripeBodyParser(req, res, next)
   }
   return jsonBodyParser(req, res, next)
+})
+
+const apiGlobalRateLimit = createRateLimit({
+  windowMs: 60 * 1000,
+  max: Math.max(60, Number(process.env.API_GLOBAL_RATE_LIMIT_PER_MIN || 240) || 240),
+  keyPrefix: "api-global",
+  message: "Too many API requests. Please try again in a minute.",
+})
+app.use("/api", (req, res, next) => {
+  if (req.path === "/stripe/webhook") return next()
+  return apiGlobalRateLimit(req, res, next)
 })
 
 const dashboardIndex = path.join(dashboardDist, "index.html")
@@ -1309,6 +1321,150 @@ app.get("/api/admin/export-stats", authMiddleware, ownerOnly, (req, res) => {
   }
 })
 
+app.get("/api/admin/metrics", authMiddleware, ownerOnly, (req, res) => {
+  try {
+    const sinceDays = Math.max(7, Math.min(365, Number(req.query.days || 90) || 90))
+    const sinceDate = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000).toISOString()
+    const now = new Date()
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
+    const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
+    const dayStart = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()
+
+    const signupsByDay = db.prepare(`
+      SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS count
+      FROM users
+      WHERE created_at >= ?
+      GROUP BY day
+      ORDER BY day ASC
+    `).all(sinceDate)
+    const signupsSummary = {
+      day: db.prepare("SELECT COUNT(*) AS count FROM users WHERE created_at >= ?").get(dayStart)?.count || 0,
+      week: db.prepare("SELECT COUNT(*) AS count FROM users WHERE created_at >= ?").get(weekStart)?.count || 0,
+      month: db.prepare("SELECT COUNT(*) AS count FROM users WHERE created_at >= ?").get(monthStart)?.count || 0,
+    }
+
+    const revenueByMonth = db.prepare(`
+      SELECT substr(created_at, 1, 7) AS month, ROUND(SUM(COALESCE(amount_eur, 0)), 2) AS amount
+      FROM user_invoices
+      WHERE created_at >= ? AND COALESCE(status, '') IN ('paid', 'open')
+      GROUP BY month
+      ORDER BY month ASC
+    `).all(sinceDate)
+    const mrrCurrent = Number(revenueByMonth[revenueByMonth.length - 1]?.amount || 0)
+
+    const usageRows = db.prepare(`
+      SELECT created_at, amount_eur, type, description
+      FROM credit_transactions
+      WHERE created_at >= ? AND amount_eur < 0
+      ORDER BY created_at DESC
+      LIMIT 2000
+    `).all(sinceDate)
+    const usageByModelMap = new Map()
+    for (const row of usageRows) {
+      const day = String(row.created_at || "").slice(0, 10)
+      const description = String(row.description || "").toLowerCase()
+      const modelMatch = description.match(
+        /(claude(?:-[a-z0-9.-]+)?|gemini(?:-[a-z0-9.-]+)?|groq:[a-z0-9._-]+|ollama:[a-z0-9._:-]+)/i,
+      )
+      const model = (modelMatch?.[1] || String(row.type || "unknown")).toLowerCase()
+      const key = `${day}|${model}`
+      const existing = usageByModelMap.get(key) || { day, model, credits: 0, calls: 0 }
+      existing.credits += Math.abs(Number(row.amount_eur || 0))
+      existing.calls += 1
+      usageByModelMap.set(key, existing)
+    }
+    const usageByModel = Array.from(usageByModelMap.values())
+      .sort((left, right) => `${right.day}${right.model}`.localeCompare(`${left.day}${left.model}`))
+      .slice(0, 300)
+
+    const importEvents = db.prepare(`
+      SELECT
+        SUM(CASE WHEN action LIKE 'project.import.%.success%' OR action LIKE 'project.import.success%' THEN 1 ELSE 0 END) AS success,
+        SUM(CASE WHEN action LIKE 'project.import.%.failed%' OR action LIKE 'project.import.failed%' THEN 1 ELSE 0 END) AS failed
+      FROM audit_logs
+      WHERE created_at >= ?
+        AND action LIKE 'project.import.%'
+    `).get(sinceDate) || { success: 0, failed: 0 }
+
+    const exportByMode = db.prepare(`
+      SELECT export_mode, outcome, COUNT(*) AS count
+      FROM project_exports
+      WHERE created_at >= ?
+      GROUP BY export_mode, outcome
+      ORDER BY export_mode ASC, outcome ASC
+    `).all(sinceDate)
+
+    const retentionCohorts = db.prepare(`
+      SELECT
+        substr(created_at, 1, 7) AS cohort,
+        COUNT(*) AS users,
+        SUM(CASE WHEN COALESCE(plan_status, 'active') = 'active' THEN 1 ELSE 0 END) AS active_users
+      FROM users
+      GROUP BY cohort
+      ORDER BY cohort ASC
+      LIMIT 24
+    `).all()
+    const churnSummary = db.prepare(`
+      SELECT
+        SUM(CASE WHEN COALESCE(plan_status, 'active') = 'canceled' THEN 1 ELSE 0 END) AS canceled_users,
+        COUNT(*) AS total_users
+      FROM users
+    `).get() || { canceled_users: 0, total_users: 0 }
+
+    const importTotal = Number(importEvents.success || 0) + Number(importEvents.failed || 0)
+    const importPassRate = importTotal > 0 ? Number((((importEvents.success || 0) / importTotal) * 100).toFixed(2)) : null
+    const exportTotals = exportByMode.reduce(
+      (acc, row) => {
+        acc.total += Number(row.count || 0)
+        if (String(row.outcome || "success") === "failure") acc.failed += Number(row.count || 0)
+        else acc.success += Number(row.count || 0)
+        return acc
+      },
+      { total: 0, success: 0, failed: 0 },
+    )
+    const exportPassRate = exportTotals.total > 0 ? Number(((exportTotals.success / exportTotals.total) * 100).toFixed(2)) : null
+
+    res.json({
+      ok: true,
+      sinceDate,
+      signups: {
+        summary: signupsSummary,
+        daily: signupsByDay,
+      },
+      revenue: {
+        mrrCurrent,
+        monthly: revenueByMonth,
+      },
+      aiUsage: {
+        byModelDaily: usageByModel,
+      },
+      imports: {
+        success: Number(importEvents.success || 0),
+        failed: Number(importEvents.failed || 0),
+        passRate: importPassRate,
+      },
+      exports: {
+        ...exportTotals,
+        passRate: exportPassRate,
+        byMode: exportByMode,
+      },
+      retention: {
+        cohorts: retentionCohorts.map((row) => ({
+          cohort: row.cohort,
+          users: Number(row.users || 0),
+          activeUsers: Number(row.active_users || 0),
+          retentionRate: Number(row.users || 0) > 0 ? Number(((Number(row.active_users || 0) / Number(row.users || 0)) * 100).toFixed(2)) : 0,
+        })),
+        churnRate: Number(churnSummary.total_users || 0) > 0
+          ? Number(((Number(churnSummary.canceled_users || 0) / Number(churnSummary.total_users || 0)) * 100).toFixed(2))
+          : 0,
+      },
+    })
+  } catch (e) {
+    sendError(res, 500, safeErrorMessage(e))
+  }
+})
+
 registerStripeRoutes(app)
 registerScreenshotRoutes(app)
 registerGoogleServiceRoutes(app)
@@ -1326,8 +1482,12 @@ app.get("/api/admin/me", authMiddleware, (req, res) => {
 })
 
 
-app.get("/api/admin/users", authMiddleware, ownerOnly, (_req, res) => {
+app.get("/api/admin/users", authMiddleware, ownerOnly, (req, res) => {
   try {
+    const q = String(req.query.q || "").trim().toLowerCase()
+    const planFilter = String(req.query.plan || "").trim().toLowerCase()
+    const roleFilter = String(req.query.role || "").trim().toLowerCase()
+
     const rows = db.prepare(`
       SELECT
         u.id,
@@ -1366,8 +1526,25 @@ app.get("/api/admin/users", authMiddleware, ownerOnly, (_req, res) => {
       
       return { ...user, affiliations: affiliations || '-' }
     })
-    
-    res.json({ ok: true, users: usersWithAffiliations })
+
+    const filtered = usersWithAffiliations.filter((entry) => {
+      if (q) {
+        const haystack = `${entry.email || ""} ${entry.name || ""} ${entry.affiliations || ""}`.toLowerCase()
+        if (!haystack.includes(q)) return false
+      }
+      if (planFilter && planFilter !== "all" && String(entry.plan || "").toLowerCase() !== planFilter) return false
+      if (roleFilter && roleFilter !== "all") {
+        if (!String(entry.affiliations || "").toLowerCase().includes(`(${roleFilter})`)) return false
+      }
+      return true
+    })
+
+    res.json({
+      ok: true,
+      users: filtered,
+      filters: { q, plan: planFilter || "all", role: roleFilter || "all" },
+      total: filtered.length,
+    })
   } catch (e) {
     sendError(res, 500, safeErrorMessage(e))
   }

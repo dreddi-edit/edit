@@ -109,6 +109,7 @@ export default function CommandPalette({
   return (
     <div
       role="dialog"
+      aria-modal="true"
       aria-label="Command palette"
       style={{
         position: "fixed",
@@ -156,6 +157,8 @@ export default function CommandPalette({
         </div>
         <div
           ref={listRef}
+          role="listbox"
+          aria-label="Command palette results"
           style={{
             maxHeight: 320,
             overflowY: "auto",
@@ -171,6 +174,8 @@ export default function CommandPalette({
               <button
                 key={item.type === "project" ? `p-${item.data.id}` : item.data.id}
                 data-index={i}
+                role="option"
+                aria-selected={i === selected}
                 onClick={() => {
                   if (item.type === "project") onOpenProject(item.data)
                   else {

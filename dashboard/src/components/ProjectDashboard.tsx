@@ -511,6 +511,20 @@ const DASHBOARD_RUNTIME_STRINGS = Array.from(
       "Ready",
       "Guarded",
       "Filter...",
+      "Sort projects",
+      "Last edited",
+      "Newest",
+      "Name",
+      "Filter by assignee",
+      "All assignees",
+      "Assigned to me",
+      "Unassigned",
+      "Filter by tag",
+      "All tags",
+      "Rename",
+      "Rename project",
+      "Project renamed",
+      "Project rename failed",
       "Launch flagship",
       "+ New project",
       "+ Extract template",
@@ -561,6 +575,8 @@ const DASHBOARD_RUNTIME_STRINGS = Array.from(
       "Live URL",
       "Project content",
       "Run status",
+      "Project activity",
+      "No activity yet.",
       "Close",
       "Running...",
       "Manual input",
@@ -839,6 +855,31 @@ function workflowClass(stage?: string) {
   if (stage === "approved") return "approved"
   if (stage === "shipped") return "shipped"
   return "draft"
+}
+
+function projectTagValues(project: Project) {
+  const tags = new Set<string>()
+  const platform = String(project.platform || "").trim().toLowerCase()
+  if (platform) tags.add(`platform:${platform}`)
+  const stage = String(project.workflowStage || "draft").trim().toLowerCase()
+  if (stage) tags.add(`stage:${stage}`)
+  const approval = String(project.approvalStatus || "draft").trim().toLowerCase()
+  if (approval) tags.add(`approval:${approval}`)
+  const readiness = exportReadiness(project)
+  tags.add(`export:${readiness}`)
+
+  try {
+    const context = typeof project.brandContext === "string" ? JSON.parse(project.brandContext || "{}") : {}
+    const contextTags = Array.isArray(context?.tags) ? context.tags : []
+    for (const tag of contextTags) {
+      const normalized = String(tag || "").trim().toLowerCase()
+      if (normalized) tags.add(`tag:${normalized}`)
+    }
+  } catch {
+    // ignore malformed brand context
+  }
+
+  return Array.from(tags)
 }
 
 function displayMemberName(member?: Pick<ProjectAssignee, "name" | "email"> | null) {
@@ -1210,6 +1251,7 @@ function ProjectCard({
   project,
   onOpen,
   onInspect,
+  onRename,
   onDelete,
   onShare,
   onReview,
@@ -1220,6 +1262,7 @@ function ProjectCard({
   project: Project
   onOpen: () => void
   onInspect: () => void
+  onRename: () => void
   onDelete: () => void
   onShare: () => void
   onReview: () => void
@@ -1360,6 +1403,17 @@ function ProjectCard({
           <button
             className="pd-card-btn"
             type="button"
+            aria-label={rt("Rename project")}
+            onClick={(event) => {
+              event.stopPropagation()
+              onRename()
+            }}
+          >
+            {rt("Rename")}
+          </button>
+          <button
+            className="pd-card-btn"
+            type="button"
             aria-label={rt("Open review comments")}
             onClick={(event) => {
               event.stopPropagation()
@@ -1426,6 +1480,8 @@ function ProjectExplorerModal({
   rt,
   view,
   scanning,
+  activity,
+  loadingActivity,
   onChangeView,
   onRescan,
   onOpenPage,
@@ -1436,6 +1492,8 @@ function ProjectExplorerModal({
   rt: (text: string) => string
   view: "grid" | "tree"
   scanning: boolean
+  activity: Array<{ id: string; type: string; label: string; detail?: string; created_at: string }>
+  loadingActivity: boolean
   onChangeView: (view: "grid" | "tree") => void
   onRescan: () => void
   onOpenPage: (pageId: string) => void
@@ -1516,6 +1574,27 @@ function ProjectExplorerModal({
               <span>{rt("Run a page scan to map the website into this project.")}</span>
             </div>
           )}
+
+          <div className="pd-project-activity">
+            <div className="pd-project-activity-head">{rt("Project activity")}</div>
+            {loadingActivity ? (
+              <div className="pd-card-client">{rt("Loading...")}</div>
+            ) : activity.length ? (
+              <div className="pd-project-activity-list">
+                {activity.slice(0, 12).map((entry) => (
+                  <div key={entry.id} className="pd-project-activity-item">
+                    <strong>{entry.label}</strong>
+                    <span>
+                      {entry.detail ? `${entry.detail} · ` : ""}
+                      {new Date(entry.created_at).toLocaleString()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="pd-card-client">{rt("No activity yet.")}</div>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -1844,6 +1923,9 @@ export default function ProjectDashboard({
   const [plan, setPlan] = useState<Plan>(currentPlan || "basis")
   const [theme, setTheme] = useState<"dark" | "light">(resolveThemePreference)
   const [stageFilter, setStageFilter] = useState<DashboardStage>("all")
+  const [projectSort, setProjectSort] = useState<"updated" | "created" | "name">("updated")
+  const [assigneeFilter, setAssigneeFilter] = useState<string>("all")
+  const [tagFilter, setTagFilter] = useState<string>("all")
   const [templateFilter, setTemplateFilter] = useState<TemplateFilter>("all")
   const [exportFilter, setExportFilter] = useState<ExportFilter>("all")
   const [aiStudioFilter, setAIStudioFilter] = useState<AIStudioFilter>("all")
@@ -1864,6 +1946,8 @@ export default function ProjectDashboard({
   const [projectExplorerView, setProjectExplorerView] = useState<"grid" | "tree">(
     () => (localStorage.getItem("se_project_pages_view") as "grid" | "tree") || "grid"
   )
+  const [projectActivity, setProjectActivity] = useState<Array<{ id: string; type: string; label: string; detail?: string; created_at: string }>>([])
+  const [loadingProjectActivity, setLoadingProjectActivity] = useState(false)
   const [activeStudioTool, setActiveStudioTool] = useState<StudioTool | null>(null)
   const [creatingProject, setCreatingProject] = useState(false)
   const [landingGenerating, setLandingGenerating] = useState(false)
@@ -2054,6 +2138,24 @@ export default function ProjectDashboard({
   }, [reviewPanelProjectId])
 
   useEffect(() => {
+    if (!projectExplorerId) {
+      setProjectActivity([])
+      setLoadingProjectActivity(false)
+      return
+    }
+    setLoadingProjectActivity(true)
+    void apiFetch<{
+      ok: boolean
+      activity?: Array<{ id: string; type: string; label: string; detail?: string; created_at: string }>
+    }>(`/api/projects/${projectExplorerId}/activity`)
+      .then((response) => {
+        if (response?.ok) setProjectActivity(response.activity || [])
+      })
+      .catch(() => setProjectActivity([]))
+      .finally(() => setLoadingProjectActivity(false))
+  }, [projectExplorerId])
+
+  useEffect(() => {
     setSearchActiveIndex((previous) => {
       if (!searchResults.length) return 0
       return Math.min(previous, searchResults.length - 1)
@@ -2079,14 +2181,55 @@ export default function ProjectDashboard({
   const studioSourceReady = studioNeedsLiveUrl
     ? /^https?:\/\//i.test(effectiveStudioUrl)
     : Boolean(selectedStudioProjectText || /^https?:\/\//i.test(effectiveStudioUrl))
-  const filteredProjects = normalizedProjects.filter(project => {
-    const query = projectSearch.trim().toLowerCase()
-    const matchesQuery =
-      !query ||
-      project.name.toLowerCase().includes(query) ||
-      (project.url || "").toLowerCase().includes(query)
-    return matchesQuery && matchesStage(stageFilter, project.workflowStage)
-  })
+  const projectAssigneeOptions = Array.from(
+    new Set(
+      normalizedProjects.flatMap((project) =>
+        (project.assignees || [])
+          .map((assignee) => String(assignee.email || "").trim().toLowerCase())
+          .filter(Boolean),
+      ),
+    ),
+  )
+  const projectTagOptions = Array.from(
+    new Set(
+      normalizedProjects.flatMap((project) => projectTagValues(project)),
+    ),
+  ).sort((left, right) => left.localeCompare(right))
+  const filteredProjects = normalizedProjects
+    .filter(project => {
+      const query = projectSearch.trim().toLowerCase()
+      const matchesQuery =
+        !query ||
+        project.name.toLowerCase().includes(query) ||
+        (project.url || "").toLowerCase().includes(query)
+      if (!matchesQuery) return false
+      if (!matchesStage(stageFilter, project.workflowStage)) return false
+
+      if (assigneeFilter === "me") {
+        const mine = (project.assignees || []).some(
+          (entry) => String(entry.email || "").toLowerCase() === String(user.email || "").toLowerCase(),
+        )
+        if (!mine) return false
+      } else if (assigneeFilter === "unassigned") {
+        if ((project.assignees || []).length > 0) return false
+      } else if (assigneeFilter !== "all") {
+        const included = (project.assignees || []).some(
+          (entry) => String(entry.email || "").toLowerCase() === assigneeFilter,
+        )
+        if (!included) return false
+      }
+
+      if (tagFilter !== "all" && !projectTagValues(project).includes(tagFilter)) return false
+      return true
+    })
+    .sort((left, right) => {
+      if (Number(left.pinned || 0) !== Number(right.pinned || 0)) {
+        return Number(right.pinned || 0) - Number(left.pinned || 0)
+      }
+      if (projectSort === "name") return String(left.name || "").localeCompare(String(right.name || ""))
+      if (projectSort === "created") return String(right.created_at || "").localeCompare(String(left.created_at || ""))
+      return String(right.updated_at || "").localeCompare(String(left.updated_at || ""))
+    })
   const filteredTemplates = templates.filter(template => {
     const query = projectSearch.trim().toLowerCase()
     const matchesQuery =
@@ -2846,6 +2989,33 @@ export default function ProjectDashboard({
     onOpen(project, pageId)
   }
 
+  const renameProject = async (project: Project) => {
+    const currentName = (project.name || "").trim() || getProjectDisplayName(project)
+    const nextName = window.prompt(rt("Project name"), currentName)?.trim() || ""
+    if (!nextName || nextName === currentName) return
+    try {
+      const response = await fetchWithAuth(`/api/projects/${project.id}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: nextName }),
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || !data?.ok || !data?.project) {
+        throw new Error(data?.error || rt("Project rename failed"))
+      }
+      const renamed = {
+        ...data.project,
+        thumbnail: normalizeThumbnailUrl(data.project.thumbnail),
+      }
+      setProjects((previous) =>
+        previous.map((entry) => (entry.id === project.id ? { ...entry, ...renamed } : entry)),
+      )
+      toast.success(rt("Project renamed"))
+    } catch (error) {
+      toast.error(errMsg(error))
+    }
+  }
+
   const closeSearchResults = () => {
     setSearchResults([])
     setSearchLoading(false)
@@ -3545,6 +3715,48 @@ export default function ProjectDashboard({
                 </div>
               ) : null}
             </div>
+            {activeWorkspace === "projects" ? (
+              <>
+                <select
+                  className="pd-filter-input pd-toolbar-select"
+                  aria-label={rt("Sort projects")}
+                  value={projectSort}
+                  onChange={(event) => setProjectSort(event.target.value as "updated" | "created" | "name")}
+                >
+                  <option value="updated">{rt("Last edited")}</option>
+                  <option value="created">{rt("Newest")}</option>
+                  <option value="name">{rt("Name")}</option>
+                </select>
+                <select
+                  className="pd-filter-input pd-toolbar-select"
+                  aria-label={rt("Filter by assignee")}
+                  value={assigneeFilter}
+                  onChange={(event) => setAssigneeFilter(event.target.value)}
+                >
+                  <option value="all">{rt("All assignees")}</option>
+                  <option value="me">{rt("Assigned to me")}</option>
+                  <option value="unassigned">{rt("Unassigned")}</option>
+                  {projectAssigneeOptions.map((email) => (
+                    <option key={email} value={email}>
+                      {email}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="pd-filter-input pd-toolbar-select"
+                  aria-label={rt("Filter by tag")}
+                  value={tagFilter}
+                  onChange={(event) => setTagFilter(event.target.value)}
+                >
+                  <option value="all">{rt("All tags")}</option>
+                  {projectTagOptions.map((tag) => (
+                    <option key={tag} value={tag}>
+                      {tag}
+                    </option>
+                  ))}
+                </select>
+              </>
+            ) : null}
             {activeWorkspace === "ai-studio" ? (
               <button
                 className="pd-btn pd-btn-primary"
@@ -3855,6 +4067,7 @@ export default function ProjectDashboard({
                     currentUserEmail={user.email}
                     onOpen={() => handleOpenProject(project)}
                     onInspect={() => openProjectExplorer(project)}
+                    onRename={() => void renameProject(project)}
                     onShare={() => void copyClientShareLink(project)}
                     onReview={() => setReviewPanelProjectId(project.id)}
                     onDelete={() => deleteProject(project.id, project.name)}
@@ -3992,6 +4205,8 @@ export default function ProjectDashboard({
           rt={rt}
           view={projectExplorerView}
           scanning={scanningProjectId === explorerProject.id}
+          activity={projectActivity}
+          loadingActivity={loadingProjectActivity}
           onChangeView={setProjectExplorerView}
           onRescan={() => void rescanProjectPages(explorerProject)}
           onOpenHome={() => {

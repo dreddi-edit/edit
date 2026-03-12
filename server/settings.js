@@ -16,6 +16,7 @@ export function registerSettingsRoutes(app) {
       ok: true,
       settings: {
         theme: s.theme,
+        theme_explicit: !!s.theme_explicit,
         disabled_models: JSON.parse(s.disabled_models || "[]"),
         has_anthropic_key: !!s.anthropic_key,
         has_gemini_key: !!s.gemini_key,
@@ -29,7 +30,7 @@ export function registerSettingsRoutes(app) {
     const { theme, disabled_models, anthropic_key, gemini_key, groq_key } = req.body
     db.prepare("INSERT OR IGNORE INTO user_settings (user_id) VALUES (?)").run(req.user.id)
 
-    if (theme) db.prepare("UPDATE user_settings SET theme = ? WHERE user_id = ?").run(theme, req.user.id)
+    if (theme) db.prepare("UPDATE user_settings SET theme = ?, theme_explicit = 1 WHERE user_id = ?").run(theme, req.user.id)
     if (disabled_models) db.prepare("UPDATE user_settings SET disabled_models = ? WHERE user_id = ?").run(JSON.stringify(disabled_models), req.user.id)
     if (anthropic_key !== undefined) db.prepare("UPDATE user_settings SET anthropic_key = ? WHERE user_id = ?").run(anthropic_key, req.user.id)
     if (gemini_key !== undefined) db.prepare("UPDATE user_settings SET gemini_key = ? WHERE user_id = ?").run(gemini_key, req.user.id)

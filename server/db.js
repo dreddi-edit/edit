@@ -82,6 +82,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS user_settings (
     user_id INTEGER PRIMARY KEY,
     theme TEXT DEFAULT 'dark',
+    theme_explicit INTEGER NOT NULL DEFAULT 0,
     disabled_models TEXT DEFAULT '[]',
     anthropic_key TEXT DEFAULT '',
     gemini_key TEXT DEFAULT '',
@@ -354,6 +355,9 @@ function runMigration(id, up) {
 
 runMigration("20260310_user_settings_plan", () => {
   execMigrationSql(`ALTER TABLE user_settings ADD COLUMN plan TEXT DEFAULT 'basis'`)
+})
+runMigration("20260314_user_settings_theme_explicit", () => {
+  execMigrationSql(`ALTER TABLE user_settings ADD COLUMN theme_explicit INTEGER NOT NULL DEFAULT 0`)
 })
 runMigration("20260310_projects_pinned", () => {
   execMigrationSql(`ALTER TABLE projects ADD COLUMN pinned INTEGER DEFAULT 0`)

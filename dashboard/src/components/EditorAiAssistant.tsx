@@ -20,11 +20,11 @@ export const EditorAiAssistant: React.FC<EditorAiAssistantProps> = ({
   AI_MODELS, leftAiRunning, batchAiRunning, runLeftAiPrompt, runBatchAiAcrossPages, versionPreview
 }) => (
   <section className="editor-panel__section">
-    <div className="editor-panel__label">AI Assistant</div>
-    <select className="editor-select editor-select--full" value={leftAiModel} onChange={e => setLeftAiModel(e.target.value)}>
+    <h2 className="editor-panel__label">AI Assistant</h2>
+    <select className="editor-select editor-select--full" value={leftAiModel} onChange={e => setLeftAiModel(e.target.value)} aria-label="AI model">
       {AI_MODELS.map(model => <option key={model.value} value={model.value}>{model.label}</option>)}
     </select>
-    <select className="editor-select editor-select--full" value={leftAiTone} onChange={e => setLeftAiTone(e.target.value)}>
+    <select className="editor-select editor-select--full" value={leftAiTone} onChange={e => setLeftAiTone(e.target.value)} aria-label="AI tone">
       <option value="neutral">Neutral tone</option>
       <option value="professional">Professional</option>
       <option value="casual">Casual</option>
@@ -37,11 +37,12 @@ export const EditorAiAssistant: React.FC<EditorAiAssistantProps> = ({
       value={leftAiPrompt}
       onChange={e => setLeftAiPrompt(e.target.value)}
       placeholder="Prompt..."
+      aria-label="AI prompt"
     />
-    <button className={`editor-btn editor-btn--panel editor-btn--accent ${leftAiRunning ? "is-loading" : ""}`} onClick={() => void runLeftAiPrompt()} disabled={leftAiRunning || Boolean(versionPreview)}>
+    <button className={`editor-btn editor-btn--panel editor-btn--accent ${leftAiRunning ? "is-loading" : ""}`} type="button" onClick={() => void runLeftAiPrompt()} disabled={leftAiRunning || Boolean(versionPreview)}>
       {leftAiRunning ? "Running..." : "Run prompt"}
     </button>
-    <button className={`editor-btn editor-btn--panel editor-btn--panel-muted ${batchAiRunning ? "is-loading" : ""}`} onClick={() => void runBatchAiAcrossPages()} disabled={batchAiRunning || leftAiRunning || Boolean(versionPreview)}>
+    <button className={`editor-btn editor-btn--panel editor-btn--panel-muted ${batchAiRunning ? "is-loading" : ""}`} type="button" onClick={() => void runBatchAiAcrossPages()} disabled={batchAiRunning || leftAiRunning || Boolean(versionPreview)}>
       {batchAiRunning ? "Running..." : "Run across pages"}
     </button>
   </section>

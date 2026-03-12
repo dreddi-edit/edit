@@ -1,6 +1,9 @@
 import crypto from "crypto"
 import bcrypt from "bcryptjs"
 import jwt from "jsonwebtoken"
+import fs from "node:fs/promises"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 
 import db from "./db.js"
 import { sendWelcome, sendPasswordReset } from "./email.js"
@@ -19,6 +22,13 @@ const SECRET = process.env.JWT_SECRET || DEFAULT_SECRET
 const COOKIE = "se_token"
 const REFRESH_COOKIE = "se_refresh"
 const IS_PROD = process.env.NODE_ENV === "production"
+const AUTH_IDLE_TIMEOUT_MIN = Math.max(5, Math.min(24 * 60, Number(process.env.AUTH_IDLE_TIMEOUT_MIN || 120) || 120))
+const AUTH_IDLE_TIMEOUT_MS = AUTH_IDLE_TIMEOUT_MIN * 60 * 1000
+const AUTH_ACTIVITY_RENEW_SECONDS = Math.max(30, Math.min(10 * 60, Number(process.env.AUTH_ACTIVITY_RENEW_SECONDS || 90) || 90))
+const AVATAR_UPLOAD_MAX_BYTES = Math.max(128_000, Math.min(8_000_000, Number(process.env.AVATAR_UPLOAD_MAX_BYTES || 4_000_000) || 4_000_000))
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+const THUMBNAILS_DIR = path.join(__dirname, "thumbnails")
 const AUTH_COOKIE_OPTIONS = {
   httpOnly: true,
   secure: IS_PROD,
@@ -95,7 +105,7 @@ function syncUserSettingsPlan(userId, planId = "basis") {
 }
 
 function signAccessToken(userId, email) {
-  return jwt.sign({ id: userId, email }, SECRET, { expiresIn: "15m" })
+  return jwt.sign({ id: userId, email, act: Date.now() }, SECRET, { expiresIn: "15m" })
 }
 
 function setAuthCookies(res, userId, email) {
@@ -113,6 +123,35 @@ function setAuthCookies(res, userId, email) {
 function clearAuthCookies(res) {
   res.clearCookie(COOKIE)
   res.clearCookie(REFRESH_COOKIE, { path: "/api/auth" })
+}
+
+function isHttpsRequest(req) {
+  if (req.secure) return true
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "")
+    .split(",")[0]
+    .trim()
+    .toLowerCase()
+  if (forwardedProto === "https") return true
+  const host = String(req.headers.host || "").toLowerCase()
+  if (host.startsWith("localhost") || host.startsWith("127.0.0.1")) return true
+  return false
+}
+
+function requireHttpsInProd(req, res, next) {
+  if (!IS_PROD || isHttpsRequest(req)) return next()
+  return res.status(400).json({ ok: false, error: "HTTPS is required for authentication endpoints in production." })
+}
+
+function parseAvatarDataUrl(raw) {
+  const value = String(raw || "").trim()
+  const match = value.match(/^data:(image\/(?:png|jpeg|jpg|webp|gif));base64,([a-z0-9+/=\s]+)$/i)
+  if (!match) return null
+  const mime = match[1].toLowerCase() === "image/jpg" ? "image/jpeg" : match[1].toLowerCase()
+  const payload = match[2].replace(/\s+/g, "")
+  const buffer = Buffer.from(payload, "base64")
+  if (!buffer.length || buffer.length > AVATAR_UPLOAD_MAX_BYTES) return null
+  const extension = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : mime === "image/gif" ? "gif" : "jpg"
+  return { mime, buffer, extension }
 }
 
 function generateBase32Secret(byteLength = 20) {
@@ -277,7 +316,26 @@ export function authMiddleware(req, res, next) {
   const token = req.cookies?.[COOKIE] || req.headers.authorization?.replace("Bearer ", "")
   if (!token) return res.status(401).json({ ok: false, error: "Nicht eingeloggt" })
   try {
-    req.user = jwt.verify(token, SECRET)
+    const decoded = jwt.verify(token, SECRET)
+    const lastActive = Number(decoded?.act || 0) || Number(decoded?.iat || 0) * 1000
+    if (!Number.isFinite(lastActive) || Date.now() - lastActive > AUTH_IDLE_TIMEOUT_MS) {
+      clearAuthCookies(res)
+      return res.status(401).json({ ok: false, error: "Session expired due to inactivity." })
+    }
+
+    // Sliding idle window for cookie-based sessions.
+    if (req.cookies?.[COOKIE] && Date.now() - lastActive > AUTH_ACTIVITY_RENEW_SECONDS * 1000) {
+      const refreshed = jwt.sign(
+        { id: decoded.id, email: decoded.email, act: Date.now() },
+        SECRET,
+        { expiresIn: "15m" },
+      )
+      res.cookie(COOKIE, refreshed, { ...AUTH_COOKIE_OPTIONS, maxAge: 15 * 60 * 1000 })
+      req.user = { ...decoded, act: Date.now() }
+      return next()
+    }
+
+    req.user = decoded
     next()
   } catch {
     res.status(401).json({ ok: false, error: "Session abgelaufen" })
@@ -285,6 +343,8 @@ export function authMiddleware(req, res, next) {
 }
 
 export function registerAuthRoutes(app) {
+  app.use("/api/auth", requireHttpsInProd)
+
   app.post("/api/auth/register", registerRateLimit, async (req, res) => {
     try {
       const email = readEmail(req.body?.email)
@@ -494,9 +554,24 @@ export function registerAuthRoutes(app) {
     res.json({ ok: true, email_verified: Boolean(user?.email_verified) })
   })
 
+  app.get("/api/auth/providers", (_req, res) => {
+    res.json({
+      ok: true,
+      providers: {
+        google: {
+          enabled: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
+        },
+      },
+    })
+  })
+
   app.get("/api/auth/google", (req, res) => {
     const clientId = process.env.GOOGLE_CLIENT_ID
-    if (!clientId) return res.status(500).json({ ok: false, error: "GOOGLE_CLIENT_ID is not configured" })
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET
+    if (!clientId || !clientSecret) {
+      const message = encodeURIComponent("Google sign-in is not available right now.")
+      return res.redirect(`/?error=${message}`)
+    }
 
     const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/google/callback`
     const params = new URLSearchParams({
@@ -654,6 +729,35 @@ export function registerAuthRoutes(app) {
     } catch (error) {
       if (isValidationError(error)) return res.status(400).json({ ok: false, error: error.message })
       res.status(500).json({ ok: false, error: error?.message || "Update failed" })
+    }
+  })
+
+  app.post("/api/auth/avatar", authMiddleware, async (req, res) => {
+    try {
+      const parsed = parseAvatarDataUrl(req.body?.data_url || req.body?.dataUrl || "")
+      if (!parsed) {
+        return res.status(400).json({
+          ok: false,
+          error: `Upload failed. Please upload PNG, JPG, WEBP, or GIF up to ${Math.round(AVATAR_UPLOAD_MAX_BYTES / 1_000_000)}MB.`,
+        })
+      }
+
+      await fs.mkdir(THUMBNAILS_DIR, { recursive: true })
+      const fileName = `avatar-${req.user.id}-${Date.now()}.${parsed.extension}`
+      const diskPath = path.join(THUMBNAILS_DIR, fileName)
+      await fs.writeFile(diskPath, parsed.buffer)
+      const avatarUrl = `/thumbnails/${fileName}`
+      db.prepare("UPDATE users SET avatar_url = ? WHERE id = ?").run(avatarUrl, req.user.id)
+      logAudit({
+        userId: req.user.id,
+        action: "auth.avatar_uploaded",
+        targetType: "user",
+        targetId: req.user.id,
+        meta: { mime: parsed.mime, bytes: parsed.buffer.length },
+      })
+      res.json({ ok: true, avatar_url: avatarUrl, user: readUserProfile(req.user.id) })
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error?.message || "Avatar upload failed" })
     }
   })
 

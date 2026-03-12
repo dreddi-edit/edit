@@ -26,6 +26,11 @@ export type LoginTwoFactorChallenge = {
 }
 
 export type LoginResult = User | LoginTwoFactorChallenge
+export type AuthProviders = {
+  google: {
+    enabled: boolean
+  }
+}
 
 function isTwoFactorChallenge(value: unknown): value is LoginTwoFactorChallenge {
   return Boolean(
@@ -105,6 +110,14 @@ export async function apiResetPassword(token: string, password: string): Promise
     body: JSON.stringify({ token, password }),
   })
   if (d && !d.ok) throw new Error(d.error || "Reset failed.")
+}
+
+export async function apiGetAuthProviders(): Promise<AuthProviders> {
+  const d = await apiFetch<{ ok?: boolean; error?: string; providers?: AuthProviders }>(`${BASE}/api/auth/providers`)
+  if (!d?.ok || !d.providers) {
+    throw new Error(d?.error || "Failed to load auth providers.")
+  }
+  return d.providers
 }
 
 export { isTwoFactorChallenge }

@@ -11,6 +11,7 @@ import type { StripeSubscriptionPlan, UserInvoice } from "../api/types"
 import { getRequireApproval, getApprovalThreshold, setRequireApproval, setApprovalThreshold } from "../approval-settings"
 import { AVAILABLE_UI_LANGUAGES, useTranslation, type Language } from "../i18n/useTranslation"
 import { MODEL_CATEGORIES, getCategoryModels, type ModelCategoryId } from "../utils/modelCatalog"
+import { persistThemeChoice, resolveThemePreference } from "../utils/theme"
 import {
   analyzeEntities,
   analyzeImage,
@@ -35,7 +36,7 @@ const BASE = ""
 type TabId = "general" | "profile" | "apikeys" | "org" | "google"
 type GoogleSectionId = "seo" | "ai" | "media" | "export"
 type GoogleResult = Record<string, any>
-type Settings = { theme: string; disabled_models: string[] }
+type Settings = { theme: string; disabled_models: string[]; theme_explicit?: boolean }
 type NotificationPrefs = { email_updates: boolean; team_mentions: boolean }
 type ApiKey = {
   id: number
@@ -127,6 +128,15 @@ async function requestJson(path: string, method: string, body: unknown) {
   })
 }
 
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ""))
+    reader.onerror = () => reject(reader.error || new Error("Could not read file"))
+    reader.readAsDataURL(file)
+  })
+}
+
 export default function SettingsPanel({
   onClose,
   onThemeChange,
@@ -195,7 +205,7 @@ export default function SettingsPanel({
   const effectiveSettings =
     settings ??
     ({
-      theme: (localStorage.getItem("se_theme") as "dark" | "light") || "dark",
+      theme: resolveThemePreference(),
       disabled_models: [],
     } satisfies Settings)
 
@@ -313,6 +323,27 @@ export default function SettingsPanel({
     setAccountBusy("avatar")
     try {
       await saveProfile({ avatar_url: avatarDraft.trim() }, "Avatar updated")
+    } finally {
+      setAccountBusy(null)
+    }
+  }
+
+  const uploadAvatarFile = async (file: File | null) => {
+    if (!file) return
+    if (!/^image\//i.test(file.type || "")) {
+      toast.warning("Please choose an image file")
+      return
+    }
+    setAccountBusy("avatar-upload")
+    try {
+      const dataUrl = await fileToDataUrl(file)
+      const response = await requestJson("/api/auth/avatar", "POST", { data_url: dataUrl })
+      const nextUser = (response?.user || null) as CurrentUser | null
+      if (nextUser) applyCurrentUser(nextUser)
+      if (response?.avatar_url) setAvatarDraft(String(response.avatar_url))
+      toast.success("Avatar uploaded")
+    } catch (error) {
+      toast.error(errMsg(error))
     } finally {
       setAccountBusy(null)
     }
@@ -460,7 +491,7 @@ export default function SettingsPanel({
       setSettings(previous => ({ ...(previous || effectiveSettings), ...patch }))
       if (patch.theme) {
         onThemeChange(patch.theme)
-        localStorage.setItem("se_theme", patch.theme)
+        persistThemeChoice(patch.theme as "dark" | "light")
       }
       toast.success("Gespeichert")
     } catch (error) {
@@ -1081,11 +1112,27 @@ export default function SettingsPanel({
                   <button
                     type="button"
                     className="draft-settings-action-button"
-                    disabled={accountBusy === "avatar"}
+                    disabled={accountBusy === "avatar" || accountBusy === "avatar-upload"}
                     onClick={() => void saveAvatar()}
                   >
                     {accountBusy === "avatar" ? "Saving..." : "Save avatar"}
                   </button>
+                </div>
+                <div className="draft-settings-input-row draft-settings-input-row--stack-mobile" style={{ marginTop: 10 }}>
+                  <input
+                    aria-label={t("Upload avatar image")}
+                    className="draft-settings-text-input"
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0] || null
+                      void uploadAvatarFile(file)
+                      event.currentTarget.value = ""
+                    }}
+                  />
+                  <div className="draft-settings-description" style={{ margin: 0, alignSelf: "center" }}>
+                    {accountBusy === "avatar-upload" ? "Uploading..." : "Choose an image to upload"}
+                  </div>
                 </div>
                 {avatarDraft ? (
                   <div className="draft-settings-list-card" style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 14 }}>

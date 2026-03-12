@@ -776,6 +776,10 @@ body[data-theme="light"] .pd-studio-result {
   width: 160px;
 }
 
+.pd-toolbar-select {
+  width: 148px;
+}
+
 .pd-filter-input::placeholder,
 .pd-field-input::placeholder,
 .pd-field-textarea::placeholder {
@@ -1693,6 +1697,51 @@ body[data-theme="light"] .pd-onboarding__card {
   text-align: center;
   color: var(--pd-text-2);
   padding: 24px;
+}
+
+.pd-project-activity {
+  margin-top: 18px;
+  border: 1px solid var(--pd-border-sub);
+  border-radius: 14px;
+  background: var(--pd-bg-2);
+  padding: 12px;
+}
+
+.pd-project-activity-head {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--pd-text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 8px;
+}
+
+.pd-project-activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.pd-project-activity-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--pd-border-sub);
+  border-radius: 10px;
+  background: var(--pd-bg-1);
+  padding: 8px 10px;
+}
+
+.pd-project-activity-item strong {
+  font-size: 11px;
+  color: var(--pd-text);
+}
+
+.pd-project-activity-item span {
+  font-size: 10px;
+  color: var(--pd-text-3);
 }
 
 .pd-card-skeleton {
@@ -3356,7 +3405,8 @@ textarea:focus-visible,
   }
 
   .pd-toolbar-search,
-  .pd-toolbar-search .pd-filter-input {
+  .pd-toolbar-search .pd-filter-input,
+  .pd-toolbar-select {
     width: 100%;
   }
 

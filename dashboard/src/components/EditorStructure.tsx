@@ -10,7 +10,7 @@ export const EditorStructure: React.FC<EditorStructureProps> = ({
   structureItems, moveStructureItem, titleCaseFallback 
 }) => (
   <section className="editor-panel__section">
-    <div className="editor-panel__label">Structure</div>
+    <h2 className="editor-panel__label">Structure</h2>
     <div className="editor-structure">
       {structureItems.length === 0 ? (
         <div className="editor-panel__note">Load a site to reorder motherblocks.</div>
@@ -23,10 +23,10 @@ export const EditorStructure: React.FC<EditorStructureProps> = ({
             </div>
           </div>
           <div className="editor-structure__actions">
-            <button className="editor-structure__move" onClick={() => moveStructureItem(item.rootId, -2)}>↑↑</button>
-            <button className="editor-structure__move" onClick={() => moveStructureItem(item.rootId, -1)}>↑</button>
-            <button className="editor-structure__move" onClick={() => moveStructureItem(item.rootId, 1)}>↓</button>
-            <button className="editor-structure__move" onClick={() => moveStructureItem(item.rootId, 2)}>↓↓</button>
+            <button className="editor-structure__move" type="button" onClick={() => moveStructureItem(item.rootId, -2)} aria-label={`Move ${item.displayLabel} to top`}>↑↑</button>
+            <button className="editor-structure__move" type="button" onClick={() => moveStructureItem(item.rootId, -1)} aria-label={`Move ${item.displayLabel} up`}>↑</button>
+            <button className="editor-structure__move" type="button" onClick={() => moveStructureItem(item.rootId, 1)} aria-label={`Move ${item.displayLabel} down`}>↓</button>
+            <button className="editor-structure__move" type="button" onClick={() => moveStructureItem(item.rootId, 2)} aria-label={`Move ${item.displayLabel} to bottom`}>↓↓</button>
           </div>
         </div>
       ))}

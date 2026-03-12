@@ -7,8 +7,10 @@ import { EditorSidebar } from "./components/EditorSidebar";
 import { EditorModals } from "./components/EditorModals";
 import {
   apiCreateProjectShare,
+  apiCreateProjectPage,
   apiCreatePublishPreview,
   apiCreateProjectVersion,
+  apiDeleteProjectPage,
   apiDeleteProjectShare,
   apiGetCustomDomainGuide,
   apiGetProject,
@@ -25,6 +27,7 @@ import {
   apiScanProjectPages,
   apiSaveProject,
   apiSetProjectWorkflowStage,
+  apiUpdateProjectPage,
   type ExportWarning,
   type PlatformGuide,
   type PublishDeployment,
@@ -269,6 +272,7 @@ export default function App() {
   const [projectPages, setProjectPages] = useState<ProjectPage[]>([])
   const [activePageId, setActivePageId] = useState<string | null>(null)
   const [scanningPages, setScanningPages] = useState(false)
+  const [savingPageMutation, setSavingPageMutation] = useState(false)
   const [selectedComponent, setSelectedComponent] = useState<string>("")
   
   const [undoHistory, setUndoHistory] = useState<string[]>([])
@@ -1597,6 +1601,109 @@ const autoSave = async (html: string) => {
     }
   }
 
+  const createManualProjectPage = async (payload: {
+    name: string
+    title?: string
+    path?: string
+    slug?: string
+    url?: string
+    html?: string
+    seo?: ProjectPage["seo"]
+  }) => {
+    if (!currentProject?.id) {
+      toast.warning("Open a saved project before adding pages")
+      return
+    }
+    setSavingPageMutation(true)
+    try {
+      const response = await apiCreateProjectPage(currentProject.id, payload)
+      const nextProject = response.project
+      const nextPages = nextProject.pages || []
+      const nextPage = response.page || nextPages[nextPages.length - 1] || null
+      setCurrentProject(nextProject)
+      setProjectPages(nextPages)
+      if (nextPage) {
+        applyProjectPage(nextProject, nextPage)
+      }
+      await loadWorkflowHistory(nextProject.id)
+      toast.success(`Page "${payload.name}" created`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Page creation failed")
+    } finally {
+      setSavingPageMutation(false)
+    }
+  }
+
+  const updateProjectPageMetadata = async (
+    pageId: string,
+    payload: {
+      name?: string
+      title?: string
+      path?: string
+      slug?: string
+      url?: string
+      html?: string
+      seo?: ProjectPage["seo"]
+    },
+  ) => {
+    if (!currentProject?.id) {
+      toast.warning("Open a saved project before editing page metadata")
+      return
+    }
+    setSavingPageMutation(true)
+    try {
+      const response = await apiUpdateProjectPage(currentProject.id, pageId, payload)
+      const nextProject = response.project
+      const nextPages = nextProject.pages || []
+      const updatedPage = response.page || nextPages.find((page) => page.id === pageId) || nextPages[0] || null
+      setCurrentProject(nextProject)
+      setProjectPages(nextPages)
+      if (updatedPage && activePageId === pageId) {
+        applyProjectPage(nextProject, updatedPage)
+      }
+      await loadWorkflowHistory(nextProject.id)
+      toast.success("Page metadata updated")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Page metadata update failed")
+    } finally {
+      setSavingPageMutation(false)
+    }
+  }
+
+  const deleteProjectPage = async (pageId: string) => {
+    if (!currentProject?.id) {
+      toast.warning("Open a saved project before deleting pages")
+      return
+    }
+    const page = projectPages.find((entry) => entry.id === pageId)
+    const confirmed = window.confirm(`Delete page "${page?.name || pageId}"?`)
+    if (!confirmed) return
+
+    setSavingPageMutation(true)
+    try {
+      const nextProject = await apiDeleteProjectPage(currentProject.id, pageId)
+      const nextPages = nextProject.pages || []
+      setCurrentProject(nextProject)
+      setProjectPages(nextPages)
+      if (activePageId === pageId) {
+        const nextActive = nextPages.find((entry) => entry.path === "/") || nextPages[0] || null
+        if (nextActive) {
+          applyProjectPage(nextProject, nextActive)
+        } else {
+          setActivePageId(null)
+          applyEditorHtml(nextProject.html || "", { resetHistory: true })
+          renderToIframe(nextProject.html || "")
+        }
+      }
+      await loadWorkflowHistory(nextProject.id)
+      toast.success("Page deleted")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Page deletion failed")
+    } finally {
+      setSavingPageMutation(false)
+    }
+  }
+
   const resetLoadedDocument = (nextUrl = "", nextPlatform: SitePlatform = "unknown") => {
     exitVersionPreview(false)
     clearVersionCompare()
@@ -2833,12 +2940,16 @@ useEffect(() => {
           projectPages={projectPages}
           activePageId={activePageId}
           scanningPages={scanningPages}
+          savingPageMutation={savingPageMutation}
           scanProjectPages={() => {
             if (currentProject) void scanProjectPages(currentProject)
           }}
           openProjectPage={(page) => {
             if (currentProject) void loadScannedProjectPage(currentProject, page)
           }}
+          createProjectPage={createManualProjectPage}
+          updateProjectPageMetadata={updateProjectPageMetadata}
+          deleteProjectPage={deleteProjectPage}
           versionPreview={versionPreview}
           previewVersionTitle={previewVersionTitle}
           versionMetaFor={versionMetaFor}

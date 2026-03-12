@@ -47,6 +47,15 @@ export type WorkflowEvent = {
   email?: string
 }
 
+export type ProjectActivityEntry = {
+  id: string
+  type: "workflow" | "version" | "export" | "share"
+  label: string
+  detail?: string
+  pageId?: string
+  created_at: string
+}
+
 export type ProjectAssignee = {
   email: string
   name?: string
@@ -249,6 +258,7 @@ type RestoreProjectVersionRes = {
   project?: Project
   version?: ProjectVersion
 }
+type ProjectActivityRes = { ok: boolean; error?: string; activity: ProjectActivityEntry[] }
 
 export async function apiGetProjects(): Promise<Project[]> {
   const d = await apiFetch<ProjectsRes>(`${BASE}/api/projects`)
@@ -428,6 +438,65 @@ export async function apiLoadProjectPage(id: number, pageId: string): Promise<Pa
   })
   if (!d?.ok) throw new Error((d as { error?: string })?.error || "Failed to load project page.")
   return d
+}
+
+export async function apiCreateProjectPage(
+  id: number,
+  payload: {
+    name: string
+    title?: string
+    path?: string
+    slug?: string
+    url?: string
+    html?: string
+    seo?: ProjectPageSeo
+  },
+): Promise<PageProjectRes> {
+  const d = await apiFetch<PageProjectRes>(`${BASE}/api/projects/${id}/pages`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  if (!d?.ok) throw new Error((d as { error?: string })?.error || "Failed to create page.")
+  return d
+}
+
+export async function apiUpdateProjectPage(
+  id: number,
+  pageId: string,
+  payload: {
+    id?: string
+    name?: string
+    title?: string
+    path?: string
+    slug?: string
+    url?: string
+    html?: string
+    seo?: ProjectPageSeo
+  },
+): Promise<PageProjectRes> {
+  const d = await apiFetch<PageProjectRes>(`${BASE}/api/projects/${id}/pages/${encodeURIComponent(pageId)}`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+  if (!d?.ok) throw new Error((d as { error?: string })?.error || "Failed to update page.")
+  return d
+}
+
+export async function apiDeleteProjectPage(id: number, pageId: string): Promise<Project> {
+  const d = await apiFetch<{ ok: boolean; error?: string; project: Project }>(
+    `${BASE}/api/projects/${id}/pages/${encodeURIComponent(pageId)}`,
+    { method: "DELETE" },
+  )
+  if (!d?.ok) throw new Error((d as { error?: string })?.error || "Failed to delete page.")
+  return d.project
+}
+
+export async function apiGetProjectActivity(id: number): Promise<ProjectActivityEntry[]> {
+  const d = await apiFetch<ProjectActivityRes>(`${BASE}/api/projects/${id}/activity`)
+  if (!d?.ok) throw new Error((d as { error?: string })?.error || "Failed to load project activity.")
+  return d.activity || []
 }
 
 export async function apiDeleteProject(id: number) {

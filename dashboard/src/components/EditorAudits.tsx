@@ -9,9 +9,10 @@ interface EditorAuditsProps {
 export const EditorAudits: React.FC<EditorAuditsProps> = ({ runEditorAudit, runningAudit, editorAudit }) => {
   return (
     <section className="editor-panel__section">
-      <div className="editor-panel__label">Audits</div>
+      <h2 className="editor-panel__label">Audits</h2>
       <div className="editor-panel__two-up">
         <button
+          type="button"
           className="editor-btn editor-btn--panel"
           onClick={() => void runEditorAudit("seo")}
           disabled={runningAudit !== null}
@@ -19,6 +20,7 @@ export const EditorAudits: React.FC<EditorAuditsProps> = ({ runEditorAudit, runn
           {runningAudit === "seo" ? "Running..." : "SEO"}
         </button>
         <button
+          type="button"
           className="editor-btn editor-btn--panel editor-btn--panel-muted"
           onClick={() => void runEditorAudit("cro")}
           disabled={runningAudit !== null}
@@ -27,6 +29,7 @@ export const EditorAudits: React.FC<EditorAuditsProps> = ({ runEditorAudit, runn
         </button>
       </div>
       <button
+        type="button"
         className="editor-btn editor-btn--panel editor-btn--panel-muted"
         onClick={() => void runEditorAudit("accessibility")}
         disabled={runningAudit !== null}
