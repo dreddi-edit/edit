@@ -1606,25 +1606,32 @@ const autoSave = async (html: string) => {
   }
 
   const load = async (forceReload = false, requestedUrl?: string) => {
-    const targetUrl = String(requestedUrl ?? url).trim();
-    if (!targetUrl) return;
-    if (!forceReload && loadedUrl === targetUrl && currentHtml) return;
+    const targetUrl = String(requestedUrl ?? url).trim()
+    if (!targetUrl) return
+    if (!forceReload && loadedUrl === targetUrl && currentHtml) return
     const requestId = ++loadRequestRef.current
+    resetLoadedDocument(targetUrl)
+    setStatus("blocked")
+
     try {
-      resetLoadedDocument(targetUrl)
-      try { setStatus("blocked");
-      const r = await fetchWithAuth(`${ENDPOINTS.proxy}?url=${encodeURIComponent(targetUrl)}`);
+      const r = await fetchWithAuth(`${ENDPOINTS.proxy}?url=${encodeURIComponent(targetUrl)}`)
       if (!r.ok) {
-        const text = await r.text();
-        let msg = "Page could not be loaded.";
-        try { const d = JSON.parse(text); if (d?.error) msg = d.error; } catch { /* ignore */ }
-        if (requestId !== loadRequestRef.current) return;
-        toast.error(msg);
-        setStatus("idle");
-        return;
+        const text = await r.text()
+        let msg = "Page could not be loaded."
+        try {
+          const d = JSON.parse(text)
+          if (d?.error) msg = d.error
+        } catch {
+          /* ignore */
+        }
+        if (requestId !== loadRequestRef.current) return
+        toast.error(msg)
+        setStatus("idle")
+        return
       }
-      const html = await r.text();
-      if (requestId !== loadRequestRef.current) return;
+
+      const html = await r.text()
+      if (requestId !== loadRequestRef.current) return
       if (!html.trim()) {
         throw new Error("The loaded page returned empty HTML.")
       }
@@ -1636,13 +1643,13 @@ const autoSave = async (html: string) => {
       applyEditorHtml(html, { resetHistory: true })
       setCurrentPlatform(detectedPlatform)
       renderToIframe(html)
-       
+      setStatus("ok")
     } catch (e) {
-      if (requestId !== loadRequestRef.current) return;
-      setStatus("idle");
-      toast.error(e instanceof Error ? e.message : "Page could not be loaded.");
+      if (requestId !== loadRequestRef.current) return
+      setStatus("idle")
+      toast.error(e instanceof Error ? e.message : "Page could not be loaded.")
     }
-  };
+  }
 
   const handleOpenProject = async (p: Project, initialPageId?: string | null) => {
     const project = await apiGetProject(p.id).catch(() => p)
@@ -1719,13 +1726,14 @@ const autoSave = async (html: string) => {
       toast.warning("Exit snapshot preview before editing")
       return
     }
-    if (mode === "view") { setMode("edit"); if (currentHtml)   }
-    else {
-      if (confirm("Änderungen speichern und zum View-Modus wechseln?")) {
-        setMode("view"); if (currentHtml)  
-      }
+    if (mode === "view") {
+      setMode("edit")
+      return
     }
-  };
+    if (window.confirm("Änderungen speichern und zum View-Modus wechseln?")) {
+      setMode("view")
+    }
+  }
 
   const handleExport = async (modeOverride?: ExportMode) => {
     if (versionPreview) {
@@ -2678,4 +2686,3 @@ useEffect(() => {
     </div>
   );
 };
-
