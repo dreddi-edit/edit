@@ -1,3 +1,5 @@
+import type { ProjectAsset as AssetEntry, ProjectPage } from "./api/projects";
+
 export const BLOCK_FILTER_OPTIONS: Array<{ value: BlockFilter; label: string }> = [
   { value: "all", label: "All blocks" },
   { value: "button", label: "Buttons" },

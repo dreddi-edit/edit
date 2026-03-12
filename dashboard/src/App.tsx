@@ -1,7 +1,7 @@
 import { Header } from "./components/Header";
 import { MainView } from "./components/MainView";
 import { AssistantContainer } from "./components/AssistantContainer";
-import { shortenText, sleep, isValidUrl, readSavedTheme, DEFAULT_CHROME_BACKGROUND, DEFAULT_CHROME_BORDER } from "./editorHelpers";
+import { shortenText, sleep, isValidUrl, readSavedTheme, DEFAULT_CHROME_BACKGROUND, DEFAULT_CHROME_BORDER, VIEWPORT_PRESETS, EXPORT_MODE_OPTIONS, WORKFLOW_STAGE_OPTIONS, PROJECT_VERSION_SOURCE_LABELS, DEFAULT_GLOBAL_STYLE_OVERRIDES, titleCaseFallback, formatEditorDateTime, pickEditorChromeFromDocument, getDownloadFilename, collectProjectAssets, mergeAssetLibraries, collectCssVariables, applyGlobalStylesToHtml, applyTranslationOverridesToHtml, getLanguageVariantEffectiveHtml, buildLocalAudit } from "./editorHelpers";
 import { calculateCost, processAIResponse } from "./assistantLogic";
 import { EditorView } from "./components/EditorView";
 import { useAdmin } from "./hooks/useAdmin";
@@ -190,7 +190,7 @@ export default function App() {
   const [publishingTarget, setPublishingTarget] = useState<PublishTarget | null>(null)
   const [rollingBackDeploymentId, setRollingBackDeploymentId] = useState<number | null>(null)
   const [versionCompare, setVersionCompare] = useState<ProjectVersionDetail | null>(null)
-  const [aiState, setAiState] = useState({ loading: false, prompt: "", model: "auto", tone: "neutral", running: false, batchRunning: false, diff: null, approvalQueue: [] })
+  const [aiState, setAiState] = useState({ loading: false, prompt: "", model: "auto", tone: "neutral", running: false, batchRunning: false, diff: null }); const [aiApprovalQueue, setAiApprovalQueue] = useState<AiApprovalItem[]>([])
   const [sessionCost, setSessionCost] = useState(0)
   const [sessionTokens, setSessionTokens] = useState({input: 0, output: 0})
   const [editorChrome, setEditorChrome] = useState({
@@ -1612,7 +1612,7 @@ const autoSave = async (html: string) => {
     const requestId = ++loadRequestRef.current
     try {
       resetLoadedDocument(targetUrl)
-      setStatus("blocked");
+      try { setStatus("blocked");
       const r = await fetchWithAuth(`${ENDPOINTS.proxy}?url=${encodeURIComponent(targetUrl)}`);
       if (!r.ok) {
         const text = await r.text();
@@ -1636,7 +1636,7 @@ const autoSave = async (html: string) => {
       applyEditorHtml(html, { resetHistory: true })
       setCurrentPlatform(detectedPlatform)
       renderToIframe(html)
-      setStatus("ok");
+      if (requestId === loadRequestRef.current) setStatus("ok"); else setStatus("idle"); }
     } catch (e) {
       if (requestId !== loadRequestRef.current) return;
       setStatus("idle");
@@ -1719,10 +1719,10 @@ const autoSave = async (html: string) => {
       toast.warning("Exit snapshot preview before editing")
       return
     }
-    if (mode === "view") { setMode("edit"); if (currentHtml) setStatus("ok"); }
+    if (mode === "view") { setMode("edit"); if (currentHtml) if (requestId === loadRequestRef.current) setStatus("ok"); else setStatus("idle"); } }
     else {
       if (confirm("Änderungen speichern und zum View-Modus wechseln?")) {
-        setMode("view"); if (currentHtml) setStatus("ok");
+        setMode("view"); if (currentHtml) if (requestId === loadRequestRef.current) setStatus("ok"); else setStatus("idle"); }
       }
     }
   };
@@ -2251,14 +2251,8 @@ useEffect(() => {
       }}>
         <span style={{ animation: "spin 0.8s linear infinite" }}>⟳</span>
         Laden…
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
       </div>
       <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
     </div>
   )
 
@@ -2315,109 +2309,63 @@ useEffect(() => {
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32 }}>
             <div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
               <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: -0.5 }}>Admin Console</div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
               <div style={{ fontSize: 12, color: "#475569", marginTop: 4 }}>{adminUsers.length} users · internal only</div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => setShowCreateUser(true)} style={{ height: 36, padding: "0 16px", borderRadius: 8, border: "1px solid #1e293b", background: "#0f172a", color: "white", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>+ New User</button>
               <button onClick={loadAdminUsers} style={{ height: 36, padding: "0 16px", borderRadius: 8, border: "1px solid #1e293b", background: "#0f172a", color: "#94a3b8", cursor: "pointer", fontSize: 13 }}>{adminLoading ? "Loading…" : t("↻ Refresh")}</button>
               <button onClick={() => setView("dashboard")} style={{ height: 36, padding: "0 16px", borderRadius: 8, border: "1px solid #1e293b", background: "#0f172a", color: "#94a3b8", cursor: "pointer", fontSize: 13 }}>← Back</button>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             </div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
           <div style={{ background: "#0d1525", border: "1px solid #1e293b", borderRadius: 14, overflow: "hidden" }}>
             <div style={{ display: "grid", gridTemplateColumns: "48px 1fr 140px 100px 100px 160px", padding: "10px 20px", background: "#0f172a", borderBottom: "1px solid #1e293b", fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: 0.8 }}>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
               <div>ID</div><div>User</div><div>Plan</div><div>Credits</div><div>Joined</div><div style={{ textAlign: "right" }}>Actions</div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             </div>
             {adminUsers.map((u: AdminUser) => {
               const plan = adminUserPlans[u.id] || "basis"
               const color = planColors[plan] || "#6366f1"
               return (
                 <div key={u.id} style={{ display: "grid", gridTemplateColumns: "48px 1fr 140px 100px 100px 160px", padding: "14px 20px", borderBottom: "1px solid #0f172a", alignItems: "center" }}>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
                   <div style={{ fontSize: 12, color: "#334155", fontWeight: 700 }}>#{u.id}</div>
                   <div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{u.email}</div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
                     <div style={{ fontSize: 11, color: "#475569", marginTop: 2 }}>{u.name || "—"}</div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
                   </div>
                   <div>
                     <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: `${color}18`, border: `1px solid ${color}40`, color }}>
                       {plan.charAt(0).toUpperCase() + plan.slice(1)}
                     </span>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
                   </div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
                   <div style={{ fontSize: 13, color: "#94a3b8" }}>€{Number(u.credits || 0).toFixed(2)}</div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
                   <div style={{ fontSize: 11, color: "#475569" }}>{(u.created_at || "").slice(0, 10)}</div>
                   <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                     <button onClick={() => addCredits(u.id, u.email)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #10b98130", background: "#10b98115", color: "#10b981", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Credits</button>
                     <button onClick={() => assignPlan(u.id, u.email)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #6366f130", background: "#6366f115", color: "#818cf8", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Plan</button>
                     <button onClick={() => resetPassword(u.id, u.email)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #f59e0b30", background: "#f59e0b15", color: "#fbbf24", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>PW</button>
                     <button onClick={() => deleteUser(u.id, u.email)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #ef444430", background: "#ef444415", color: "#f87171", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Del</button>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
                   </div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
                 </div>
               )
             })}
             {!adminLoading && adminUsers.length === 0 && (
               <div style={{ padding: 32, color: "#334155", textAlign: "center", fontSize: 13 }}>No users yet. Click Refresh.</div>
             )}
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
         </div>
         {showCreateUser && (
           <div style={{ position: "fixed", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
             <div style={{ background: "#0d1525", padding: 28, borderRadius: 14, border: "1px solid #1e293b", width: 400 }}>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
               <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 20 }}>Create User</div>
               {(["email","password","name"] as const).map(f => (<input key={f} placeholder={f} type={f==="password"?"password":"text"} value={newUser[f]} onChange={e => setNewUser(p => ({...p,[f]:e.target.value}))} style={{ display:"block", width:"100%", marginBottom:10, padding:"9px 12px", borderRadius:8, border:"1px solid #1e293b", background:"#060b14", color:"white", fontSize:13, boxSizing:"border-box" }} />))}
               <input placeholder={t("credits (€)")} type="number" value={newUser.credits} onChange={e => setNewUser(p => ({...p,credits:Number(e.target.value)}))} style={{ display:"block", width:"100%", marginBottom:16, padding:"9px 12px", borderRadius:8, border:"1px solid #1e293b", background:"#060b14", color:"white", fontSize:13, boxSizing:"border-box" }} />
               <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
                 <button onClick={() => setShowCreateUser(false)} style={{ padding:"8px 16px", borderRadius:8, border:"1px solid #1e293b", background:"transparent", color:"#94a3b8", cursor:"pointer", fontSize:13 }}>Cancel</button>
                 <button onClick={createUser} style={{ padding:"8px 16px", borderRadius:8, border:"none", background:"#6366f1", color:"white", cursor:"pointer", fontSize:13, fontWeight:700 }}>Create</button>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
               </div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             </div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
         )}
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
       </div>
     )
   }
@@ -2436,14 +2384,8 @@ useEffect(() => {
           </button>
 
           <div className="editor-toolbar__identity">
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             <div className="editor-toolbar__label">Site Editor</div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
         </div>
 
         <div className="editor-toolbar__divider" />
@@ -2464,11 +2406,7 @@ useEffect(() => {
             >
               {isLoading ? "..." : "Load"}
             </button>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
         </div>
 
         <div className="editor-toolbar__divider editor-toolbar__divider--hide-mobile" />
@@ -2481,8 +2419,6 @@ useEffect(() => {
               : status === "ok" && /^https?:\/\//i.test(loadedUrl || url)
               ? t("Online")
               : t("Offline")}
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
 
           <div
@@ -2496,8 +2432,6 @@ useEffect(() => {
           >
             <span className="editor-pill__dot" style={{ background: currentPlatformMeta.accent }} />
             {currentPlatformMeta.label}
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
 
           {currentProject && (
@@ -2528,8 +2462,6 @@ useEffect(() => {
             >
               <span className="editor-pill__dot" style={{ background: "#fbbf24" }} />
               Snapshot preview
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             </div>
           )}
 
@@ -2544,8 +2476,6 @@ useEffect(() => {
                 {VIEWPORT_PRESETS[preset].label}
               </button>
             ))}
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
 
           <button
@@ -2573,8 +2503,6 @@ useEffect(() => {
           >
             Redo
           </button>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
         </div>
 
         <div className="editor-toolbar__spacer" />
@@ -2595,8 +2523,6 @@ useEffect(() => {
               <span className="editor-cost-chip__sep" />
               <span>{sessionTokens.input.toLocaleString()} in</span>
               <span>{sessionTokens.output.toLocaleString()} out</span>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             </div>
           )}
 
@@ -2649,15 +2575,9 @@ useEffect(() => {
             >
               {exporting ? "Exporting..." : "Export"}
             </button>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
 
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
         </div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
       </div>
 
       <style>{`
@@ -2668,8 +2588,6 @@ useEffect(() => {
 
       <div className={`editor-progress ${isLoading ? "is-visible" : ""}`}>
         <div className="editor-progress__bar" />
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
       </div>
 
       {currentAiApproval && (
@@ -2691,25 +2609,13 @@ useEffect(() => {
         }}>
           <div style={{ fontSize:12, fontWeight:900, letterSpacing:0.3, color: theme === "light" ? "#111827" : "rgba(255,255,255,0.95)" }}>
             Cloud Request Approval
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
 
           <div style={{ display:"grid", gridTemplateColumns:"92px 1fr", gap:6, fontSize:12, color: theme === "light" ? "#334155" : "rgba(255,255,255,0.82)" }}>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             <div style={{ opacity:0.7 }}>Model</div><div style={{ fontWeight:700 }}>{currentAiApproval.model}</div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             <div style={{ opacity:0.7 }}>Scope</div><div style={{ fontWeight:700 }}>{currentAiApproval.scope}</div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             <div style={{ opacity:0.7 }}>Input est.</div><div style={{ fontWeight:700 }}>~{currentAiApproval.estInputTokens.toLocaleString()} tokens</div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
             <div style={{ opacity:0.7 }}>Output est.</div><div style={{ fontWeight:700 }}>~{currentAiApproval.estOutputTokens.toLocaleString()} tokens</div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
 
           <div style={{
@@ -2724,8 +2630,6 @@ useEffect(() => {
             overflow:"auto"
           }}>
             {currentAiApproval.prompt}
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
 
           <div style={{ display:"flex", gap:8, justifyContent:"flex-end" }}>
@@ -2768,17 +2672,9 @@ useEffect(() => {
             >
               Allow Cloud Request
             </button>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
           </div>
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
         </div>
       )}
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
-        <EditorModals aiDiff={aiDiff} theme={theme} acceptAiDiff={acceptAiDiff} rejectAiDiff={rejectAiDiff} buildDiffPreview={buildDiffPreview} isLoading={isLoading} />
-        <EditorSidebar isEditRailCollapsed={isEditRailCollapsed} setIsEditRailCollapsed={setIsEditRailCollapsed} currentPlatformMeta={currentPlatformMeta} handleAiRescan={handleAiRescan} aiState={aiState} setAiState={setAiState} setLeftAiPrompt={setLeftAiPrompt} AI_MODELS={AI_MODELS} leftAiRunning={leftAiRunning} batchAiRunning={batchAiRunning} runLeftAiPrompt={runLeftAiPrompt} runBatchAiAcrossPages={runBatchAiAcrossPages} />
     </div>
   );
 };

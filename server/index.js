@@ -632,7 +632,7 @@ app.post("/api/ai/analyze-and-rebuild", authMiddleware, aiRateLimit, async (req,
   }
 })
 
-app.get("/api/ai/ollama-health", async (_req, res) => {
+app.get("/api/ai/ollama-health", authMiddleware, async (_req, res) => {
   try {
     const result = await ollamaHealth()
     res.json({ ok: result.ok, models: result.models || [] })
