@@ -33,6 +33,7 @@ import {
 import { getTopActiveModelsByCategory } from "../utils/modelCatalog"
 import { buildAutoImportPayload, collectDroppedUploadItems, summarizeImportPreview } from "../utils/projectImport"
 import { useShortcuts } from "../hooks/useShortcuts"
+import { applyThemeToDocument, hasExplicitThemePreference, persistThemeChoice, resolveThemePreference } from "../utils/theme"
 import "./project-dashboard-dark.css"
 
 const BASE = ""
@@ -66,7 +67,7 @@ type AIStudioService = {
   actionLabel: string
   status: string
 }
-type SettingsSnapshot = { disabled_models: string[] }
+type SettingsSnapshot = { disabled_models: string[]; theme?: "dark" | "light"; theme_explicit?: boolean }
 type StudioAudit = {
   url: string
   scores: { performance: number; accessibility: number; seo: number; bestPractices: number }
@@ -98,7 +99,16 @@ type StudioToolMeta = {
   extraFieldPlaceholder?: string
   extraFieldPresets?: string[]
 }
-type SearchResult = { id: number; name: string; url: string; type: string; thumbnail?: string }
+type SearchResult = {
+  id: string | number
+  name: string
+  url: string
+  type: "project" | "page" | "template" | "export"
+  thumbnail?: string
+  subtitle?: string
+  projectId?: number
+  pageId?: string | null
+}
 type ReviewComment = {
   id: string
   block_id: string
@@ -844,6 +854,23 @@ function formatImportPathLabel(value: string) {
   return `${segments.slice(0, 2).join("/")}/.../${segments.at(-1)}`
 }
 
+function parseImportHeaderLines(value: string) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const separatorIndex = line.indexOf(":")
+      if (separatorIndex <= 0) return null
+      const key = line.slice(0, separatorIndex).trim()
+      const headerValue = line.slice(separatorIndex + 1).trim()
+      if (!key || !headerValue) return null
+      return { key, value: headerValue }
+    })
+    .filter((item): item is { key: string; value: string } => Boolean(item))
+    .slice(0, 12)
+}
+
 function plainTextFromHtml(html?: string | null) {
   return String(html || "")
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
@@ -979,6 +1006,15 @@ function gradientFromName(name: string) {
   const second = name.charCodeAt(1) || 65
   const hue = (first * 11 + second * 7) % 360
   return `linear-gradient(135deg, hsl(${hue}, 26%, 12%) 0%, hsl(${(hue + 22) % 360}, 28%, 8%) 100%)`
+}
+
+function activateOnEnterOrSpace(
+  event: { key: string; preventDefault: () => void },
+  action: () => void,
+) {
+  if (event.key !== "Enter" && event.key !== " ") return
+  event.preventDefault()
+  action()
 }
 
 function platformDistribution(projects: Project[]) {
@@ -1172,6 +1208,7 @@ function buildSpendBuckets(transactions: CreditTransaction[], range: SpendRange)
 
 function ProjectCard({
   project,
+  onOpen,
   onInspect,
   onDelete,
   onShare,
@@ -1181,6 +1218,7 @@ function ProjectCard({
   rt,
 }: {
   project: Project
+  onOpen: () => void
   onInspect: () => void
   onDelete: () => void
   onShare: () => void
@@ -1217,11 +1255,11 @@ function ProjectCard({
   return (
     <article
       className="pd-card"
-      onClick={onInspect}
-      onKeyDown={event => event.key === "Enter" && onInspect()}
+      onClick={onOpen}
+      onKeyDown={event => activateOnEnterOrSpace(event, onOpen)}
       tabIndex={0}
       role="button"
-      aria-label={`Inspect project ${displayName}`}
+      aria-label={`Open project ${displayName}`}
     >
       {approvalStatus !== "draft" ? (
         <div
@@ -1254,6 +1292,7 @@ function ProjectCard({
         {canDelete ? (
           <button
             className="pd-card-delete"
+            type="button"
             onClick={event => {
               event.stopPropagation()
               onDelete()
@@ -1291,10 +1330,21 @@ function ProjectCard({
             aria-label={rt("Open Project")}
             onClick={(event) => {
               event.stopPropagation()
-              onInspect()
+              onOpen()
             }}
           >
             {rt("Open")}
+          </button>
+          <button
+            className="pd-card-btn"
+            type="button"
+            aria-label={rt("Browse project pages")}
+            onClick={(event) => {
+              event.stopPropagation()
+              onInspect()
+            }}
+          >
+            {rt("Pages")}
           </button>
           <button
             className="pd-card-btn"
@@ -1355,7 +1405,7 @@ function ProjectPageTreeBranch({
           <span>{page?.path || node.key.replace(/^__root__$/, "/")}</span>
         </div>
         {page ? (
-          <button className="pd-page-open-btn" onClick={() => onOpenPage(page.id)}>
+          <button className="pd-page-open-btn" type="button" onClick={() => onOpenPage(page.id)}>
             Open
           </button>
         ) : null}
@@ -1398,13 +1448,19 @@ function ProjectExplorerModal({
 
   return (
     <div className="pd-modal-backdrop" onClick={onClose}>
-      <div className="pd-modal pd-modal-wide pd-project-explorer" onClick={(event) => event.stopPropagation()}>
+      <div
+        className="pd-modal pd-modal-wide pd-project-explorer"
+        role="dialog"
+        aria-modal="true"
+        aria-label={rt("Project pages")}
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="pd-modal-header">
           <div>
             <div className="pd-modal-eyebrow">{rt("Project pages")}</div>
             <div className="pd-modal-title">{displayName}</div>
           </div>
-          <button className="pd-modal-close" onClick={onClose} aria-label={rt("Close")}>X</button>
+          <button className="pd-modal-close" type="button" onClick={onClose} aria-label={rt("Close")}>X</button>
         </div>
         <div className="pd-modal-body">
           <div className="pd-project-explorer__hero">
@@ -1417,20 +1473,22 @@ function ProjectExplorerModal({
             <div className="pd-project-explorer__actions">
               <button
                 className={`pd-segment-btn ${view === "grid" ? "is-active" : ""}`}
+                type="button"
                 onClick={() => onChangeView("grid")}
               >
                 {rt("Grid")}
               </button>
               <button
                 className={`pd-segment-btn ${view === "tree" ? "is-active" : ""}`}
+                type="button"
                 onClick={() => onChangeView("tree")}
               >
                 {rt("Smart tree")}
               </button>
-              <button className="pd-btn" onClick={onRescan} disabled={scanning}>
+              <button className="pd-btn" type="button" onClick={onRescan} disabled={scanning}>
                 {scanning ? rt("Scanning...") : pages.length ? rt("Rescan pages") : rt("Scan pages")}
               </button>
-              <button className="pd-btn pd-btn-primary" onClick={onOpenHome}>
+              <button className="pd-btn pd-btn-primary" type="button" onClick={onOpenHome}>
                 {rt("Open homepage")}
               </button>
             </div>
@@ -1440,7 +1498,7 @@ function ProjectExplorerModal({
             view === "grid" ? (
               <div className="pd-page-grid">
                 {pages.map((page) => (
-                  <button key={page.id} className="pd-page-card" onClick={() => onOpenPage(page.id)}>
+                  <button key={page.id} className="pd-page-card" type="button" onClick={() => onOpenPage(page.id)}>
                     <div className="pd-page-card-title">{page.title || page.name}</div>
                     <div className="pd-page-card-path">{page.path}</div>
                     <div className="pd-page-card-state">{page.html ? rt("Saved page") : rt("Load and open")}</div>
@@ -1605,7 +1663,7 @@ function TemplateCard({
     <article
       className="pd-card"
       onClick={onUse}
-      onKeyDown={event => event.key === "Enter" && onUse()}
+      onKeyDown={event => activateOnEnterOrSpace(event, onUse)}
       tabIndex={0}
       role="button"
       aria-label={`Use template ${template.name}`}
@@ -1625,6 +1683,7 @@ function TemplateCard({
         ) : null}
         <button
           className="pd-card-delete"
+          type="button"
           onClick={event => {
             event.stopPropagation()
             onDelete()
@@ -1668,7 +1727,7 @@ function ExportCard({
     <article
       className="pd-card"
       onClick={onDownload}
-      onKeyDown={event => event.key === "Enter" && onDownload()}
+      onKeyDown={event => activateOnEnterOrSpace(event, onDownload)}
       tabIndex={0}
       role="button"
       aria-label={`${rt("Download export for")} ${project.name}`}
@@ -1688,6 +1747,7 @@ function ExportCard({
         ) : null}
         <button
           className="pd-card-delete pd-card-action"
+          type="button"
           onClick={event => {
             event.stopPropagation()
             onDownload()
@@ -1782,9 +1842,7 @@ export default function ProjectDashboard({
   const [loading, setLoading] = useState(true)
   const [balance, setBalance] = useState<number | null>(null)
   const [plan, setPlan] = useState<Plan>(currentPlan || "basis")
-  const [theme, setTheme] = useState<"dark" | "light">(
-    (localStorage.getItem("se_theme") as "dark" | "light") || "dark"
-  )
+  const [theme, setTheme] = useState<"dark" | "light">(resolveThemePreference)
   const [stageFilter, setStageFilter] = useState<DashboardStage>("all")
   const [templateFilter, setTemplateFilter] = useState<TemplateFilter>("all")
   const [exportFilter, setExportFilter] = useState<ExportFilter>("all")
@@ -1834,6 +1892,11 @@ export default function ProjectDashboard({
   const [newImportSummary, setNewImportSummary] = useState("")
   const [newImportAnalysis, setNewImportAnalysis] = useState<ProjectImportAnalysis | null>(null)
   const [newImportMode, setNewImportMode] = useState<ProjectImportMode>("crawl")
+  const [newImportShowAuth, setNewImportShowAuth] = useState(false)
+  const [newImportBasicUser, setNewImportBasicUser] = useState("")
+  const [newImportBasicPass, setNewImportBasicPass] = useState("")
+  const [newImportCookie, setNewImportCookie] = useState("")
+  const [newImportHeaders, setNewImportHeaders] = useState("")
   const [newImporting, setNewImporting] = useState(false)
   const [newImportDragActive, setNewImportDragActive] = useState(false)
   const [landingName, setLandingName] = useState("")
@@ -1851,6 +1914,7 @@ export default function ProjectDashboard({
   const [loadingAssignableMembers, setLoadingAssignableMembers] = useState(false)
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
+  const [searchActiveIndex, setSearchActiveIndex] = useState(0)
   const [reviewPanelProjectId, setReviewPanelProjectId] = useState<number | null>(null)
   const [reviewComments, setReviewComments] = useState<ReviewComment[]>([])
   const [studioRuns, setStudioRuns] = useState<StudioRun[]>([])
@@ -1933,9 +1997,16 @@ export default function ProjectDashboard({
   }, [projects])
 
   useEffect(() => {
-    localStorage.setItem("se_theme", theme)
-    document.body.setAttribute("data-theme", theme)
+    applyThemeToDocument(theme)
   }, [theme])
+
+  useEffect(() => {
+    const syncTheme = () => setTheme(resolveThemePreference())
+    syncTheme()
+    const observer = new MutationObserver(syncTheme)
+    observer.observe(document.body, { attributes: true, attributeFilter: ["data-theme"] })
+    return () => observer.disconnect()
+  }, [])
 
   useEffect(() => {
     if (currentPlan && currentPlan !== plan) {
@@ -1981,6 +2052,13 @@ export default function ProjectDashboard({
       })
       .catch((error) => toast.error(errMsg(error)))
   }, [reviewPanelProjectId])
+
+  useEffect(() => {
+    setSearchActiveIndex((previous) => {
+      if (!searchResults.length) return 0
+      return Math.min(previous, searchResults.length - 1)
+    })
+  }, [searchResults])
 
   const currentPlanMeta = PLAN_META[plan]
   const unlockedStudioServices = AI_STUDIO_SERVICES.filter(service => hasStudioAccess(plan, service.id))
@@ -2167,6 +2245,7 @@ export default function ProjectDashboard({
       key: "k",
       modifiers: ["meta"],
       handler: () => {
+        setCommandPaletteOpen(false)
         document.getElementById("pd-global-search-input")?.focus()
       },
     },
@@ -2174,10 +2253,39 @@ export default function ProjectDashboard({
       key: "k",
       modifiers: ["ctrl"],
       handler: () => {
+        setCommandPaletteOpen(false)
         document.getElementById("pd-global-search-input")?.focus()
       },
     },
     {
+      key: "p",
+      modifiers: ["meta", "shift"],
+      handler: () => {
+        setCommandPaletteOpen(true)
+      },
+    },
+    {
+      key: "p",
+      modifiers: ["ctrl", "shift"],
+      handler: () => {
+        setCommandPaletteOpen(true)
+      },
+    },
+    {
+      key: "n",
+      modifiers: ["meta"],
+      handler: () => {
+        setShowNewProject(true)
+      },
+    },
+    {
+      key: "n",
+      modifiers: ["ctrl"],
+      handler: () => {
+        setShowNewProject(true)
+      },
+    },
+    {
       key: "/",
       modifiers: ["meta"],
       handler: () => {
@@ -2192,29 +2300,61 @@ export default function ProjectDashboard({
       },
     },
     {
-      key: "p",
+      key: "1",
       modifiers: ["meta"],
-      handler: () => {
-        if (projectExplorerId || normalizedProjects[0]?.id) {
-          setActiveWorkspace("exports")
-        }
-      },
+      handler: () => setActiveWorkspace("projects"),
     },
     {
-      key: "p",
+      key: "2",
+      modifiers: ["meta"],
+      handler: () => setActiveWorkspace("templates"),
+    },
+    {
+      key: "3",
+      modifiers: ["meta"],
+      handler: () => setActiveWorkspace("exports"),
+    },
+    {
+      key: "4",
+      modifiers: ["meta"],
+      handler: () => setActiveWorkspace("ai-studio"),
+    },
+    {
+      key: "1",
       modifiers: ["ctrl"],
-      handler: () => {
-        if (projectExplorerId || normalizedProjects[0]?.id) {
-          setActiveWorkspace("exports")
-        }
-      },
+      handler: () => setActiveWorkspace("projects"),
+    },
+    {
+      key: "2",
+      modifiers: ["ctrl"],
+      handler: () => setActiveWorkspace("templates"),
+    },
+    {
+      key: "3",
+      modifiers: ["ctrl"],
+      handler: () => setActiveWorkspace("exports"),
+    },
+    {
+      key: "4",
+      modifiers: ["ctrl"],
+      handler: () => setActiveWorkspace("ai-studio"),
+    },
+    {
+      key: ",",
+      modifiers: ["meta"],
+      handler: () => setShowSettings(true),
+    },
+    {
+      key: ",",
+      modifiers: ["ctrl"],
+      handler: () => setShowSettings(true),
     },
     {
       key: "Escape",
       allowInInput: true,
       handler: () => {
         setReviewPanelProjectId(null)
-        setSearchResults([])
+        closeSearchResults()
         setCommandPaletteOpen(false)
         setShortcutsOpen(false)
       },
@@ -2235,6 +2375,11 @@ export default function ProjectDashboard({
     setNewImportSummary("")
     setNewImportAnalysis(null)
     setNewImportMode("crawl")
+    setNewImportShowAuth(false)
+    setNewImportBasicUser("")
+    setNewImportBasicPass("")
+    setNewImportCookie("")
+    setNewImportHeaders("")
     setNewImportDragActive(false)
     uploadDragDepthRef.current = 0
     if (uploadInputRef.current) uploadInputRef.current.value = ""
@@ -2545,12 +2690,24 @@ export default function ProjectDashboard({
       toast.warning(rt("Enter a website URL first."))
       return
     }
+    const headers = parseImportHeaderLines(newImportHeaders)
+    const requestOverrides = {
+      basicAuth: newImportBasicUser.trim()
+        ? {
+            username: newImportBasicUser.trim(),
+            password: newImportBasicPass,
+          }
+        : undefined,
+      cookie: newImportCookie.trim() || undefined,
+      headers: headers.length ? headers : undefined,
+    }
     setNewImporting(true)
     try {
       const preview = await apiPreviewProjectImport({
         kind: "url",
         url: newUrl.trim(),
         mode: newImportMode,
+        requestOverrides,
       })
       applyImportPreview(preview)
       toast.success(preview.summary || rt("Website imported"))
@@ -2660,10 +2817,21 @@ export default function ProjectDashboard({
       if (creditTransactions.ok) setTransactions(creditTransactions.transactions ?? [])
       if (settingsData?.settings) {
         setSettingsSnapshot({
+          theme: settingsData.settings.theme,
+          theme_explicit: Boolean(settingsData.settings.theme_explicit),
           disabled_models: Array.isArray(settingsData.settings.disabled_models)
             ? settingsData.settings.disabled_models
             : [],
         })
+        if (
+          settingsData.settings.theme_explicit &&
+          (settingsData.settings.theme === "dark" || settingsData.settings.theme === "light")
+        ) {
+          persistThemeChoice(settingsData.settings.theme)
+          setTheme(settingsData.settings.theme)
+        } else if (!hasExplicitThemePreference()) {
+          setTheme(resolveThemePreference())
+        }
       }
       await loadTemplates()
     } catch (error) {
@@ -2676,6 +2844,48 @@ export default function ProjectDashboard({
   const handleOpenProject = (project: Project, pageId?: string | null) => {
     updateChecklist("load", true)
     onOpen(project, pageId)
+  }
+
+  const closeSearchResults = () => {
+    setSearchResults([])
+    setSearchLoading(false)
+    setSearchActiveIndex(0)
+  }
+
+  const handleSearchResultSelect = (result: SearchResult) => {
+    closeSearchResults()
+
+    if (result.type === "page" && result.projectId) {
+      const project = normalizedProjects.find((entry) => entry.id === result.projectId)
+      if (project) {
+        handleOpenProject(project, result.pageId || null)
+        return
+      }
+    }
+
+    if (result.type === "project" && result.projectId) {
+      const project = normalizedProjects.find((entry) => entry.id === result.projectId)
+      if (project) {
+        handleOpenProject(project)
+        return
+      }
+    }
+
+    if (result.type === "template") {
+      setActiveWorkspace("templates")
+      setProjectSearch(result.name)
+      return
+    }
+
+    if (result.type === "export") {
+      setActiveWorkspace("exports")
+      setProjectSearch(result.name.replace(/\s+export$/i, ""))
+      return
+    }
+
+    if (result.projectId) {
+      setProjectExplorerId(result.projectId)
+    }
   }
 
   const openProjectExplorer = (project: Project) => {
@@ -3002,6 +3212,31 @@ export default function ProjectDashboard({
 
   const dashboardModelGroups = getTopActiveModelsByCategory(settingsSnapshot.disabled_models, 3)
     .filter(group => group.models.length > 0)
+  const activeSearchResult = searchResults[searchActiveIndex] || null
+  const searchDropdownId = "pd-global-search-results"
+  const dashboardShortcutSections = [
+    {
+      title: "Workspace",
+      items: [
+        { keys: "⌘K", desc: "Focus global search" },
+        { keys: "⌘⇧P", desc: "Open command palette" },
+        { keys: "⌘1", desc: "Go to Projects" },
+        { keys: "⌘2", desc: "Go to Templates" },
+        { keys: "⌘3", desc: "Go to Exports" },
+        { keys: "⌘4", desc: "Go to AI Studio" },
+      ],
+    },
+    {
+      title: "Actions",
+      items: [
+        { keys: "⌘N", desc: "Create a new project" },
+        { keys: "⌘,", desc: "Open settings" },
+        { keys: "⌘/", desc: "Open assistant" },
+        { keys: "?", desc: "Show keyboard shortcuts" },
+        { keys: "Esc", desc: "Close search or modal" },
+      ],
+    },
+  ]
 
   return (
     <div className="pd-shell">
@@ -3052,6 +3287,9 @@ export default function ProjectDashboard({
 
           <div className="pd-divider" />
 
+          <button className="pd-btn" type="button" onClick={() => setShortcutsOpen(true)} aria-label={rt("Show keyboard shortcuts")}>
+            ?
+          </button>
           <button className="pd-btn" type="button" onClick={() => setShowSettings(true)}>{rt("Settings")}</button>
           <button
             className="pd-btn"
@@ -3063,20 +3301,27 @@ export default function ProjectDashboard({
           >
             {rt("Invite")}
           </button>
-          <button className="pd-btn" type="button" onClick={logout} title={rt("Sign out")}>
+          <button
+            className="pd-btn"
+            type="button"
+            onClick={() => setShowSettings(true)}
+            title={rt("Open account settings")}
+            aria-label={rt("Open account settings")}
+          >
             {(user.email || "account").replace(/(.{12}).+/, "$1...")} v
           </button>
         </div>
       </header>
 
       <div className="pd-body">
-        <aside className="pd-sidebar">
+        <aside className="pd-sidebar" aria-label={rt("Workspace navigation")}>
           <div className="pd-sidebar-section">{rt("Workspace")}</div>
           <div className="pd-scroll-box">
             <button
               className={`pd-sidebar-item ${activeWorkspace === "ai-studio" ? "is-active" : ""}`}
               type="button"
               onClick={() => setActiveWorkspace("ai-studio")}
+              aria-pressed={activeWorkspace === "ai-studio"}
             >
               <span className="pd-sidebar-icon">AI</span>
               {rt("AI Studio")}
@@ -3086,6 +3331,7 @@ export default function ProjectDashboard({
               className={`pd-sidebar-item ${activeWorkspace === "projects" ? "is-active" : ""}`}
               type="button"
               onClick={() => setActiveWorkspace("projects")}
+              aria-pressed={activeWorkspace === "projects"}
             >
               <span className="pd-sidebar-icon">[]</span>
               {rt("Projects")}
@@ -3095,6 +3341,7 @@ export default function ProjectDashboard({
               className={`pd-sidebar-item ${activeWorkspace === "templates" ? "is-active" : ""}`}
               type="button"
               onClick={() => setActiveWorkspace("templates")}
+              aria-pressed={activeWorkspace === "templates"}
             >
               <span className="pd-sidebar-icon">[]</span>
               {rt("Templates")}
@@ -3104,6 +3351,7 @@ export default function ProjectDashboard({
               className={`pd-sidebar-item ${activeWorkspace === "exports" ? "is-active" : ""}`}
               type="button"
               onClick={openExports}
+              aria-pressed={activeWorkspace === "exports"}
             >
               <span className="pd-sidebar-icon">D</span>
               {rt("Exports")}
@@ -3204,30 +3452,62 @@ export default function ProjectDashboard({
             ))}
           </div>
 
-          <div className="pd-toolbar" role="search" aria-label="Global Dashboard Toolbar">
-            <nav className="pd-breadcrumbs" aria-label="Breadcrumb">
+          <div className="pd-toolbar" role="region" aria-label={rt("Workspace toolbar")}>
+            <nav className="pd-breadcrumbs" aria-label={rt("Workspace breadcrumb")}>
               <span className="pd-breadcrumb-item">{rt("Workspace")}</span>
               <span className="pd-breadcrumb-sep" aria-hidden="true"> / </span>
               <span className="pd-breadcrumb-item pd-breadcrumb-current" aria-current="page">
                 {workspaceTitle}
               </span>
             </nav>
-            <span className="pd-toolbar-title">{workspaceTitle}</span>
+            <span className="pd-toolbar-title" id="pd-workspace-title">{workspaceTitle}</span>
             <span className="pd-toolbar-count">{activeItemsCount} {rt("items")}</span>
             <div className="pd-toolbar-spacer" />
-            <div className="pd-toolbar-search">
+            <div className="pd-toolbar-search" role="search" aria-label={rt("Global search")}>
               <input
                 id="pd-global-search-input"
                 className="pd-filter-input"
-                placeholder={rt("Search projects… (⌘K)")}
-                aria-label={rt("Search all projects and files")}
+                placeholder={rt("Search projects, pages, templates… (⌘K)")}
+                aria-label={rt("Search projects, pages, templates, and exports")}
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded={searchResults.length > 0 || searchLoading}
+                aria-controls={searchDropdownId}
+                aria-activedescendant={activeSearchResult ? `pd-search-result-${activeSearchResult.type}-${activeSearchResult.id}` : undefined}
+                aria-describedby="pd-workspace-title"
                 value={projectSearch}
+                onKeyDown={(event) => {
+                  if (!searchResults.length) {
+                    if (event.key === "Escape") closeSearchResults()
+                    return
+                  }
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault()
+                    setSearchActiveIndex((previous) => Math.min(previous + 1, searchResults.length - 1))
+                    return
+                  }
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault()
+                    setSearchActiveIndex((previous) => Math.max(previous - 1, 0))
+                    return
+                  }
+                  if (event.key === "Enter") {
+                    event.preventDefault()
+                    if (activeSearchResult) handleSearchResultSelect(activeSearchResult)
+                    return
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault()
+                    closeSearchResults()
+                  }
+                }}
                 onChange={(event) => {
                   const value = event.target.value
                   setProjectSearch(value)
                   const query = value.trim()
                   if (query.length >= 2) {
                     setSearchLoading(true)
+                    setSearchActiveIndex(0)
                     void apiFetch<{ ok: boolean; results: SearchResult[] }>(`/api/search?q=${encodeURIComponent(query)}`)
                       .then((response) => {
                         if (response?.ok) setSearchResults(response.results || [])
@@ -3241,23 +3521,25 @@ export default function ProjectDashboard({
                 }}
               />
               {searchResults.length > 0 || searchLoading ? (
-                <div className="pd-search-dropdown" role="listbox" aria-label="Search results">
+                <div className="pd-search-dropdown" id={searchDropdownId} role="listbox" aria-label="Search results">
                   {searchLoading ? <div className="pd-search-empty">{rt("Searching...")}</div> : null}
-                  {searchResults.map((result) => (
+                  {searchResults.map((result, index) => (
                     <button
                       key={`${result.type}-${result.id}`}
+                      id={`pd-search-result-${result.type}-${result.id}`}
                       type="button"
                       role="option"
-                      aria-selected="false"
-                      className="pd-search-result-item"
-                      onClick={() => {
-                        setProjectSearch("")
-                        setSearchResults([])
-                        setProjectExplorerId(result.id)
-                      }}
+                      aria-selected={searchActiveIndex === index}
+                      aria-label={`${result.type}: ${result.name}`}
+                      className={`pd-search-result-item ${searchActiveIndex === index ? "is-active" : ""}`}
+                      onMouseEnter={() => setSearchActiveIndex(index)}
+                      onClick={() => handleSearchResultSelect(result)}
                     >
-                      <span className="pd-search-result-name">{result.name}</span>
-                      <span className="pd-search-result-url">{result.url}</span>
+                      <div className="pd-search-result-head">
+                        <span className={`pd-search-result-type pd-search-result-type--${result.type}`}>{result.type}</span>
+                        <span className="pd-search-result-name">{result.name}</span>
+                      </div>
+                      <span className="pd-search-result-url">{result.subtitle || result.url}</span>
                     </button>
                   ))}
                 </div>
@@ -3393,6 +3675,7 @@ export default function ProjectDashboard({
                   className="pd-note-input"
                   value={newNote}
                   onChange={event => setNewNote(event.target.value)}
+                  aria-label={rt("Add note")}
                   onKeyDown={event => {
                     if (event.key === "Enter") {
                       event.preventDefault()
@@ -3570,6 +3853,7 @@ export default function ProjectDashboard({
                     rt={rt}
                     currentUserId={user.id}
                     currentUserEmail={user.email}
+                    onOpen={() => handleOpenProject(project)}
                     onInspect={() => openProjectExplorer(project)}
                     onShare={() => void copyClientShareLink(project)}
                     onReview={() => setReviewPanelProjectId(project.id)}
@@ -3832,7 +4116,13 @@ export default function ProjectDashboard({
         theme={theme}
       />
 
-      <KeyboardShortcuts open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} theme={theme} />
+      <KeyboardShortcuts
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+        theme={theme}
+        title={rt("Keyboard shortcuts")}
+        sections={dashboardShortcutSections}
+      />
       {showCredits ? <CreditsPanel onClose={() => { setShowCredits(false); loadDashboard() }} /> : null}
       {showSettings ? (
         <SettingsPanel
@@ -4244,6 +4534,60 @@ export default function ProjectDashboard({
                       {newImporting ? rt("Importing...") : rt("Import website")}
                     </button>
                   </div>
+                  <div className="pd-import-auth-toggle">
+                    <button
+                      className="pd-btn"
+                      type="button"
+                      onClick={() => setNewImportShowAuth((value) => !value)}
+                    >
+                      {newImportShowAuth ? rt("Hide auth/headers") : rt("Use auth, cookie, or headers")}
+                    </button>
+                  </div>
+                  {newImportShowAuth ? (
+                    <div className="pd-import-auth-grid">
+                      <label className="pd-field-label">
+                        {rt("Basic auth username")}
+                        <input
+                          className="pd-field-input"
+                          value={newImportBasicUser}
+                          onChange={event => setNewImportBasicUser(event.target.value)}
+                          placeholder={rt("Optional")}
+                          autoComplete="off"
+                        />
+                      </label>
+                      <label className="pd-field-label">
+                        {rt("Basic auth password")}
+                        <input
+                          className="pd-field-input"
+                          type="password"
+                          value={newImportBasicPass}
+                          onChange={event => setNewImportBasicPass(event.target.value)}
+                          placeholder={rt("Optional")}
+                          autoComplete="new-password"
+                        />
+                      </label>
+                      <label className="pd-field-label pd-field-label-full">
+                        {rt("Cookie header")}
+                        <textarea
+                          className="pd-field-textarea"
+                          rows={2}
+                          value={newImportCookie}
+                          onChange={event => setNewImportCookie(event.target.value)}
+                          placeholder="session=...; csrftoken=..."
+                        />
+                      </label>
+                      <label className="pd-field-label pd-field-label-full">
+                        {rt("Custom headers (one per line)")}
+                        <textarea
+                          className="pd-field-textarea"
+                          rows={3}
+                          value={newImportHeaders}
+                          onChange={event => setNewImportHeaders(event.target.value)}
+                          placeholder={"X-Env: staging\nX-API-Key: ..."}
+                        />
+                      </label>
+                    </div>
+                  ) : null}
                   <div
                     className={`pd-import-dropzone${newImportDragActive ? " is-dragging" : ""}`}
                     onClick={() => uploadInputRef.current?.click()}
@@ -4365,6 +4709,45 @@ export default function ProjectDashboard({
                                 <span>{rt("No support files detected")}</span>
                               )}
                             </div>
+                            <div className="pd-import-analysis-card">
+                              <span className="pd-import-analysis-label">{rt("Navigation model")}</span>
+                              <strong>
+                                {(newImportAnalysis.navStructure?.primary?.length || 0)} {rt("primary")} · {(newImportAnalysis.navStructure?.footer?.length || 0)} {rt("footer")}
+                              </strong>
+                              {(newImportAnalysis.navStructure?.primary?.length || 0) > 0 ? (
+                                <ul>
+                                  {newImportAnalysis.navStructure?.primary?.slice(0, 3).map((item) => (
+                                    <li key={`${item.label}:${item.href}`}>{item.label}</li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <span>{rt("No nav links modeled")}</span>
+                              )}
+                            </div>
+                            <div className="pd-import-analysis-card">
+                              <span className="pd-import-analysis-label">{rt("Repeated sections")}</span>
+                              {newImportAnalysis.repeatedSections?.length ? (
+                                <ul>
+                                  {newImportAnalysis.repeatedSections.slice(0, 4).map((entry) => (
+                                    <li key={entry.signature}>{entry.label} · {entry.count}x</li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <span>{rt("No repeated section clusters yet")}</span>
+                              )}
+                            </div>
+                            <div className="pd-import-analysis-card">
+                              <span className="pd-import-analysis-label">{rt("Forms and CTAs")}</span>
+                              <strong>{newImportAnalysis.formsCount || 0} {rt("forms")} · {newImportAnalysis.ctaCount || 0} {rt("ctas")}</strong>
+                              <span>{rt("Actions normalized and CTA markers kept in imported HTML.")}</span>
+                            </div>
+                            <div className="pd-import-analysis-card">
+                              <span className="pd-import-analysis-label">{rt("Fidelity / SEO")}</span>
+                              <strong>{newImportAnalysis.fidelityScore ?? 0}/100</strong>
+                              <span>
+                                {(newImportAnalysis.seoCoverage?.withTitle || 0)}/{newImportAnalysis.seoCoverage?.total || 0} {rt("titles")} · {(newImportAnalysis.seoCoverage?.withDescription || 0)} {rt("descriptions")}
+                              </span>
+                            </div>
                           </div>
                           {newImportAnalysis.warnings.length ? (
                             <div className="pd-import-analysis-warnings">
@@ -4388,6 +4771,10 @@ export default function ProjectDashboard({
                           setNewUploadName("")
                           setNewImportSummary("")
                           setNewImportAnalysis(null)
+                          setNewImportBasicUser("")
+                          setNewImportBasicPass("")
+                          setNewImportCookie("")
+                          setNewImportHeaders("")
                           setNewImportDragActive(false)
                           uploadDragDepthRef.current = 0
                           if (uploadInputRef.current) uploadInputRef.current.value = ""
@@ -4399,7 +4786,7 @@ export default function ProjectDashboard({
                     </div>
                   ) : null}
                   <span className="pd-field-hint">
-                    {rt("Easy imports now support live URL crawl, sitemap.xml, ZIP websites, folders, HTML, SVG, Markdown, DOCX, PDF briefs, screenshots, and asset libraries.")}
+                    {rt("Easy imports now support live URL crawl, sitemap.xml, basic-auth/cookie/header injection, ZIP websites, folders, Figma frame exports, HTML, SVG, Markdown, DOCX, PDF briefs, screenshots, and asset libraries.")}
                   </span>
                 </div>
                 <div className="pd-field-label pd-field-label-full">

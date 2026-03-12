@@ -84,6 +84,29 @@ export type ProjectLanguageVariant = {
   segments?: ProjectTranslationSegment[]
 }
 
+export type ProjectPageSeo = {
+  title?: string
+  description?: string
+  canonical?: string
+  robots?: string
+  og?: Record<string, string>
+}
+
+export type ProjectPageSemanticLink = {
+  label: string
+  href: string
+}
+
+export type ProjectPageSemantic = {
+  forms?: Array<{ action: string; method: "get" | "post"; fields: number }>
+  ctas?: Array<{ label: string; href?: string; tag?: string }>
+  sections?: Array<{ signature: string; label: string }>
+  primaryNav?: ProjectPageSemanticLink[]
+  footerNav?: ProjectPageSemanticLink[]
+  fidelityScore?: number
+  fidelity?: Record<string, unknown>
+}
+
 export type ProjectPage = {
   id: string
   name: string
@@ -91,6 +114,8 @@ export type ProjectPage = {
   path: string
   url: string
   html?: string
+  seo?: ProjectPageSeo
+  semantic?: ProjectPageSemantic
   languageVariants?: Record<string, ProjectLanguageVariant>
   updatedAt?: string
   scannedAt?: string
@@ -122,6 +147,25 @@ export type ProjectImportAnalysis = {
   styleCount: number
   scriptCount: number
   assetCount: number
+  repeatedSections?: Array<{ signature: string; label: string; count: number; pages: string[] }>
+  navStructure?: {
+    primary?: ProjectPageSemanticLink[]
+    footer?: ProjectPageSemanticLink[]
+  }
+  formsCount?: number
+  ctaCount?: number
+  seoCoverage?: {
+    total: number
+    withTitle: number
+    withDescription: number
+    withOg: number
+  }
+  fidelityScore?: number
+  localizedAssets?: {
+    count: number
+    totalBytes: number
+    byType: Record<string, number>
+  }
 }
 
 export type ProjectImportPreview = {
@@ -247,7 +291,7 @@ export async function apiCreateProject(
 export async function apiPreviewProjectImport(payload: {
   kind: "url" | "entries" | "zip" | "brief" | "screenshot"
   mode?: "single" | "crawl" | "sitemap"
-  entryMode?: "auto" | "single-file" | "folder" | "zip" | "assets"
+  entryMode?: "auto" | "single-file" | "folder" | "zip" | "assets" | "figma-export"
   url?: string
   fileName?: string
   mimeType?: string
@@ -255,6 +299,11 @@ export async function apiPreviewProjectImport(payload: {
   entries?: ProjectImportEntry[]
   title?: string
   summary?: string
+  requestOverrides?: {
+    basicAuth?: { username?: string; password?: string }
+    cookie?: string
+    headers?: Array<{ key?: string; value?: string }>
+  }
 }): Promise<ProjectImportPreview> {
   const d = await apiFetch<ImportPreviewRes>(`${BASE}/api/projects/import-preview`, {
     method: "POST",

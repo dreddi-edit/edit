@@ -16,7 +16,7 @@ export type AutoImportPayload =
       kind: "entries"
       entries: ProjectImportEntry[]
       title: string
-      entryMode: "single-file" | "folder" | "assets"
+      entryMode: "single-file" | "folder" | "assets" | "figma-export"
       summary?: string
     }
 
@@ -24,6 +24,7 @@ const TEXT_EXTENSIONS = new Set([".html", ".htm", ".svg", ".md", ".markdown", ".
 const BRIEF_EXTENSIONS = new Set([".pdf", ".docx"])
 const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif"])
 const ASSET_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".svg", ".ico", ".mp4", ".webm", ".mov", ".mp3", ".wav", ".ogg", ".woff", ".woff2", ".ttf", ".otf", ".eot"])
+const FIGMA_HINT_PATTERN = /(figma|frame|desktop|mobile|tablet|artboard|screen|variant)/i
 
 function extensionOf(name: string) {
   const match = String(name || "").toLowerCase().match(/(\.[^.\/]+)$/)
@@ -87,6 +88,24 @@ function isAssetLike(item: ImportUploadItem) {
   return ASSET_EXTENSIONS.has(ext)
 }
 
+function isImageFrameLike(item: ImportUploadItem) {
+  const name = normalizeUploadName(item.file, item.relativePath)
+  const ext = extensionOf(name)
+  if (!IMAGE_EXTENSIONS.has(ext) && ext !== ".svg") return false
+  return FIGMA_HINT_PATTERN.test(name) || /\/(mobile|desktop|tablet|frames?)\//i.test(name)
+}
+
+function looksLikeFigmaExport(uploads: ImportUploadItem[]) {
+  if (uploads.length < 2) return false
+  const imageLike = uploads.filter((item) => {
+    const ext = extensionOf(normalizeUploadName(item.file, item.relativePath))
+    return IMAGE_EXTENSIONS.has(ext) || ext === ".svg"
+  })
+  if (imageLike.length < 2) return false
+  const frameHints = uploads.filter(isImageFrameLike).length
+  return imageLike.length / uploads.length >= 0.66 || frameHints >= 2
+}
+
 export async function buildAutoImportPayload(items: ImportUploadItem[]): Promise<AutoImportPayload> {
   const uploads = Array.from(items || []).filter((item) => item?.file)
   if (!uploads.length) throw new Error("No files selected.")
@@ -132,6 +151,16 @@ export async function buildAutoImportPayload(items: ImportUploadItem[]): Promise
       title: "Asset library",
       entryMode: "assets",
       summary: "Asset library imported into one project page",
+    }
+  }
+
+  if (looksLikeFigmaExport(uploads)) {
+    return {
+      kind: "entries",
+      entries: await filesToImportEntries(uploads),
+      title: rootName || "Figma export",
+      entryMode: "figma-export",
+      summary: "Figma frame export imported into editable page drafts",
     }
   }
 

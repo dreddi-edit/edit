@@ -81,6 +81,12 @@ function stripHtml(value) {
   return cleanText(String(value || "").replace(/<[^>]+>/g, " "))
 }
 
+function matchesSearchText(query, ...values) {
+  const needle = cleanText(query).toLowerCase()
+  if (!needle) return false
+  return values.some((value) => cleanText(value).toLowerCase().includes(needle))
+}
+
 function normalizePagePath(pageUrl, siteRootUrl) {
   try {
     const resolved = new URL(pageUrl, siteRootUrl || pageUrl)
@@ -151,6 +157,73 @@ function normalizeTranslationSegment(input, index) {
   }
 }
 
+function normalizePageSeo(input) {
+  if (!input || typeof input !== "object") return undefined
+  const ogEntries = Object.entries(input.og || {})
+    .map(([key, value]) => [cleanText(key).slice(0, 80), cleanText(value).slice(0, 600)])
+    .filter(([key, value]) => key && value)
+    .slice(0, 40)
+  const seo = {
+    title: cleanText(input.title).slice(0, 280),
+    description: cleanText(input.description).slice(0, 600),
+    canonical: cleanText(input.canonical).slice(0, 600),
+    robots: cleanText(input.robots).slice(0, 200),
+    og: Object.fromEntries(ogEntries),
+  }
+  if (!seo.title && !seo.description && !seo.canonical && !seo.robots && !Object.keys(seo.og).length) return undefined
+  return seo
+}
+
+function normalizeSemanticLinks(list) {
+  return (Array.isArray(list) ? list : [])
+    .map((item) => ({
+      label: cleanText(item?.label).slice(0, 160),
+      href: cleanText(item?.href).slice(0, 1000),
+    }))
+    .filter((item) => item.label && item.href)
+    .slice(0, 80)
+}
+
+function normalizePageSemantic(input) {
+  if (!input || typeof input !== "object") return undefined
+  const forms = (Array.isArray(input.forms) ? input.forms : [])
+    .map((item) => ({
+      action: cleanText(item?.action).slice(0, 1000),
+      method: cleanText(item?.method).toLowerCase() === "get" ? "get" : "post",
+      fields: Math.max(0, Math.min(200, Number(item?.fields || 0))),
+    }))
+    .slice(0, 80)
+  const ctas = (Array.isArray(input.ctas) ? input.ctas : [])
+    .map((item) => ({
+      label: cleanText(item?.label).slice(0, 160),
+      href: cleanText(item?.href).slice(0, 1000),
+      tag: cleanText(item?.tag).slice(0, 24),
+    }))
+    .filter((item) => item.label)
+    .slice(0, 120)
+  const sections = (Array.isArray(input.sections) ? input.sections : [])
+    .map((item) => ({
+      signature: cleanText(item?.signature).slice(0, 240),
+      label: cleanText(item?.label).slice(0, 180),
+    }))
+    .filter((item) => item.signature)
+    .slice(0, 180)
+  const primaryNav = normalizeSemanticLinks(input.primaryNav)
+  const footerNav = normalizeSemanticLinks(input.footerNav)
+  const fidelityScore = Number(input.fidelityScore)
+  const semantic = {
+    forms,
+    ctas,
+    sections,
+    primaryNav,
+    footerNav,
+    fidelityScore: Number.isFinite(fidelityScore) ? Math.max(0, Math.min(100, Math.round(fidelityScore))) : undefined,
+    fidelity: input.fidelity && typeof input.fidelity === "object" ? input.fidelity : undefined,
+  }
+  if (!forms.length && !ctas.length && !sections.length && !primaryNav.length && !footerNav.length && semantic.fidelityScore == null) return undefined
+  return semantic
+}
+
 function normalizeProjectPage(input, siteRootUrl) {
   const url = cleanText(input?.url)
   const path = normalizePagePath(url || input?.path || "/", siteRootUrl)
@@ -185,6 +258,8 @@ function normalizeProjectPage(input, siteRootUrl) {
     path,
     url,
     html: typeof input?.html === "string" ? input.html : "",
+    seo: normalizePageSeo(input?.seo),
+    semantic: normalizePageSemantic(input?.semantic),
     languageVariants,
     updatedAt: cleanText(input?.updatedAt),
     scannedAt: cleanText(input?.scannedAt),
@@ -1238,15 +1313,94 @@ export function registerProjectRoutes(app) {
       if (!raw || raw.trim().length < 2) {
         return res.json({ ok: true, results: [] })
       }
-      const q = `%${raw.trim()}%`
-      const projects = db.prepare(
-        `SELECT id, name, url, thumbnail, 'project' AS type, updated_at
+      const query = raw.trim()
+      const projectRows = db.prepare(
+        `SELECT id, name, url, thumbnail, pages_json, last_export_at, last_export_mode, updated_at
          FROM projects
-         WHERE user_id = ? AND (name LIKE ? OR url LIKE ?)
+         WHERE user_id = ?
          ORDER BY updated_at DESC
-         LIMIT 12`
-      ).all(req.user.id, q, q)
-      res.json({ ok: true, results: projects.map((project) => ({ ...project, thumbnail: normalizeManagedThumbnailUrl(project.thumbnail) })) })
+         LIMIT 120`
+      ).all(req.user.id)
+      const templateRows = db.prepare(
+        `SELECT id, name, url, platform, thumbnail, created_at
+         FROM templates
+         WHERE user_id = ?
+         ORDER BY created_at DESC
+         LIMIT 80`
+      ).all(req.user.id)
+
+      const results = []
+
+      for (const project of projectRows) {
+        const normalizedThumbnail = normalizeManagedThumbnailUrl(project.thumbnail)
+        if (matchesSearchText(query, project.name, project.url)) {
+          results.push({
+            id: project.id,
+            projectId: project.id,
+            name: cleanText(project.name) || "Untitled project",
+            url: cleanText(project.url),
+            type: "project",
+            subtitle: "Project",
+            thumbnail: normalizedThumbnail,
+            updated_at: project.updated_at || "",
+          })
+        }
+
+        const pages = parseProjectPages(project.pages_json, project.url || "")
+        for (const page of pages) {
+          if (!matchesSearchText(query, page.name, page.title, page.path, page.url)) continue
+          results.push({
+            id: `${project.id}:${page.id}`,
+            projectId: project.id,
+            pageId: page.id,
+            name: cleanText(page.name || page.title) || "Page",
+            url: cleanText(page.url || page.path || project.url),
+            type: "page",
+            subtitle: `${cleanText(project.name) || "Project"} · ${cleanText(page.path || page.url || "")}`,
+            thumbnail: normalizedThumbnail,
+            updated_at: page.updatedAt || project.updated_at || "",
+          })
+        }
+
+        if (project.last_export_at && matchesSearchText(query, project.name, project.url, project.last_export_mode)) {
+          results.push({
+            id: `export:${project.id}`,
+            projectId: project.id,
+            name: `${cleanText(project.name) || "Project"} export`,
+            url: cleanText(project.url),
+            type: "export",
+            subtitle: `${cleanText(project.last_export_mode || "export")} · ${cleanText(project.last_export_at)}`,
+            thumbnail: normalizedThumbnail,
+            updated_at: project.last_export_at || project.updated_at || "",
+          })
+        }
+      }
+
+      for (const template of templateRows) {
+        if (!matchesSearchText(query, template.name, template.url, template.platform)) continue
+        results.push({
+          id: `template:${template.id}`,
+          name: cleanText(template.name) || "Template",
+          url: cleanText(template.url),
+          type: "template",
+          subtitle: `Template${template.platform ? ` · ${cleanText(template.platform)}` : ""}`,
+          thumbnail: normalizeManagedThumbnailUrl(template.thumbnail),
+          updated_at: template.created_at || "",
+        })
+      }
+
+      const typePriority = { page: 0, project: 1, template: 2, export: 3 }
+      const sorted = results
+        .sort((left, right) => {
+          const leftPriority = typePriority[left.type] ?? 99
+          const rightPriority = typePriority[right.type] ?? 99
+          if (leftPriority !== rightPriority) return leftPriority - rightPriority
+          return String(right.updated_at || "").localeCompare(String(left.updated_at || ""))
+        })
+        .slice(0, 20)
+        .map(({ updated_at, ...result }) => result)
+
+      res.json({ ok: true, results: sorted })
     } catch (error) {
       if (isValidationError(error)) return res.status(400).json({ ok: false, error: error.message })
       res.status(500).json({ ok: false, error: error.message })

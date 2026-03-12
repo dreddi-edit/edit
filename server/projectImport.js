@@ -1,4 +1,5 @@
 import path from "node:path"
+import { JSDOM } from "jsdom"
 import { normalizeProjectDocument, normalizeSiteUrl } from "./siteMeta.js"
 
 const MAX_SITE_PAGES = 16
@@ -63,9 +64,121 @@ const SHOPIFY_THEME_SEGMENTS = new Set(["sections", "snippets", "templates", "la
 const LOCALE_FILE_PATTERN = /(?:^|[._-])(en|de|fr|es|it|nl|pt|pl|cs|sv|no|da|fi|tr|ro|hu|el|ar|he|ja|ko|zh|uk|ru)(?:[._-]|$)/i
 const MAX_AI_IMPORT_FILES = 36
 const MAX_AI_SNIPPET_LENGTH = 3600
+const MAX_URL_IMPORT_ASSETS = 180
+const MAX_URL_IMPORT_ASSET_BYTES = 2_000_000
+const MAX_URL_IMPORT_TOTAL_BYTES = 20_000_000
+const MAX_CUSTOM_IMPORT_HEADERS = 12
+const BLOCKED_IMPORT_HEADERS = new Set([
+  "host",
+  "content-length",
+  "connection",
+  "upgrade",
+  "transfer-encoding",
+])
+const FIGMA_FRAME_HINT_PATTERN = /(figma|frame|desktop|mobile|tablet|screen|artboard|variant)/i
 
 function cleanText(value) {
   return String(value || "").replace(/\s+/g, " ").trim()
+}
+
+function readLimitedText(value, max = 4000) {
+  return cleanText(value).slice(0, Math.max(0, max))
+}
+
+function normalizeImportHeaderName(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "")
+    .slice(0, 80)
+}
+
+function parseImportRequestOverrides(raw = {}) {
+  const basicAuth = raw?.basicAuth && typeof raw.basicAuth === "object"
+    ? {
+        username: readLimitedText(raw.basicAuth.username, 200),
+        password: String(raw.basicAuth.password || "").slice(0, 500),
+      }
+    : null
+
+  const cookie = String(raw?.cookie || "").trim().slice(0, 6000)
+  const headersInput = Array.isArray(raw?.headers) ? raw.headers : []
+  const headers = []
+  for (const item of headersInput.slice(0, MAX_CUSTOM_IMPORT_HEADERS)) {
+    const key = normalizeImportHeaderName(item?.key)
+    const value = String(item?.value || "").trim().slice(0, 1000)
+    if (!key || !value || BLOCKED_IMPORT_HEADERS.has(key)) continue
+    headers.push({ key, value })
+  }
+
+  return {
+    basicAuth: basicAuth && basicAuth.username ? basicAuth : null,
+    cookie: cookie || "",
+    headers,
+  }
+}
+
+function buildImportRequestHeaders(overrides = {}, options = {}) {
+  const headers = {
+    "User-Agent": "Mozilla/5.0 (compatible; SiteEditor/1.0)",
+    Accept: options.accept || "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  }
+
+  if (options.referer) headers.Referer = String(options.referer)
+  if (overrides.cookie) headers.Cookie = overrides.cookie
+  if (overrides.basicAuth?.username) {
+    headers.Authorization = `Basic ${Buffer.from(`${overrides.basicAuth.username}:${overrides.basicAuth.password || ""}`).toString("base64")}`
+  }
+  for (const pair of overrides.headers || []) {
+    headers[pair.key] = pair.value
+  }
+  return headers
+}
+
+function detectImportedAssetKind(url = "", mimeType = "") {
+  const lowerMime = String(mimeType || "").toLowerCase()
+  const lowerUrl = String(url || "").toLowerCase()
+  if (lowerMime.startsWith("image/") || IMAGE_FILE_EXTENSIONS.has(path.extname(lowerUrl))) return "image"
+  if (lowerMime.startsWith("font/") || FONT_FILE_EXTENSIONS.has(path.extname(lowerUrl))) return "font"
+  if (lowerMime.includes("css") || CSS_FILE_EXTENSIONS.has(path.extname(lowerUrl))) return "style"
+  if (lowerMime.includes("javascript") || SCRIPT_FILE_EXTENSIONS.has(path.extname(lowerUrl))) return "script"
+  if (lowerMime.startsWith("video/") || lowerMime.startsWith("audio/") || MEDIA_FILE_EXTENSIONS.has(path.extname(lowerUrl))) return "media"
+  return "asset"
+}
+
+function shouldSkipImportAssetReference(value) {
+  const ref = String(value || "").trim()
+  if (!ref) return true
+  return /^(data:|mailto:|tel:|javascript:|#)/i.test(ref)
+}
+
+function resolveImportAssetUrl(candidate, baseUrl) {
+  const ref = String(candidate || "").trim()
+  if (!ref || shouldSkipImportAssetReference(ref)) return ""
+  try {
+    if (ref.startsWith("//")) {
+      const base = new URL(baseUrl)
+      return new URL(`${base.protocol}${ref}`).toString()
+    }
+    return new URL(ref, baseUrl).toString()
+  } catch {
+    return ""
+  }
+}
+
+async function replaceAsync(value, pattern, replacer) {
+  const source = String(value || "")
+  const matches = Array.from(source.matchAll(pattern))
+  if (!matches.length) return source
+  let output = ""
+  let lastIndex = 0
+  for (const match of matches) {
+    output += source.slice(lastIndex, match.index)
+    output += await replacer(...match)
+    lastIndex = match.index + match[0].length
+  }
+  output += source.slice(lastIndex)
+  return output
 }
 
 function stripHtml(value) {
@@ -148,7 +261,7 @@ function pathToTitle(filePath) {
   return segment.replace(/[-_]+/g, " ").replace(/\b\w/g, (match) => match.toUpperCase())
 }
 
-function buildPageRecord({ id, name, title = "", path: pagePath, url = "", html = "" }) {
+function buildPageRecord({ id, name, title = "", path: pagePath, url = "", html = "", seo = null, semantic = null }) {
   return {
     id,
     name,
@@ -156,6 +269,8 @@ function buildPageRecord({ id, name, title = "", path: pagePath, url = "", html 
     path: pagePath,
     url,
     html,
+    seo,
+    semantic,
     updatedAt: "",
     scannedAt: new Date().toISOString(),
   }
@@ -297,6 +412,425 @@ function inlineHtmlAssets(html, filePath, assets, textEntries) {
   })
 
   return output
+}
+
+async function localizeCssUrlsFromWeb(cssText, cssUrl, context, depth = 0) {
+  if (depth > 2) return String(cssText || "")
+  return replaceAsync(String(cssText || ""), /url\(([^)]+)\)/gi, async (match, inner = "") => {
+    const raw = String(inner || "").trim().replace(/^['"]|['"]$/g, "")
+    const resolved = resolveImportAssetUrl(raw, cssUrl)
+    if (!resolved) return match
+    const asset = await fetchAndCacheImportAsset(resolved, context, { referer: cssUrl, depth: depth + 1 })
+    if (!asset?.dataUrl) return `url("${resolved}")`
+    return `url("${asset.dataUrl}")`
+  })
+}
+
+async function fetchAndCacheImportAsset(assetUrl, context, options = {}) {
+  const cache = context.assetCache
+  if (cache.has(assetUrl)) return cache.get(assetUrl)
+  if (cache.size >= MAX_URL_IMPORT_ASSETS) {
+    context.warnings.add("Asset download limit reached; some references remain external.")
+    cache.set(assetUrl, null)
+    return null
+  }
+
+  let response
+  try {
+    response = await fetch(assetUrl, {
+      redirect: "follow",
+      headers: buildImportRequestHeaders(context.requestOverrides, {
+        accept: "*/*",
+        referer: options.referer || context.rootUrl,
+      }),
+    })
+  } catch {
+    cache.set(assetUrl, null)
+    return null
+  }
+
+  if (!response?.ok) {
+    cache.set(assetUrl, null)
+    return null
+  }
+
+  const mimeType = cleanText(response.headers.get("content-type") || "").split(";")[0] || guessMimeType(assetUrl)
+  const buffer = Buffer.from(await response.arrayBuffer())
+  if (buffer.length > MAX_URL_IMPORT_ASSET_BYTES) {
+    context.warnings.add(`Skipped large asset (> ${Math.round(MAX_URL_IMPORT_ASSET_BYTES / 1_000_000)}MB): ${assetUrl}`)
+    cache.set(assetUrl, null)
+    return null
+  }
+  if (context.totalBytes + buffer.length > MAX_URL_IMPORT_TOTAL_BYTES) {
+    context.warnings.add("Asset byte budget reached; remaining assets were left as external URLs.")
+    cache.set(assetUrl, null)
+    return null
+  }
+
+  context.totalBytes += buffer.length
+  const kind = detectImportedAssetKind(assetUrl, mimeType)
+
+  if (kind === "style" || /\.css($|\?)/i.test(assetUrl)) {
+    const localizedCss = await localizeCssUrlsFromWeb(buffer.toString("utf8"), assetUrl, context, options.depth || 0)
+    const cssBuffer = Buffer.from(localizedCss, "utf8")
+    const result = {
+      url: assetUrl,
+      mimeType: "text/css",
+      kind: "style",
+      size: cssBuffer.length,
+      text: localizedCss,
+      dataUrl: dataUrlFromBuffer(cssBuffer, "text/css"),
+    }
+    cache.set(assetUrl, result)
+    context.downloadedAssets.set(assetUrl, result)
+    return result
+  }
+
+  const result = {
+    url: assetUrl,
+    mimeType,
+    kind,
+    size: buffer.length,
+    dataUrl: dataUrlFromBuffer(buffer, mimeType),
+  }
+  cache.set(assetUrl, result)
+  context.downloadedAssets.set(assetUrl, result)
+  return result
+}
+
+async function localizeHtmlAssetsFromWeb(html, pageUrl, context) {
+  let output = String(html || "")
+
+  output = await replaceAsync(output, /<link\b([^>]*?)\bhref=(["'])([^"']+)\2([^>]*)>/gi, async (match, before = "", _quote, href = "", after = "") => {
+    const resolved = resolveImportAssetUrl(href, pageUrl)
+    if (!resolved) return match
+    const relMatch = String(match).match(/\brel=(["'])([^"']+)\1/i)
+    const relValue = String(relMatch?.[2] || "").toLowerCase()
+    const asset = await fetchAndCacheImportAsset(resolved, context, { referer: pageUrl })
+    if (!asset) return `<link${before}href="${resolved}"${after}>`
+    if (relValue.includes("stylesheet") || asset.kind === "style") {
+      if (asset.text) {
+        return `<style data-imported-from="${escapeHtml(resolved)}">${asset.text}</style>`
+      }
+    }
+    return `<link${before}href="${asset.dataUrl}"${after}>`
+  })
+
+  output = await replaceAsync(output, /(<script\b[^>]*?\bsrc=)(["'])([^"']+)\2/gi, async (match, prefix, quote, src) => {
+    const resolved = resolveImportAssetUrl(src, pageUrl)
+    if (!resolved) return match
+    const asset = await fetchAndCacheImportAsset(resolved, context, { referer: pageUrl })
+    if (!asset?.dataUrl) return `${prefix}${quote}${resolved}${quote}`
+    return `${prefix}${quote}${asset.dataUrl}${quote}`
+  })
+
+  output = await replaceAsync(output, /(<(?:img|source|video|audio|track|input)\b[^>]*?\b(?:src|poster)=)(["'])([^"']+)\2/gi, async (match, prefix, quote, src) => {
+    const resolved = resolveImportAssetUrl(src, pageUrl)
+    if (!resolved) return match
+    const asset = await fetchAndCacheImportAsset(resolved, context, { referer: pageUrl })
+    if (!asset?.dataUrl) return `${prefix}${quote}${resolved}${quote}`
+    return `${prefix}${quote}${asset.dataUrl}${quote}`
+  })
+
+  output = await replaceAsync(output, /\ssrcset=(["'])([^"']+)\1/gi, async (match, _quote, value = "") => {
+    const items = String(value || "")
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean)
+    const rewritten = []
+    for (const item of items) {
+      const [rawSrc, descriptor] = item.split(/\s+/, 2)
+      const resolved = resolveImportAssetUrl(rawSrc, pageUrl)
+      if (!resolved) {
+        rewritten.push(item)
+        continue
+      }
+      const asset = await fetchAndCacheImportAsset(resolved, context, { referer: pageUrl })
+      const target = asset?.dataUrl || resolved
+      rewritten.push(descriptor ? `${target} ${descriptor}` : target)
+    }
+    return ` srcset="${rewritten.join(", ")}"`
+  })
+
+  output = await replaceAsync(output, /\sstyle=(["'])([\s\S]*?)\1/gi, async (match, quote, value) => {
+    return ` style=${quote}${await localizeCssUrlsFromWeb(value, pageUrl, context)}${quote}`
+  })
+
+  output = await replaceAsync(output, /<style\b([^>]*)>([\s\S]*?)<\/style>/gi, async (match, attrs = "", css = "") => {
+    const localizedCss = await localizeCssUrlsFromWeb(css, pageUrl, context)
+    return `<style${attrs}>${localizedCss}</style>`
+  })
+
+  return output
+}
+
+function isLikelyCtaElement(element) {
+  const tag = String(element?.tagName || "").toLowerCase()
+  const classes = String(element?.className || "").toLowerCase()
+  const text = cleanText(element?.textContent || element?.value || "").toLowerCase()
+  if (tag === "button") return true
+  if (tag === "input") {
+    const type = String(element?.getAttribute?.("type") || "").toLowerCase()
+    return type === "submit" || type === "button"
+  }
+  if (tag !== "a") return false
+  if (/(cta|button|btn|primary|action|signup|purchase|checkout)/i.test(classes)) return true
+  return /(book|buy|start|join|demo|contact|talk|get|order|subscribe|register|trial|pricing|quote|download)/i.test(text)
+}
+
+function extractSeoMetadata(html, pageUrl = "") {
+  const dom = new JSDOM(String(html || ""))
+  const doc = dom.window.document
+  const readMeta = (selector) => cleanText(doc.querySelector(selector)?.getAttribute("content") || "")
+  const title = cleanText(doc.querySelector("title")?.textContent || "")
+  const description = readMeta("meta[name='description']")
+  const canonical = cleanText(doc.querySelector("link[rel='canonical']")?.getAttribute("href") || "")
+  const robots = readMeta("meta[name='robots']")
+  const og = {}
+  for (const meta of Array.from(doc.querySelectorAll("meta[property^='og:']"))) {
+    const key = cleanText(meta.getAttribute("property") || "")
+    const value = cleanText(meta.getAttribute("content") || "")
+    if (!key || !value) continue
+    og[key] = value
+  }
+  return {
+    title,
+    description,
+    canonical: canonical ? resolveImportAssetUrl(canonical, pageUrl) || canonical : "",
+    robots,
+    og,
+  }
+}
+
+function normalizeImportedInteractions(html, pageUrl) {
+  const dom = new JSDOM(String(html || ""))
+  const doc = dom.window.document
+  const forms = []
+  const ctas = []
+
+  const formNodes = Array.from(doc.querySelectorAll("form"))
+  formNodes.forEach((form, formIndex) => {
+    const rawAction = cleanText(form.getAttribute("action") || "")
+    const resolvedAction = rawAction ? (resolveImportAssetUrl(rawAction, pageUrl) || rawAction) : pageUrl
+    const methodRaw = cleanText(form.getAttribute("method") || "post").toLowerCase()
+    const method = methodRaw === "get" ? "get" : "post"
+    form.setAttribute("action", resolvedAction || pageUrl)
+    form.setAttribute("method", method)
+    form.setAttribute("data-imported-form", "1")
+    form.setAttribute("data-imported-form-index", String(formIndex + 1))
+
+    let fieldCounter = 0
+    for (const field of Array.from(form.querySelectorAll("input, select, textarea"))) {
+      if (field.getAttribute("type") === "hidden") continue
+      if (!field.getAttribute("name")) {
+        fieldCounter += 1
+        const fallbackName = cleanText(field.getAttribute("id") || field.getAttribute("aria-label") || "") || `field_${fieldCounter}`
+        field.setAttribute("name", fallbackName.replace(/[^\w-]+/g, "_").slice(0, 80))
+      }
+    }
+    forms.push({ action: resolvedAction || pageUrl, method, fields: form.querySelectorAll("input, select, textarea").length })
+  })
+
+  const ctaNodes = Array.from(doc.querySelectorAll("a, button, input[type='submit'], input[type='button']"))
+  ctaNodes.forEach((node) => {
+    if (!isLikelyCtaElement(node)) return
+    const label = cleanText(node.textContent || node.getAttribute("value") || "")
+    if (!label) return
+    node.setAttribute("data-imported-cta", "1")
+    node.setAttribute("data-imported-cta-label", label.slice(0, 120))
+    ctas.push({ label, href: cleanText(node.getAttribute("href") || ""), tag: String(node.tagName || "").toLowerCase() })
+  })
+
+  return {
+    html: dom.serialize(),
+    forms,
+    ctas,
+  }
+}
+
+function buildSectionSignature(element) {
+  const tag = String(element.tagName || "").toLowerCase()
+  const classTokens = String(element.getAttribute("class") || "")
+    .split(/\s+/)
+    .map((token) => token.trim().toLowerCase())
+    .filter(Boolean)
+    .slice(0, 3)
+    .sort()
+  const headingCount = element.querySelectorAll("h1, h2, h3, h4, h5, h6").length
+  const buttonCount = element.querySelectorAll("button, a[data-imported-cta='1'], input[type='submit'], input[type='button']").length
+  const imageCount = element.querySelectorAll("img, picture, video").length
+  const formCount = element.querySelectorAll("form").length
+  const text = cleanText(element.textContent || "").slice(0, 120)
+  const label =
+    cleanText(element.getAttribute("aria-label") || "")
+    || cleanText(element.querySelector("h1, h2, h3, h4, h5, h6")?.textContent || "")
+    || cleanText(text.split(".")[0] || "")
+    || tag
+  return {
+    signature: `${tag}|${classTokens.join(".")}|h${headingCount}|b${buttonCount}|i${imageCount}|f${formCount}`,
+    label: label.slice(0, 120),
+  }
+}
+
+function extractNavigationLinks(root, siteRootUrl = "") {
+  const links = []
+  const seen = new Set()
+  for (const node of Array.from(root?.querySelectorAll?.("a[href]") || [])) {
+    const label = cleanText(node.textContent || "").slice(0, 120)
+    const hrefRaw = cleanText(node.getAttribute("href") || "")
+    if (!label || !hrefRaw || /^(#|javascript:|mailto:|tel:)/i.test(hrefRaw)) continue
+    const href = resolveImportAssetUrl(hrefRaw, siteRootUrl) || hrefRaw
+    const key = `${label}::${href}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    links.push({ label, href })
+    if (links.length >= 24) break
+  }
+  return links
+}
+
+function collectFidelitySignals(html) {
+  const dom = new JSDOM(String(html || ""))
+  const doc = dom.window.document
+  return {
+    title: cleanText(doc.querySelector("title")?.textContent || ""),
+    description: cleanText(doc.querySelector("meta[name='description']")?.getAttribute("content") || ""),
+    ogCount: doc.querySelectorAll("meta[property^='og:']").length,
+    headings: doc.querySelectorAll("h1, h2, h3, h4, h5, h6").length,
+    links: doc.querySelectorAll("a[href]").length,
+    images: doc.querySelectorAll("img, picture source, video source").length,
+    forms: doc.querySelectorAll("form").length,
+    ctas: doc.querySelectorAll("[data-imported-cta='1'], button, input[type='submit'], input[type='button']").length,
+    sections: doc.querySelectorAll("section, article, nav, header, footer, main, aside").length,
+  }
+}
+
+function calculateFidelityScore(source, target) {
+  const countDiff = (key, weight, cap) => Math.min(cap, Math.abs((source[key] || 0) - (target[key] || 0)) * weight)
+  let score = 100
+  score -= countDiff("headings", 2, 14)
+  score -= countDiff("links", 0.6, 10)
+  score -= countDiff("images", 1.5, 14)
+  score -= countDiff("forms", 8, 16)
+  score -= countDiff("ctas", 4, 12)
+  score -= countDiff("sections", 1, 10)
+  if (source.title && !target.title) score -= 12
+  if (source.description && !target.description) score -= 10
+  if ((source.ogCount || 0) > 0 && (target.ogCount || 0) === 0) score -= 10
+  return Math.max(0, Math.min(100, Math.round(score)))
+}
+
+function deriveSectionCandidates(document) {
+  const selected = Array.from(document.querySelectorAll("main section, section, article, [data-section], [data-component], [role='region']"))
+  if (selected.length) return selected
+  return Array.from(document.querySelectorAll("header, main > div, footer")).slice(0, 18)
+}
+
+function extractSemanticStructure(html, { pageUrl = "", siteRootUrl = "" } = {}) {
+  const dom = new JSDOM(String(html || ""))
+  const doc = dom.window.document
+  const navRoot = doc.querySelector("header nav, nav[aria-label*='primary' i], nav")
+  const footerRoot = doc.querySelector("footer nav, footer")
+  const sections = []
+  const sectionNodes = deriveSectionCandidates(doc).slice(0, 64)
+  sectionNodes.forEach((node) => {
+    const { signature, label } = buildSectionSignature(node)
+    if (!signature) return
+    sections.push({ signature, label })
+  })
+
+  return {
+    sections,
+    primaryNav: extractNavigationLinks(navRoot, siteRootUrl || pageUrl),
+    footerNav: extractNavigationLinks(footerRoot, siteRootUrl || pageUrl),
+  }
+}
+
+function dedupeNavigationLinks(list = []) {
+  const out = []
+  const seen = new Set()
+  for (const item of Array.isArray(list) ? list : []) {
+    const label = cleanText(item?.label || "")
+    const href = cleanText(item?.href || "")
+    if (!label || !href) continue
+    const key = `${label}::${href}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({ label, href })
+    if (out.length >= 24) break
+  }
+  return out
+}
+
+function buildRepeatedSections(pages = []) {
+  const grouped = new Map()
+  for (const page of pages) {
+    for (const section of page?.semantic?.sections || []) {
+      const signature = cleanText(section?.signature || "")
+      if (!signature) continue
+      if (!grouped.has(signature)) grouped.set(signature, { signature, label: section.label || "", count: 0, pages: new Set() })
+      const bucket = grouped.get(signature)
+      bucket.count += 1
+      bucket.pages.add(page.path || "/")
+      if (!bucket.label && section.label) bucket.label = section.label
+    }
+  }
+  return Array.from(grouped.values())
+    .filter((entry) => entry.pages.size >= 2 || entry.count >= 3)
+    .sort((left, right) => right.count - left.count)
+    .slice(0, 18)
+    .map((entry) => ({
+      signature: entry.signature,
+      label: entry.label || "Repeated section",
+      count: entry.count,
+      pages: Array.from(entry.pages).sort((left, right) => left.localeCompare(right)),
+    }))
+}
+
+function collectSeoCoverage(pages = []) {
+  const total = pages.length
+  const withTitle = pages.filter((page) => cleanText(page?.seo?.title || "")).length
+  const withDescription = pages.filter((page) => cleanText(page?.seo?.description || "")).length
+  const withOg = pages.filter((page) => Object.keys(page?.seo?.og || {}).length > 0).length
+  return { total, withTitle, withDescription, withOg }
+}
+
+function collectProjectFidelity(pages = []) {
+  const scores = pages
+    .map((page) => Number(page?.semantic?.fidelityScore))
+    .filter((value) => Number.isFinite(value))
+  if (!scores.length) return 0
+  return Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length)
+}
+
+function enrichImportedPageRecord(page, { siteRootUrl = "", defaultUrl = "" } = {}) {
+  const normalizedUrl = cleanText(page?.url || "") || cleanText(page?.path || "") || defaultUrl
+  const sourceHtml = String(page?.sourceHtml || page?.html || "")
+  const interactions = normalizeImportedInteractions(page?.html || "", normalizedUrl || siteRootUrl || defaultUrl)
+  const seo = extractSeoMetadata(interactions.html, normalizedUrl || siteRootUrl || defaultUrl)
+  const semanticStructure = extractSemanticStructure(interactions.html, {
+    pageUrl: normalizedUrl || siteRootUrl || defaultUrl,
+    siteRootUrl: siteRootUrl || defaultUrl,
+  })
+  const sourceSignals = collectFidelitySignals(sourceHtml)
+  const targetSignals = collectFidelitySignals(interactions.html)
+  const fidelityScore = calculateFidelityScore(sourceSignals, targetSignals)
+  return {
+    html: interactions.html,
+    seo,
+    semantic: {
+      forms: interactions.forms.slice(0, 40),
+      ctas: interactions.ctas.slice(0, 60),
+      sections: semanticStructure.sections.slice(0, 80),
+      primaryNav: semanticStructure.primaryNav.slice(0, 24),
+      footerNav: semanticStructure.footerNav.slice(0, 24),
+      fidelityScore,
+      fidelity: {
+        source: sourceSignals,
+        imported: targetSignals,
+      },
+    },
+  }
 }
 
 function stripTemplateSyntax(text, ext = "") {
@@ -481,6 +1015,206 @@ function buildAssetLibraryHtml(entries, title = "Asset library") {
 </html>`
 }
 
+function normalizeFrameLabel(fileName, fallback = "Frame") {
+  const stem = path.posix.basename(fileName, path.extname(fileName))
+  return cleanText(stem.replace(/[-_]+/g, " ")) || fallback
+}
+
+function frameNameToPath(fileName, index = 0) {
+  const stem = path.posix.basename(fileName, path.extname(fileName))
+  const slug = cleanText(stem)
+    .toLowerCase()
+    .replace(/[^\w]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+  if (!slug) return index === 0 ? "/" : `/frame-${index + 1}`
+  return index === 0 ? "/" : `/${slug}`
+}
+
+function buildFigmaFrameCard(frame) {
+  if (frame.inlineSvg) {
+    return `<div class="figma-frame-svg">${frame.inlineSvg}</div>`
+  }
+  return `<img src="${frame.dataUrl}" alt="${escapeHtml(frame.label)}" loading="lazy" />`
+}
+
+function buildFigmaFramePageHtml(frame, { title = "Figma import", frameIndex = 0, frameCount = 1 } = {}) {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(frame.label)} · ${escapeHtml(title)}</title>
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+        color: #0f172a;
+        background: radial-gradient(circle at 20% 0%, rgba(14, 165, 233, 0.18), transparent 55%), linear-gradient(170deg, #f8fafc 0%, #e2e8f0 100%);
+      }
+      main { max-width: 1280px; margin: 0 auto; padding: 38px 20px 56px; }
+      .meta { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 20px; }
+      .chip { padding: 8px 12px; border-radius: 999px; font: 700 11px/1.1 ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; letter-spacing: 0.12em; background: rgba(15, 23, 42, 0.08); color: #0f172a; }
+      h1 { margin: 0 0 18px; font-size: clamp(24px, 4vw, 44px); line-height: 1.04; }
+      .canvas { border-radius: 24px; border: 1px solid rgba(148, 163, 184, 0.4); background: #ffffff; box-shadow: 0 36px 84px rgba(15, 23, 42, 0.12); overflow: hidden; }
+      .canvas img, .canvas svg { display: block; width: 100%; height: auto; }
+      .canvas .figma-frame-svg svg { width: 100%; height: auto; display: block; }
+      .note { margin-top: 18px; color: #334155; font-size: 14px; line-height: 1.6; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="meta">
+        <span class="chip">Figma import</span>
+        <span class="chip">Frame ${frameIndex + 1} / ${frameCount}</span>
+      </div>
+      <h1>${escapeHtml(frame.label)}</h1>
+      <section class="canvas">${buildFigmaFrameCard(frame)}</section>
+      <p class="note">This frame was imported from a Figma export package. You can now replace text, split sections, and rebuild components directly in the editor.</p>
+    </main>
+  </body>
+</html>`
+}
+
+function buildFigmaOverviewHtml(frames, title = "Figma import") {
+  const items = frames.map((frame, index) => `<article class="frame-card">
+      <div class="frame-preview">${buildFigmaFrameCard(frame)}</div>
+      <div class="frame-copy">
+        <strong>${escapeHtml(frame.label)}</strong>
+        <span>${escapeHtml(frame.path)}</span>
+        <small>Frame ${index + 1}</small>
+      </div>
+    </article>`)
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${escapeHtml(title)}</title>
+    <style>
+      :root { color-scheme: light; }
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: "Space Grotesk", ui-sans-serif, system-ui, sans-serif; color: #e2e8f0; background: linear-gradient(165deg, #020617 0%, #111827 70%, #0f172a 100%); }
+      main { max-width: 1240px; margin: 0 auto; padding: 44px 20px 64px; }
+      .eyebrow { display: inline-flex; padding: 8px 12px; border-radius: 999px; font: 700 11px/1.1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.12em; text-transform: uppercase; color: #a5f3fc; background: rgba(8, 145, 178, 0.2); margin-bottom: 14px; }
+      h1 { margin: 0 0 12px; font-size: clamp(32px, 5vw, 56px); line-height: 1.02; }
+      .sub { margin: 0 0 30px; max-width: 760px; color: #94a3b8; line-height: 1.6; }
+      .grid { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+      .frame-card { background: rgba(15, 23, 42, 0.72); border: 1px solid rgba(148, 163, 184, 0.22); border-radius: 20px; overflow: hidden; backdrop-filter: blur(3px); }
+      .frame-preview { min-height: 120px; max-height: 220px; overflow: hidden; background: rgba(255, 255, 255, 0.08); }
+      .frame-preview img, .frame-preview svg { width: 100%; display: block; height: auto; }
+      .frame-preview .figma-frame-svg svg { width: 100%; height: auto; display: block; }
+      .frame-copy { padding: 12px 14px 16px; display: grid; gap: 4px; }
+      .frame-copy strong { font-size: 15px; color: #f8fafc; }
+      .frame-copy span { font-size: 13px; color: #93c5fd; }
+      .frame-copy small { font-size: 12px; color: #94a3b8; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <span class="eyebrow">Figma frame pack</span>
+      <h1>${escapeHtml(title)}</h1>
+      <p class="sub">Detected ${frames.length} visual frame${frames.length === 1 ? "" : "s"} and reconstructed them into editable pages. Use this overview as the project index and open each frame page for focused editing.</p>
+      <section class="grid">${items.join("\n")}</section>
+    </main>
+  </body>
+</html>`
+}
+
+function detectFigmaExportEntries(entries = []) {
+  if (!Array.isArray(entries) || !entries.length) return false
+  const names = entries.map((entry) => normalizeEntryPath(entry?.name || ""))
+  const imageLike = names.filter((name) => IMAGE_FILE_EXTENSIONS.has(path.extname(name).toLowerCase()) || /\.svg$/i.test(name))
+  if (imageLike.length < 2) return false
+  const figmaHints = names.filter((name) => FIGMA_FRAME_HINT_PATTERN.test(name)).length
+  return imageLike.length / names.length >= 0.66 || figmaHints >= 2
+}
+
+function buildFigmaPagesFromEntries(entries, options = {}) {
+  const { textEntries, assetEntries } = entryToBufferMap(entries)
+  const frames = Array.from(assetEntries.values())
+    .filter((entry) => {
+      const ext = path.extname(entry.name).toLowerCase()
+      return IMAGE_FILE_EXTENSIONS.has(ext) || ext === ".svg"
+    })
+    .sort((left, right) => left.name.localeCompare(right.name, undefined, { numeric: true }))
+    .slice(0, 40)
+    .map((entry, index) => {
+      const textEntry = textEntries.get(entry.name)
+      const inlineSvg = path.extname(entry.name).toLowerCase() === ".svg" && textEntry
+        ? String(textEntry.text || "").trim()
+        : ""
+      const label = normalizeFrameLabel(entry.name, `Frame ${index + 1}`)
+      return {
+        id: index === 0 ? "home" : pathToPageId(frameNameToPath(entry.name, index)),
+        name: label,
+        title: label,
+        path: frameNameToPath(entry.name, index),
+        url: frameNameToPath(entry.name, index),
+        label,
+        dataUrl: entry.dataUrl,
+        inlineSvg,
+      }
+    })
+
+  if (!frames.length) {
+    throw new Error("No image or SVG frames found in the uploaded Figma export.")
+  }
+
+  const projectTitle = cleanText(options.title || "Figma import")
+  const pages = [
+    {
+      id: "home",
+      name: projectTitle,
+      title: projectTitle,
+      path: "/",
+      url: "/",
+      html: buildFigmaOverviewHtml(frames, projectTitle),
+    },
+    ...frames.slice(0, 24).map((frame, index) => ({
+      id: frame.id || `frame-${index + 1}`,
+      name: frame.name,
+      title: frame.title,
+      path: index === 0 ? "/frame-1" : frame.path,
+      url: index === 0 ? "/frame-1" : frame.path,
+      html: buildFigmaFramePageHtml(frame, { title: projectTitle, frameIndex: index, frameCount: frames.length }),
+    })),
+  ]
+
+  const analysis = {
+    projectType: "Figma export",
+    platform: "static",
+    confidence: "high",
+    homepageFile: "Generated overview",
+    homepagePath: "/",
+    pageCandidates: pages.map((page) => page.path),
+    supportFiles: [],
+    contentSources: [],
+    localeFiles: [],
+    styleFiles: [],
+    scriptFiles: [],
+    assetFiles: frames.map((frame) => frame.path),
+    warnings: [],
+    fileCount: entries.length,
+    pageCount: pages.length,
+    styleCount: 0,
+    scriptCount: 0,
+    assetCount: frames.length,
+    overview: `Detected ${frames.length} frame exports and rebuilt them into ${pages.length} editable page drafts.`,
+  }
+
+  return buildPreviewFromPages({
+    name: projectTitle,
+    url: "",
+    pages,
+    platform: "static",
+    summary: `Figma export imported with ${frames.length} frames`,
+    source: "Figma",
+    analysis,
+  })
+}
+
 async function readZipEntries(buffer) {
   const yauzlModule = await import("yauzl")
   const yauzl = yauzlModule.default || yauzlModule
@@ -551,15 +1285,70 @@ function buildPreviewFromPages({ name, url = "", pages = [], platform = "static"
       url: /^https?:\/\//i.test(pageUrl) ? pageUrl : url || "",
       platform: resolvedPlatform,
     })
+    const enriched = enrichImportedPageRecord(
+      {
+        ...page,
+        html: normalizedPage.html,
+      },
+      {
+        siteRootUrl: normalized.meta.url || url || "",
+        defaultUrl: pageUrl || normalized.meta.url || url || "",
+      },
+    )
     return buildPageRecord({
       id: page.id,
       name: page.name,
-      title: page.title || extractDocumentTitleFromHtml(normalizedPage.html, page.name),
+      title: page.title || extractDocumentTitleFromHtml(enriched.html, page.name),
       path: page.path,
       url: pageUrl,
-      html: normalizedPage.html,
+      html: enriched.html,
+      seo: enriched.seo,
+      semantic: enriched.semantic,
     })
   })
+
+  const mergedAnalysis = {
+    projectType: cleanText(analysis?.projectType || `${source} import`),
+    platform: resolvedPlatform,
+    confidence: ["low", "medium", "high"].includes(String(analysis?.confidence || "").toLowerCase())
+      ? String(analysis.confidence).toLowerCase()
+      : "medium",
+    homepageFile: cleanText(analysis?.homepageFile || ""),
+    homepagePath: cleanText(analysis?.homepagePath || "") || "/",
+    pageCandidates: Array.isArray(analysis?.pageCandidates) ? analysis.pageCandidates : normalizedPages.map((page) => page.path || "/"),
+    supportFiles: Array.isArray(analysis?.supportFiles) ? analysis.supportFiles : [],
+    contentSources: Array.isArray(analysis?.contentSources) ? analysis.contentSources : [],
+    localeFiles: Array.isArray(analysis?.localeFiles) ? analysis.localeFiles : [],
+    styleFiles: Array.isArray(analysis?.styleFiles) ? analysis.styleFiles : [],
+    scriptFiles: Array.isArray(analysis?.scriptFiles) ? analysis.scriptFiles : [],
+    assetFiles: Array.isArray(analysis?.assetFiles) ? analysis.assetFiles : [],
+    warnings: Array.isArray(analysis?.warnings) ? analysis.warnings : [],
+    fileCount: Number(analysis?.fileCount || normalizedPages.length),
+    pageCount: Number(analysis?.pageCount || normalizedPages.length),
+    styleCount: Number(analysis?.styleCount || 0),
+    scriptCount: Number(analysis?.scriptCount || 0),
+    assetCount: Number(analysis?.assetCount || 0),
+    overview: cleanText(analysis?.overview || ""),
+    ...(analysis && typeof analysis === "object" ? analysis : {}),
+  }
+
+  const primaryNav = dedupeNavigationLinks(
+    normalizedPages.flatMap((page) => page?.semantic?.primaryNav || []),
+  )
+  const footerNav = dedupeNavigationLinks(
+    normalizedPages.flatMap((page) => page?.semantic?.footerNav || []),
+  )
+  const repeatedSections = buildRepeatedSections(normalizedPages)
+  const formsCount = normalizedPages.reduce((sum, page) => sum + (page?.semantic?.forms?.length || 0), 0)
+  const ctaCount = normalizedPages.reduce((sum, page) => sum + (page?.semantic?.ctas?.length || 0), 0)
+  const seoCoverage = collectSeoCoverage(normalizedPages)
+  const fidelityScore = collectProjectFidelity(normalizedPages)
+  if (!mergedAnalysis.homepageFile) {
+    mergedAnalysis.homepageFile = primaryPage?.name || primaryPage?.path || "Home"
+  }
+  if (!mergedAnalysis.overview) {
+    mergedAnalysis.overview = cleanText(summary) || `${source} import ready`
+  }
 
   return {
     name: cleanText(name) || extractDocumentTitleFromHtml(normalized.html, "Imported project"),
@@ -568,12 +1357,19 @@ function buildPreviewFromPages({ name, url = "", pages = [], platform = "static"
     pages: normalizedPages,
     platform: resolvedPlatform,
     summary: cleanText(summary) || `${source} import ready`,
-    analysis: analysis
-      ? {
-          ...analysis,
-          platform: resolvedPlatform,
-        }
-      : undefined,
+    analysis: {
+      ...mergedAnalysis,
+      platform: resolvedPlatform,
+      repeatedSections,
+      navStructure: {
+        primary: primaryNav,
+        footer: footerNav,
+      },
+      formsCount,
+      ctaCount,
+      seoCoverage,
+      fidelityScore,
+    },
   }
 }
 
@@ -1221,6 +2017,11 @@ async function maybeGenerateImportOverview(analysis) {
 }
 
 async function buildPagesFromEntries(entries, options = {}) {
+  const entryMode = cleanText(options.entryMode || "auto").toLowerCase()
+  if (entryMode === "figma-export" || ((entryMode === "auto" || entryMode === "folder") && detectFigmaExportEntries(entries))) {
+    return buildFigmaPagesFromEntries(entries, options)
+  }
+
   const baseline = analyzeImportEntries(entries, options)
   const aiStructure = await maybeRunAiImportStructure({
     entries,
@@ -1300,9 +2101,12 @@ async function buildPagesFromEntries(entries, options = {}) {
   })
 }
 
-async function fetchTextResponse(url) {
+async function fetchTextResponse(url, requestOverrides = {}, options = {}) {
   const response = await fetch(url, {
-    headers: { "User-Agent": "Mozilla/5.0 (compatible; SiteEditor/1.0)" },
+    headers: buildImportRequestHeaders(requestOverrides, {
+      accept: options.accept || "text/plain,*/*;q=0.8",
+      referer: options.referer || "",
+    }),
   })
   if (!response.ok) throw new Error(`Could not load ${url} (${response.status})`)
   return {
@@ -1311,14 +2115,22 @@ async function fetchTextResponse(url) {
   }
 }
 
-async function fetchSitePage(url) {
+async function fetchSitePage(url, context = {}) {
+  const requestOverrides = context.requestOverrides || {}
   const response = await fetch(url, {
-    headers: { "User-Agent": "Mozilla/5.0 (compatible; SiteEditor/1.0)" },
+    headers: buildImportRequestHeaders(requestOverrides, {
+      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      referer: context.rootUrl || "",
+    }),
   })
   if (!response.ok) throw new Error(`Could not load page (${response.status})`)
   const rawHtml = await response.text()
   const finalUrl = response.url || url
-  const normalized = normalizeProjectDocument({ html: rawHtml, url: finalUrl, platform: "unknown" })
+  let htmlWithLocalizedAssets = rawHtml
+  if (context.assetContext) {
+    htmlWithLocalizedAssets = await localizeHtmlAssetsFromWeb(rawHtml, finalUrl, context.assetContext)
+  }
+  const normalized = normalizeProjectDocument({ html: htmlWithLocalizedAssets, url: finalUrl, platform: "unknown" })
   return {
     html: normalized.html,
     finalUrl: normalized.meta.url || finalUrl,
@@ -1403,13 +2215,15 @@ function extractSitemapLocs(xml, rootUrl) {
   return urls
 }
 
-async function discoverSitemapUrls(rootUrl) {
+async function discoverSitemapUrls(rootUrl, requestOverrides = {}) {
   const root = new URL(rootUrl)
   const queue = [new URL("/sitemap.xml", root).toString()]
   const discovered = new Set(queue)
 
   try {
-    const robots = await fetchTextResponse(new URL("/robots.txt", root).toString())
+    const robots = await fetchTextResponse(new URL("/robots.txt", root).toString(), requestOverrides, {
+      referer: rootUrl,
+    })
     for (const match of String(robots.text || "").matchAll(/^sitemap:\s*(\S+)/gim)) {
       const candidate = cleanText(match[1])
       if (!candidate) continue
@@ -1431,7 +2245,9 @@ async function discoverSitemapUrls(rootUrl) {
     if (!sitemapUrl || visitedSitemaps.has(sitemapUrl)) continue
     visitedSitemaps.add(sitemapUrl)
     try {
-      const response = await fetchTextResponse(sitemapUrl)
+      const response = await fetchTextResponse(sitemapUrl, requestOverrides, {
+        referer: rootUrl,
+      })
       const urls = extractSitemapLocs(response.text, rootUrl)
       const nested = urls.filter((item) => /\.xml($|\?)/i.test(item))
       for (const item of nested) {
@@ -1451,15 +2267,29 @@ async function discoverSitemapUrls(rootUrl) {
   return unique.length ? unique.slice(0, MAX_SITE_PAGES) : [rootUrl]
 }
 
-async function importFromUrl(rawUrl, mode = "crawl") {
+async function importFromUrl(rawUrl, mode = "crawl", options = {}) {
   const rootUrl = normalizeSiteUrl(rawUrl)
   if (!/^https?:\/\//i.test(rootUrl)) throw new Error("A full website URL is required.")
+  const requestOverrides = parseImportRequestOverrides(options.requestOverrides || {})
+  const warnings = new Set()
+  const assetContext = {
+    rootUrl,
+    requestOverrides,
+    assetCache: new Map(),
+    downloadedAssets: new Map(),
+    warnings,
+    totalBytes: 0,
+  }
 
-  const homepage = await fetchSitePage(rootUrl)
+  const homepage = await fetchSitePage(rootUrl, {
+    rootUrl,
+    requestOverrides,
+    assetContext,
+  })
   let targetUrls = [homepage.finalUrl]
 
   if (mode === "sitemap") {
-    targetUrls = await discoverSitemapUrls(homepage.finalUrl)
+    targetUrls = await discoverSitemapUrls(homepage.finalUrl, requestOverrides)
   } else if (mode === "crawl") {
     targetUrls = extractSitePagesFromHtml(homepage.rawHtml, homepage.finalUrl).map((page) => page.url)
   }
@@ -1467,18 +2297,26 @@ async function importFromUrl(rawUrl, mode = "crawl") {
   const pages = []
   for (const targetUrl of Array.from(new Set(targetUrls)).slice(0, MAX_SITE_PAGES)) {
     try {
-      const fetched = targetUrl === homepage.finalUrl ? homepage : await fetchSitePage(targetUrl)
+      const fetched =
+        targetUrl === homepage.finalUrl
+          ? homepage
+          : await fetchSitePage(targetUrl, {
+              rootUrl: homepage.finalUrl,
+              requestOverrides,
+              assetContext,
+            })
       const pagePath = normalizePagePath(fetched.finalUrl, homepage.finalUrl)
       const title = fetched.title || derivePageName(pagePath, "", "")
       pages.push(
-        buildPageRecord({
+        {
           id: pagePath === "/" ? "home" : pathToPageId(pagePath),
           name: title,
           title,
           path: pagePath,
           url: fetched.finalUrl,
           html: fetched.html,
-        }),
+          sourceHtml: fetched.rawHtml,
+        },
       )
     } catch {
       if (targetUrl === homepage.finalUrl) throw new Error("Homepage could not be imported.")
@@ -1487,6 +2325,39 @@ async function importFromUrl(rawUrl, mode = "crawl") {
 
   if (!pages.length) throw new Error("No importable pages were found for this URL.")
 
+  const downloadedAssetList = Array.from(assetContext.downloadedAssets.values())
+  const styleAssets = downloadedAssetList.filter((entry) => entry?.kind === "style").length
+  const analysis = {
+    projectType: "Live website import",
+    platform: homepage.platform || "static",
+    confidence: "medium",
+    homepageFile: homepage.finalUrl,
+    homepagePath: "/",
+    pageCandidates: pages.map((page) => page.path),
+    supportFiles: [],
+    contentSources: [],
+    localeFiles: [],
+    styleFiles: [],
+    scriptFiles: [],
+    assetFiles: downloadedAssetList.map((entry) => entry.url),
+    warnings: Array.from(warnings),
+    fileCount: pages.length + downloadedAssetList.length,
+    pageCount: pages.length,
+    styleCount: styleAssets,
+    scriptCount: downloadedAssetList.filter((entry) => entry?.kind === "script").length,
+    assetCount: downloadedAssetList.length,
+    overview: `Imported ${pages.length} page${pages.length === 1 ? "" : "s"} with ${downloadedAssetList.length} localized assets from live URL.`,
+    localizedAssets: {
+      count: downloadedAssetList.length,
+      totalBytes: assetContext.totalBytes,
+      byType: downloadedAssetList.reduce((acc, entry) => {
+        const key = cleanText(entry?.kind || "asset") || "asset"
+        acc[key] = (acc[key] || 0) + 1
+        return acc
+      }, {}),
+    },
+  }
+
   return buildPreviewFromPages({
     name: extractDocumentTitleFromHtml(homepage.html, new URL(homepage.finalUrl).hostname),
     url: homepage.finalUrl,
@@ -1494,11 +2365,12 @@ async function importFromUrl(rawUrl, mode = "crawl") {
     platform: homepage.platform,
     summary:
       mode === "sitemap"
-        ? `${pages.length} page${pages.length === 1 ? "" : "s"} imported from sitemap.xml`
+        ? `${pages.length} page${pages.length === 1 ? "" : "s"} imported from sitemap.xml with ${downloadedAssetList.length} localized assets`
         : mode === "crawl"
-        ? `${pages.length} internal page${pages.length === 1 ? "" : "s"} imported from live links`
-        : "Homepage imported from live URL",
+        ? `${pages.length} internal page${pages.length === 1 ? "" : "s"} imported from live links with ${downloadedAssetList.length} localized assets`
+        : `Homepage imported from live URL with ${downloadedAssetList.length} localized assets`,
     source: "Live",
+    analysis,
   })
 }
 
@@ -1690,7 +2562,9 @@ export async function buildProjectImportPreview(payload = {}) {
   const kind = cleanText(payload.kind || "url").toLowerCase()
   if (kind === "url") {
     const mode = cleanText(payload.mode || "crawl").toLowerCase()
-    return importFromUrl(payload.url, mode)
+    return importFromUrl(payload.url, mode, {
+      requestOverrides: payload.requestOverrides,
+    })
   }
 
   if (kind === "entries") {
