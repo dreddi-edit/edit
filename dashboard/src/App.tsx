@@ -331,6 +331,7 @@ type AdminUser = { id: number; email: string; name?: string; credits?: number; c
   } | null>(null)
   const [translationReview, setTranslationReview] = useState<TranslationReviewState | null>(null)
   const [translationOverrideDrafts, setTranslationOverrideDrafts] = useState<Record<string, string>>({})
+  const [translationAppliedOverrides, setTranslationAppliedOverrides] = useState<Record<string, string>>({})
   const [activeTranslationSegmentId, setActiveTranslationSegmentId] = useState<string | null>(null)
   const [activeLanguageVariant, setActiveLanguageVariant] = useState<string>("base")
   const [showTranslationSplitView, setShowTranslationSplitView] = useState(false)
@@ -967,10 +968,20 @@ const autoSave = async (html: string) => {
   const switchLanguageVariant = (variant: string) => {
     if (!activePageId) {
       setActiveLanguageVariant("base")
+      setTranslationReview(null)
+      setTranslationOverrideDrafts({})
+      setTranslationAppliedOverrides({})
+      setActiveTranslationSegmentId(null)
       return
     }
     const activePage = projectPages.find((page) => page.id === activePageId)
-    if (!activePage) return
+    if (!activePage) {
+      setTranslationReview(null)
+      setTranslationOverrideDrafts({})
+      setTranslationAppliedOverrides({})
+      setActiveTranslationSegmentId(null)
+      return
+    }
     const storedVariant = variant === "base" ? null : activePage.languageVariants?.[variant] || null
     const nextHtml =
       variant === "base"
@@ -1003,6 +1014,7 @@ const autoSave = async (html: string) => {
           )
         : {}
     )
+    setTranslationAppliedOverrides(variant === "base" ? {} : { ...(storedVariant?.overrides || {}) })
     setActiveTranslationSegmentId(storedSegments[0]?.id || null)
     setTranslationInfo(
       variant === "base"
@@ -1029,10 +1041,7 @@ const autoSave = async (html: string) => {
         ? activePage.languageVariants?.[activeLanguageVariant] || null
         : null
     const sourceSegments = (currentVariant?.segments as WebsiteTranslationSegment[] | undefined) || translationReview?.segments || []
-    const nextOverrides = {
-      ...(currentVariant?.overrides || {}),
-      [segmentId]: trimmedValue,
-    }
+    const nextOverrides = { ...(currentVariant?.overrides || translationAppliedOverrides), [segmentId]: trimmedValue }
     const baseHtml = String(currentVariant?.baseHtml || currentVariant?.html || currentHtmlRef.current || "")
     const nextHtml = applyTranslationOverridesToHtml(baseHtml, sourceSegments, nextOverrides)
     const nextSegments = buildTranslationSegmentsWithOverrides(sourceSegments, nextOverrides)
@@ -1089,8 +1098,153 @@ const autoSave = async (html: string) => {
           }
         : previous
     )
+    setTranslationAppliedOverrides(nextOverrides)
     setTranslationOverrideDrafts((previous) => ({ ...previous, [segmentId]: trimmedValue }))
     toast.success("Translation override applied")
+  }
+
+  const resetTranslationOverride = async (segmentId: string) => {
+    const segment = translationReview?.segments.find((entry) => entry.id === segmentId)
+    if (!segment || activeLanguageVariant === "base") return
+    const activePage = activePageId ? projectPages.find((page) => page.id === activePageId) || null : null
+    const currentVariant =
+      activePage && activeLanguageVariant !== "base"
+        ? activePage.languageVariants?.[activeLanguageVariant] || null
+        : null
+    const sourceSegments = (currentVariant?.segments as WebsiteTranslationSegment[] | undefined) || translationReview?.segments || []
+    const baseHtml = String(currentVariant?.baseHtml || currentVariant?.html || currentHtmlRef.current || "")
+    const nextOverrides = { ...(currentVariant?.overrides || translationAppliedOverrides) }
+    delete nextOverrides[segmentId]
+    const nextHtml = applyTranslationOverridesToHtml(baseHtml, sourceSegments, nextOverrides)
+    const nextSegments = buildTranslationSegmentsWithOverrides(sourceSegments, nextOverrides)
+    const revertedSegment = nextSegments.find((entry) => entry.id === segmentId)
+
+    if (currentProject?.id && activePage) {
+      applyEditorHtml(nextHtml, { recordUndo: true })
+      renderToIframe(nextHtml)
+      const nowIso = new Date().toISOString()
+      const nextPages = projectPages.map((page) =>
+        page.id === activePage.id
+          ? {
+              ...page,
+              languageVariants: {
+                ...(page.languageVariants || {}),
+                [activeLanguageVariant]: {
+                  ...(page.languageVariants?.[activeLanguageVariant] || {}),
+                  html: nextHtml,
+                  baseHtml,
+                  updatedAt: nowIso,
+                  overrides: nextOverrides,
+                  segments: sourceSegments,
+                },
+              },
+              updatedAt: nowIso,
+            }
+          : page
+      )
+      setProjectPages(nextPages)
+      setCurrentProject((previous) => (previous ? { ...previous, pages: nextPages } : previous))
+      try {
+        const savedProject = await apiSaveProject(currentProject.id, {
+          html: String(activePage.html || currentProject.html || ""),
+          pages: nextPages,
+          platform: currentPlatform,
+          pageId: activePage.id,
+        })
+        if (savedProject) {
+          setCurrentProject(savedProject)
+          setProjectPages(savedProject.pages || nextPages)
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Translation reset save failed")
+      }
+    } else {
+      commitLiveEditorHtml(nextHtml)
+    }
+
+    setTranslationAppliedOverrides(nextOverrides)
+    setTranslationReview((previous) =>
+      previous
+        ? {
+            ...previous,
+            segments: nextSegments,
+          }
+        : previous
+    )
+    setTranslationOverrideDrafts((previous) => ({
+      ...previous,
+      [segmentId]: revertedSegment?.translatedText || segment.translatedText,
+    }))
+    toast.success("Override reset")
+  }
+
+  const resetAllTranslationOverrides = async () => {
+    if (!translationReview?.segments.length || activeLanguageVariant === "base") return
+    const activePage = activePageId ? projectPages.find((page) => page.id === activePageId) || null : null
+    const currentVariant =
+      activePage && activeLanguageVariant !== "base"
+        ? activePage.languageVariants?.[activeLanguageVariant] || null
+        : null
+    const sourceSegments = (currentVariant?.segments as WebsiteTranslationSegment[] | undefined) || translationReview.segments
+    const baseHtml = String(currentVariant?.baseHtml || currentVariant?.html || currentHtmlRef.current || "")
+    const nextOverrides: Record<string, string> = {}
+    const nextHtml = applyTranslationOverridesToHtml(baseHtml, sourceSegments, nextOverrides)
+    const nextSegments = buildTranslationSegmentsWithOverrides(sourceSegments, nextOverrides)
+
+    if (currentProject?.id && activePage) {
+      applyEditorHtml(nextHtml, { recordUndo: true })
+      renderToIframe(nextHtml)
+      const nowIso = new Date().toISOString()
+      const nextPages = projectPages.map((page) =>
+        page.id === activePage.id
+          ? {
+              ...page,
+              languageVariants: {
+                ...(page.languageVariants || {}),
+                [activeLanguageVariant]: {
+                  ...(page.languageVariants?.[activeLanguageVariant] || {}),
+                  html: nextHtml,
+                  baseHtml,
+                  updatedAt: nowIso,
+                  overrides: nextOverrides,
+                  segments: sourceSegments,
+                },
+              },
+              updatedAt: nowIso,
+            }
+          : page
+      )
+      setProjectPages(nextPages)
+      setCurrentProject((previous) => (previous ? { ...previous, pages: nextPages } : previous))
+      try {
+        const savedProject = await apiSaveProject(currentProject.id, {
+          html: String(activePage.html || currentProject.html || ""),
+          pages: nextPages,
+          platform: currentPlatform,
+          pageId: activePage.id,
+        })
+        if (savedProject) {
+          setCurrentProject(savedProject)
+          setProjectPages(savedProject.pages || nextPages)
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Translation reset save failed")
+      }
+    } else {
+      commitLiveEditorHtml(nextHtml)
+    }
+
+    setTranslationAppliedOverrides({})
+    setTranslationReview((previous) =>
+      previous
+        ? {
+            ...previous,
+            segments: nextSegments,
+          }
+        : previous
+    )
+    setTranslationOverrideDrafts(Object.fromEntries(nextSegments.map((entry) => [entry.id, entry.translatedText])))
+    toast.success("All overrides reset")
   }
 
   const storeCurrentAsLanguageVariant = async () => {
@@ -1163,6 +1317,7 @@ const autoSave = async (html: string) => {
     })
     setTranslationReview(null)
     setTranslationOverrideDrafts({})
+    setTranslationAppliedOverrides({})
     setActiveTranslationSegmentId(null)
     applyEditorHtml(activePage.html, { resetHistory: true })
     renderToIframe(activePage.html)
@@ -1190,6 +1345,7 @@ const autoSave = async (html: string) => {
     setTranslationInfo(null)
     setTranslationReview(null)
     setTranslationOverrideDrafts({})
+    setTranslationAppliedOverrides({})
     setActiveTranslationSegmentId(null)
     setShowTranslationSplitView(false)
     applyEditorHtml(activePage.html, { resetHistory: true })
@@ -1553,6 +1709,7 @@ const autoSave = async (html: string) => {
     setTranslationInfo(null)
     setTranslationReview(null)
     setTranslationOverrideDrafts({})
+    setTranslationAppliedOverrides({})
     setActiveTranslationSegmentId(null)
     setEditorAudit(null)
     setCurrentPlatform(resolvePlatform(project.platform, page.url || project.url, pageHtml))
@@ -1718,6 +1875,7 @@ const autoSave = async (html: string) => {
     setTranslationInfo(null)
     setTranslationReview(null)
     setTranslationOverrideDrafts({})
+    setTranslationAppliedOverrides({})
     setActiveTranslationSegmentId(null)
     setActiveLanguageVariant("base")
     setShowTranslationSplitView(false)
@@ -1999,6 +2157,7 @@ const autoSave = async (html: string) => {
         translatedCount: result.translatedCount,
         segments: result.segments,
       })
+      setTranslationAppliedOverrides({})
       setTranslationOverrideDrafts(
         Object.fromEntries(result.segments.map((segment) => [segment.id, segment.translatedText]))
       )
@@ -2051,6 +2210,7 @@ const autoSave = async (html: string) => {
     setTranslationInfo(null)
     setTranslationReview(null)
     setTranslationOverrideDrafts({})
+    setTranslationAppliedOverrides({})
     setActiveTranslationSegmentId(null)
   }, [translationTargetLanguage])
 
@@ -2997,12 +3157,15 @@ useEffect(() => {
           translationInfo={translationInfo}
           translationReview={translationReview}
           translationOverrideDrafts={translationOverrideDrafts}
+          translationAppliedOverrides={translationAppliedOverrides}
           activeTranslationSegmentId={activeTranslationSegmentId}
           selectTranslationSegment={(id) => setActiveTranslationSegmentId(id)}
           updateTranslationOverrideDraft={(id, value) =>
             setTranslationOverrideDrafts((previous) => ({ ...previous, [id]: value }))
           }
           applyTranslationOverride={applyTranslationOverride}
+          resetTranslationOverride={resetTranslationOverride}
+          resetAllTranslationOverrides={resetAllTranslationOverrides}
           storeCurrentAsLanguageVariant={storeCurrentAsLanguageVariant}
           resetLanguageVariantFromBase={resetLanguageVariantFromBase}
           deleteLanguageVariant={deleteLanguageVariant}

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { EditorAudits } from "./EditorAudits";
 import { EditorOverlay } from "./EditorOverlay";
 import { EditorStructure } from "./EditorStructure";
@@ -174,10 +174,13 @@ interface SidebarProps {
   translationInfo: TranslationSummary | null;
   translationReview: TranslationReview | null;
   translationOverrideDrafts: Record<string, string>;
+  translationAppliedOverrides: Record<string, string>;
   activeTranslationSegmentId: string | null;
   selectTranslationSegment: (id: string) => void;
   updateTranslationOverrideDraft: (id: string, value: string) => void;
   applyTranslationOverride: (id: string) => Promise<void>;
+  resetTranslationOverride: (id: string) => Promise<void>;
+  resetAllTranslationOverrides: () => Promise<void>;
   storeCurrentAsLanguageVariant: () => Promise<void>;
   resetLanguageVariantFromBase: () => Promise<void>;
   deleteLanguageVariant: () => Promise<void>;
@@ -261,6 +264,23 @@ async function copyText(value: string, promptLabel: string) {
   window.prompt(promptLabel, value);
 }
 
+type TranslationFilter = "all" | "issues" | "overrides";
+
+function getTranslationReviewIssues(segment: TranslationSegment, draftValue: string) {
+  const issues: string[] = [];
+  const source = String(segment.sourceText || "").trim();
+  const draft = String(draftValue || "").trim();
+  if (!draft) issues.push("empty");
+  if (source && draft && source.toLowerCase() === draft.toLowerCase()) {
+    issues.push("same as source");
+  }
+  if (source.length >= 16 && draft.length >= 4) {
+    const ratio = draft.length / Math.max(1, source.length);
+    if (ratio < 0.35 || ratio > 2.8) issues.push("length mismatch");
+  }
+  return issues;
+}
+
 export const EditorSidebar: React.FC<SidebarProps> = (props) => {
   const componentEntries = Object.entries(COMPONENT_LIBRARY);
   const selectedComponentMeta =
@@ -269,7 +289,41 @@ export const EditorSidebar: React.FC<SidebarProps> = (props) => {
       : null;
   const fontAssets = props.filteredAssetLibrary.filter((asset) => asset.type === "font");
   const visibleAssets = props.filteredAssetLibrary.slice(0, 10);
-  const translationSegments = props.translationReview?.segments.slice(0, 4) || [];
+  const [translationSearch, setTranslationSearch] = useState("");
+  const [translationFilter, setTranslationFilter] = useState<TranslationFilter>("all");
+  const translationSegments = props.translationReview?.segments || [];
+  const translationReviewEntries = useMemo(
+    () =>
+      translationSegments.map((segment) => {
+        const draft = props.translationOverrideDrafts[segment.id] ?? segment.translatedText;
+        const issues = getTranslationReviewIssues(segment, draft);
+        const isOverridden = Boolean(props.translationAppliedOverrides[segment.id]);
+        return { segment, draft, issues, isOverridden };
+      }),
+    [translationSegments, props.translationOverrideDrafts, props.translationAppliedOverrides]
+  );
+  const filteredTranslationEntries = useMemo(() => {
+    const query = translationSearch.trim().toLowerCase();
+    return translationReviewEntries.filter((entry) => {
+      if (translationFilter === "issues" && !entry.issues.length) return false;
+      if (translationFilter === "overrides" && !entry.isOverridden) return false;
+      if (!query) return true;
+      const haystack = [
+        entry.segment.selector,
+        entry.segment.sourceText,
+        entry.segment.translatedText,
+        entry.draft,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [translationReviewEntries, translationFilter, translationSearch]);
+  const activeFilteredIndex = filteredTranslationEntries.findIndex(
+    (entry) => entry.segment.id === props.activeTranslationSegmentId
+  );
+  const totalIssueSegments = translationReviewEntries.filter((entry) => entry.issues.length).length;
+  const totalOverrides = Object.keys(props.translationAppliedOverrides).length;
   const publishTargetOptions = props.publishTargets.length
     ? props.publishTargets.map((target) => target.id)
     : FALLBACK_PUBLISH_TARGETS;
@@ -736,39 +790,126 @@ export const EditorSidebar: React.FC<SidebarProps> = (props) => {
               )}
 
               {translationSegments.length ? (
-                <div className="editor-panel__version-list">
-                  {translationSegments.map((segment) => (
-                    <div
-                      key={segment.id}
-                      className={`editor-panel__version-item ${props.activeTranslationSegmentId === segment.id ? "is-active" : ""}`}
-                    >
-                      <div className="editor-panel__version-copy">
-                        <strong>{segment.sourceText || segment.selector}</strong>
-                        <span>{segment.selector}</span>
-                      </div>
-                      <textarea
-                        className="editor-textarea"
-                        value={props.translationOverrideDrafts[segment.id] || segment.translatedText}
-                        onChange={(event) => props.updateTranslationOverrideDraft(segment.id, event.target.value)}
-                        aria-label={`Translation override for ${segment.selector}`}
-                      />
-                      <div className="editor-panel__version-actions">
-                        <button
-                          className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
-                          onClick={() => props.selectTranslationSegment(segment.id)}
-                        >
-                          Focus
-                        </button>
-                        <button
-                          className="editor-btn editor-btn--panel editor-btn--compact"
-                          onClick={() => void props.applyTranslationOverride(segment.id)}
-                        >
-                          Apply
-                        </button>
-                      </div>
+                <>
+                  <div className="editor-panel__translation-review-controls">
+                    <input
+                      className="editor-select editor-select--full"
+                      type="search"
+                      value={translationSearch}
+                      onChange={(event) => setTranslationSearch(event.target.value)}
+                      placeholder="Search segments, selectors, or translations"
+                      aria-label="Search translation segments"
+                    />
+                    <div className="editor-panel__translation-filters">
+                      <button
+                        className={`editor-btn editor-btn--panel editor-btn--compact ${translationFilter === "all" ? "" : "editor-btn--panel-muted"}`}
+                        onClick={() => setTranslationFilter("all")}
+                      >
+                        All ({translationReviewEntries.length})
+                      </button>
+                      <button
+                        className={`editor-btn editor-btn--panel editor-btn--compact ${translationFilter === "issues" ? "" : "editor-btn--panel-muted"}`}
+                        onClick={() => setTranslationFilter("issues")}
+                      >
+                        Issues ({totalIssueSegments})
+                      </button>
+                      <button
+                        className={`editor-btn editor-btn--panel editor-btn--compact ${translationFilter === "overrides" ? "" : "editor-btn--panel-muted"}`}
+                        onClick={() => setTranslationFilter("overrides")}
+                      >
+                        Overrides ({totalOverrides})
+                      </button>
                     </div>
-                  ))}
-                </div>
+                    <div className="editor-panel__translation-filters">
+                      <button
+                        className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                        onClick={() => {
+                          if (!filteredTranslationEntries.length) return;
+                          const previousIndex =
+                            activeFilteredIndex <= 0 ? filteredTranslationEntries.length - 1 : activeFilteredIndex - 1;
+                          props.selectTranslationSegment(filteredTranslationEntries[previousIndex].segment.id);
+                        }}
+                        disabled={!filteredTranslationEntries.length}
+                      >
+                        Previous
+                      </button>
+                      <button
+                        className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                        onClick={() => {
+                          if (!filteredTranslationEntries.length) return;
+                          const nextIndex =
+                            activeFilteredIndex < 0 || activeFilteredIndex >= filteredTranslationEntries.length - 1
+                              ? 0
+                              : activeFilteredIndex + 1;
+                          props.selectTranslationSegment(filteredTranslationEntries[nextIndex].segment.id);
+                        }}
+                        disabled={!filteredTranslationEntries.length}
+                      >
+                        Next
+                      </button>
+                      <button
+                        className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                        onClick={() => void props.resetAllTranslationOverrides()}
+                        disabled={!totalOverrides || props.activeLanguageVariant === "base"}
+                      >
+                        Reset all overrides
+                      </button>
+                    </div>
+                    <div className="editor-panel__note">
+                      {filteredTranslationEntries.length} visible · {totalIssueSegments} with issues · {totalOverrides} override
+                      {totalOverrides === 1 ? "" : "s"}
+                    </div>
+                  </div>
+
+                  <div className="editor-panel__version-list">
+                    {filteredTranslationEntries.map((entry) => (
+                      <div
+                        key={entry.segment.id}
+                        className={`editor-panel__version-item ${props.activeTranslationSegmentId === entry.segment.id ? "is-active" : ""}`}
+                      >
+                        <div className="editor-panel__version-copy">
+                          <strong>{entry.segment.sourceText || entry.segment.selector}</strong>
+                          <span>{entry.segment.selector}</span>
+                        </div>
+                        {entry.issues.length ? (
+                          <div className="editor-panel__translation-issues">Issues: {entry.issues.join(" · ")}</div>
+                        ) : null}
+                        <textarea
+                          className="editor-textarea"
+                          value={entry.draft}
+                          onChange={(event) => props.updateTranslationOverrideDraft(entry.segment.id, event.target.value)}
+                          aria-label={`Translation override for ${entry.segment.selector}`}
+                        />
+                        <div className="editor-panel__version-actions">
+                          <button
+                            className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                            onClick={() => props.selectTranslationSegment(entry.segment.id)}
+                          >
+                            Focus
+                          </button>
+                          <button
+                            className="editor-btn editor-btn--panel editor-btn--compact"
+                            onClick={() => void props.applyTranslationOverride(entry.segment.id)}
+                            disabled={!entry.draft.trim()}
+                          >
+                            Apply
+                          </button>
+                          <button
+                            className="editor-btn editor-btn--panel editor-btn--panel-muted editor-btn--compact"
+                            onClick={() => void props.resetTranslationOverride(entry.segment.id)}
+                            disabled={!entry.isOverridden || props.activeLanguageVariant === "base"}
+                          >
+                            Reset
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {!filteredTranslationEntries.length ? (
+                    <div className="editor-panel__note">No translation segments match the current filter.</div>
+                  ) : null}
+                </>
               ) : null}
             </div>
           </section>
