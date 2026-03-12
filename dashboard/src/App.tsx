@@ -1636,7 +1636,7 @@ const autoSave = async (html: string) => {
       applyEditorHtml(html, { resetHistory: true })
       setCurrentPlatform(detectedPlatform)
       renderToIframe(html)
-       } finally { if (requestId === loadRequestRef.current) setStatus("ok"); else setStatus("idle"); }
+       
     } catch (e) {
       if (requestId !== loadRequestRef.current) return;
       setStatus("idle");
@@ -1719,10 +1719,10 @@ const autoSave = async (html: string) => {
       toast.warning("Exit snapshot preview before editing")
       return
     }
-    if (mode === "view") { setMode("edit"); if (currentHtml)  } finally { if (requestId === loadRequestRef.current) setStatus("ok"); else setStatus("idle"); } }
+    if (mode === "view") { setMode("edit"); if (currentHtml)   }
     else {
       if (confirm("Änderungen speichern und zum View-Modus wechseln?")) {
-        setMode("view"); if (currentHtml)  } finally { if (requestId === loadRequestRef.current) setStatus("ok"); else setStatus("idle"); }
+        setMode("view"); if (currentHtml)  
       }
     }
   };
