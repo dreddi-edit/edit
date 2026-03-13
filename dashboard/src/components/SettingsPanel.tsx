@@ -1857,21 +1857,21 @@ export default function SettingsPanel({
                   />
                   <GoogleActionButton
                     emoji="📝"
-                    label="NLP Entities"
-                    loading={googleLoading === "NLP Entities"}
-                    onClick={() => void runGoogleApi("NLP Entities", () => analyzeEntities("This is a sample text for entity analysis"))}
+                    label="NLP Entities (requires real text input)"
+                    loading={false}
+                    onClick={() => toast.warning("NLP Entities needs real text input and is disabled in Settings.")}
                   />
                   <GoogleActionButton
                     emoji="🌐"
-                    label="Translate Text"
-                    loading={googleLoading === "Translation"}
-                    onClick={() => void runGoogleApi("Translation", () => translateText("Hello world", "de"))}
+                    label="Translate Text (requires real text input)"
+                    loading={false}
+                    onClick={() => toast.warning("Translation needs real text input and is disabled in Settings.")}
                   />
                   <GoogleActionButton
                     emoji="🎙️"
-                    label="Speech to Text"
-                    loading={googleLoading === "Speech to Text"}
-                    onClick={() => void runGoogleApi("Speech to Text", () => recognizeSpeech(new Blob()))}
+                    label="Speech to Text (requires real audio file)"
+                    loading={false}
+                    onClick={() => toast.warning("Speech to Text needs a real audio file and is disabled in Settings.")}
                   />
                 </div>
                 {renderGoogleResult("Gemini Generate")}
@@ -1889,17 +1889,9 @@ export default function SettingsPanel({
                 <div className="draft-settings-api-grid">
                   <GoogleActionButton
                     emoji="👁️"
-                    label="Vision Analysis"
-                    loading={googleLoading === "Vision Analysis"}
-                    onClick={() =>
-                      void runGoogleApi(
-                        "Vision Analysis",
-                        () =>
-                          analyzeImage(
-                            "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
-                          )
-                      )
-                    }
+                    label="Vision Analysis (requires real image input)"
+                    loading={false}
+                    onClick={() => toast.warning("Vision Analysis needs a real image input and is disabled in Settings.")}
                   />
                   <GoogleActionButton
                     emoji="🎥"
@@ -1909,9 +1901,9 @@ export default function SettingsPanel({
                   />
                   <GoogleActionButton
                     emoji="📺"
-                    label="YouTube Search"
-                    loading={googleLoading === "YouTube Search"}
-                    onClick={() => void runGoogleApi("YouTube Search", () => searchVideos("web development"))}
+                    label="YouTube Search (requires search query)"
+                    loading={false}
+                    onClick={() => toast.warning("YouTube Search needs a real query and is disabled in Settings.")}
                   />
                   <GoogleActionButton
                     emoji="📱"
@@ -1935,29 +1927,27 @@ export default function SettingsPanel({
                 <div className="draft-settings-api-grid">
                   <GoogleActionButton
                     emoji="📄"
-                    label="Document AI"
-                    loading={googleLoading === "Document AI"}
-                    onClick={() => void runGoogleApi("Document AI", () => processDocument("<html><body>Sample document</body></html>"))}
+                    label="Document AI (requires real document)"
+                    loading={false}
+                    onClick={() => toast.warning("Document AI needs a real document and is disabled in Settings.")}
                   />
                   <GoogleActionButton
                     emoji="🔥"
-                    label="Firebase Hosting"
-                    loading={googleLoading === "Firebase Hosting"}
-                    onClick={() => void runGoogleApi("Firebase Hosting", () => createSiteVersion("my-site"))}
+                    label="Firebase Hosting (requires real site ID)"
+                    loading={false}
+                    onClick={() => toast.warning("Firebase Hosting needs a real site ID and is disabled in Settings.")}
                   />
                   <GoogleActionButton
                     emoji="☁️"
-                    label="Cloud Storage"
-                    loading={googleLoading === "Cloud Storage"}
-                    onClick={() =>
-                      void runGoogleApi("Cloud Storage", () => uploadFile(new File(["test"], "test.txt"), "my-bucket"))
-                    }
+                    label="Cloud Storage (requires real file and bucket)"
+                    loading={false}
+                    onClick={() => toast.warning("Cloud Storage needs a real file and bucket and is disabled in Settings.")}
                   />
                   <GoogleActionButton
                     emoji="📊"
-                    label="BigQuery"
-                    loading={googleLoading === "BigQuery"}
-                    onClick={() => void runGoogleApi("BigQuery", () => queryBigQuery("SELECT COUNT(*) as total FROM dataset.table"))}
+                    label="BigQuery (requires real project/query)"
+                    loading={false}
+                    onClick={() => toast.warning("BigQuery needs a real project and query and is disabled in Settings.")}
                   />
                 </div>
                 {renderGoogleResult("Document AI")}
