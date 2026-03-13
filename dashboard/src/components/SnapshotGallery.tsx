@@ -2,9 +2,9 @@ import React from 'react';
 
 export const SnapshotGallery: React.FC = () => {
   const snapshots = [
-    { id: 1, date: '2 hours ago', thumb: '/server/thumbnails/thumb_1_1772988231582.jpg' },
-    { id: 2, date: 'Yesterday', thumb: '/server/thumbnails/thumb_1_1772988231605.jpg' },
-    { id: 3, date: '3 days ago', thumb: '/server/thumbnails/thumb_1_1772988233122.jpg' }
+    { id: 1, date: '2 hours ago', thumb: '' },
+    { id: 2, date: 'Yesterday', thumb: '' },
+    { id: 3, date: '3 days ago', thumb: '' }
   ];
 
   return (

@@ -70,7 +70,7 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
   const subscribe = async (plan: StripeSubscriptionPlan) => {
     setLoading(`plan:${plan.id}`)
     try {
-      const url = await apiStripeSubscriptionCheckout(plan.id as "starter" | "pro" | "scale")
+      const url = await apiStripeSubscriptionCheckout(plan.id)
       window.location.href = url
     } catch (e: unknown) {
       toast.error(errMsg(e))
@@ -175,9 +175,10 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
                 </div>
               </div>
               {subscriptionPlans.map((plan) => {
+                const normalizedPlanId = String(plan.id || "").toLowerCase()
                 const style =
-                  plan.id === "pro" ? PLAN_STYLE.pro :
-                  plan.id === "scale" ? PLAN_STYLE.scale :
+                  normalizedPlanId === "pro" || normalizedPlanId.endsWith("_pro") || normalizedPlanId.endsWith("-pro") ? PLAN_STYLE.pro :
+                  normalizedPlanId === "scale" || normalizedPlanId.endsWith("_scale") || normalizedPlanId.endsWith("-scale") ? PLAN_STYLE.scale :
                   PLAN_STYLE.starter
 
                 const currentPlanId = String(currentUser?.plan_id || "").toLowerCase()
@@ -198,7 +199,7 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
 
                 return (
                   <div key={plan.id} style={style}>
-                    {plan.id === "pro" ? (
+                    {normalizedPlanId === "pro" || normalizedPlanId.endsWith("_pro") || normalizedPlanId.endsWith("-pro") ? (
                       <div style={{
                         position:"absolute", top:-10, right:12,
                         fontSize:10, fontWeight:800, padding:"3px 8px", borderRadius:999,
