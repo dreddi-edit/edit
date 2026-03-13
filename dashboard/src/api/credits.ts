@@ -34,7 +34,7 @@ export async function apiGetCreditsTransactions(): Promise<CreditsTransactionsRe
 }
 
 export async function apiGetStripePackages(): Promise<StripePackagesRes> {
-  return apiFetch<StripePackagesRes>(`${BASE}/api/stripe/packages`)
+  return apiFetch<StripePackagesRes>(`${BASE}/api/stripe/packages`).catch((e) => { if (e instanceof Error && /Not found\./.test(e.message)) return { ok: true, packages: [] }; throw e; })
 }
 
 export async function apiStripeCheckout(packageId: string): Promise<string> {
@@ -58,5 +58,5 @@ export async function apiStripeSubscriptionCheckout(planId: Plan): Promise<strin
 }
 
 export async function apiGetStripeInvoices(): Promise<StripeInvoicesRes> {
-  return apiFetch<StripeInvoicesRes>(`${BASE}/api/stripe/invoices`)
+  return apiFetch<StripeInvoicesRes>(`${BASE}/api/stripe/invoices`).catch((e) => { if (e instanceof Error && /Not found\./.test(e.message)) return { ok: true, invoices: [] }; throw e; })
 }
