@@ -26,6 +26,20 @@ function resolveScreenshotUrl(input) {
   return new URL(raw.startsWith("/") ? raw : `/${raw}`, `${base}/`).toString()
 }
 
+function parseProjectId(value) {
+  const id = Number(value)
+  if (!Number.isInteger(id) || id <= 0) throw new Error("ungültige project_id")
+  return id
+}
+
+function requireOwnedProject(userId, projectId) {
+  const row = db
+    .prepare("SELECT id FROM projects WHERE id = ? AND user_id = ?")
+    .get(projectId, userId)
+  if (!row) throw new Error("Projekt nicht gefunden")
+  return row
+}
+
 function makeFallbackSvg(title, subtitle) {
   const safeTitle = String(title || "Preview unavailable").replace(/[<>&"]/g, "")
   const safeSubtitle = String(subtitle || "").replace(/[<>&"]/g, "")
@@ -86,6 +100,14 @@ export function registerScreenshotRoutes(app) {
     let browser
 
     try {
+      const userId = Number(req.user?.id)
+      if (!Number.isInteger(userId) || userId <= 0) {
+        return res.status(401).json({ ok: false, error: "Unauthorized" })
+      }
+
+      const projectId = parseProjectId(project_id)
+      requireOwnedProject(userId, projectId)
+
       const targetUrl = resolveScreenshotUrl(url)
       browser = await launchBrowser()
 
@@ -99,7 +121,7 @@ export function registerScreenshotRoutes(app) {
       })
       await new Promise(resolve => setTimeout(resolve, 1200))
 
-      const filename = `thumb_${project_id}_${Date.now()}.jpg`
+      const filename = `thumb_${projectId}_${Date.now()}.jpg`
       const filepath = path.join(THUMB_DIR, filename)
 
       await page.screenshot({
@@ -115,7 +137,7 @@ export function registerScreenshotRoutes(app) {
       } catch {}
 
       thumbUrl = normalizeManagedThumbnailUrl(thumbUrl)
-      db.prepare("UPDATE projects SET thumbnail = ? WHERE id = ?").run(thumbUrl, project_id)
+      db.prepare("UPDATE projects SET thumbnail = ? WHERE id = ?").run(thumbUrl, projectId)
 
       return res.json({ ok: true, thumbnail: thumbUrl })
     } catch (e) {
@@ -123,7 +145,8 @@ export function registerScreenshotRoutes(app) {
       console.error("Screenshot Fehler:", msg)
 
       try {
-        const fallback = await saveFallbackThumbnail(project_id, msg.slice(0, 120))
+        const projectId = parseProjectId(project_id)
+        const fallback = await saveFallbackThumbnail(projectId, msg.slice(0, 120))
         return res.json({ ok: true, thumbnail: fallback, warning: msg })
       } catch (fallbackError) {
         console.error("Fallback thumbnail Fehler:", fallbackError?.message || fallbackError)

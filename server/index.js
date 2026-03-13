@@ -219,7 +219,7 @@ const apiGlobalRateLimit = createRateLimit({
   message: "Too many API requests. Please try again in a minute.",
 })
 app.use("/api", (req, res, next) => {
-  if (req.path === "/stripe/webhook") return next()
+  if (req.path === "/api/stripe/webhook") return next()
   return apiGlobalRateLimit(req, res, next)
 })
 
