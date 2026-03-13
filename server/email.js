@@ -15,7 +15,10 @@ function createTransporter() {
 }
 
 function getBaseUrl() {
-  return String(process.env.ALLOWED_ORIGIN || process.env.APP_URL || '').replace(/\/$/, '');
+  return String(process.env.ALLOWED_ORIGIN || process.env.APP_URL || '')
+    .split(',')[0]
+    .trim()
+    .replace(/\/$/, '');
 }
 
 export async function sendEmail({ to, subject, html }) {

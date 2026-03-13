@@ -50,13 +50,18 @@ export function readOptionalHtml(value, label = "HTML") {
 export function readOptionalUrl(value) {
   const s = String(value || "").trim();
   if (!s) return "";
-  try { new URL(s); return s; } catch { throw new ValidationError("Ungültige URL"); }
+  try {
+    new URL(s);
+    return s;
+  } catch {
+    throw new ValidationError("Ungültige URL");
+  }
 }
 
 export function readOptionalNumber(value, label, { min, max, integer } = {}) {
   if (value === undefined || value === null || value === "") return undefined;
   const n = Number(value);
-  if (isNaN(n)) throw new ValidationError(`${label} muss eine Zahl sein`);
+  if (Number.isNaN(n)) throw new ValidationError(`${label} muss eine Zahl sein`);
   if (min !== undefined && n < min) throw new ValidationError(`${label} muss mindestens ${min} sein`);
   if (max !== undefined && n > max) throw new ValidationError(`${label} darf maximal ${max} sein`);
   if (integer && !Number.isInteger(n)) throw new ValidationError(`${label} muss eine Ganzzahl sein`);
@@ -72,8 +77,21 @@ export function readOptionalBoolean(value) {
   return undefined;
 }
 
+export function readOptionalEnum(value, allowedValues, label, defaultValue) {
+  if (value === undefined || value === null || value === "") return defaultValue;
+  if (allowedValues.includes(value)) return value;
+  throw new ValidationError(`Ungültiger Wert für ${label}. Erlaubt: ${allowedValues.join(", ")}`);
+}
+
+export function readOptionalIsoDate(value, label) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) throw new ValidationError(`Ungültiges Datum für ${label}`);
+  return d.toISOString();
+}
+
 export function readId(value, label = "ID") {
   const n = Number(value);
-  if (isNaN(n) || n < 1 || !Number.isInteger(n)) throw new ValidationError(`Ungültige ${label}`);
+  if (Number.isNaN(n) || n < 1 || !Number.isInteger(n)) throw new ValidationError(`Ungültige ${label}`);
   return n;
 }
