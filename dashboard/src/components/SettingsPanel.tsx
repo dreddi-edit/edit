@@ -286,6 +286,8 @@ export default function SettingsPanel({
   const load = async () => {
     setLoading(true)
     try {
+      const acceptInviteData = await request("/api/orgs/accept-invite", { method: "POST" }).catch(() => null)
+
       const [settingsData, keysData, orgsData, meData, billingData, invoicesData] = await Promise.all([
         request("/api/settings"),
         request("/api/keys"),
@@ -294,6 +296,10 @@ export default function SettingsPanel({
         apiGetStripePackages(),
         apiGetStripeInvoices(),
       ])
+
+      if ((acceptInviteData as { accepted?: number } | null)?.accepted) {
+        toast.success(`Organisation invites accepted: ${(acceptInviteData as { accepted: number }).accepted}`)
+      }
 
       setSettings(settingsData.settings as Settings)
       setMyKeys((keysData.keys || []) as ApiKey[])
