@@ -334,11 +334,6 @@ app.get("/status", (_req, res) => {
   res.status(200).json({ ok: true, status: "healthy", port: process.env.PORT || 8787 })
 })
 
-=> {
-  res.status(200).json({ ok: true, status: "healthy", port: process.env.PORT || 8787 })
-})
-})
-
 app.get("/api/platforms/:platform", authMiddleware, (req, res) => {
   const requested = readOptionalString(req.params.platform, "Platform", { max: 32, empty: "unknown" })
   res.json({ ok: true, platform: requested, guide: getPlatformGuide(requested) })
