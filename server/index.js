@@ -155,7 +155,7 @@ function localRebuild(html) {
 const app = express()
 app.set("trust proxy", 1)
 const corsOrigin = process.env.NODE_ENV === "production"
-  ? (process.env.ALLOWED_ORIGIN?.split(",").map(s => s.trim()).filter(Boolean) || [])
+  ? ((process.env.ALLOWED_ORIGIN || process.env.APP_URL || "").split(",").map(s => s.trim()).filter(Boolean))
   : [`http://localhost:${process.env.PORT || 8787}`, "http://localhost:8788"]
 if (process.env.NODE_ENV === "production" && corsOrigin.length === 0) {
   console.warn("WARN: ALLOWED_ORIGIN not set in production – CORS will reject all origins. Set ALLOWED_ORIGIN in .env")
