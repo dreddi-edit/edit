@@ -35,6 +35,7 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   background: var(--pd-bg);
   color: var(--pd-text);
   font-family: var(--pd-font);
@@ -3578,5 +3579,77 @@ textarea:focus-visible,
     align-items: flex-start;
     flex-direction: column;
     gap: 4px;
+  }
+}
+
+@media (max-width: 480px) {
+  .pd-header {
+    padding: 8px 10px;
+    height: auto;
+    gap: 6px;
+  }
+
+  .pd-btn {
+    min-height: 36px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+
+  .pd-header-right > .pd-btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .pd-modal-backdrop {
+    padding: 8px;
+    align-items: flex-end;
+  }
+
+  .pd-modal {
+    max-width: 100%;
+    max-height: 95vh;
+    border-radius: 14px 14px 0 0;
+  }
+
+  .pd-modal-wide {
+    max-width: 100%;
+  }
+
+  .pd-projects-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .pd-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .pd-toolbar > * {
+    width: 100%;
+  }
+
+  .pd-sidebar-item {
+    min-height: 44px;
+  }
+
+  .pd-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .pd-studio-block {
+    width: 100%;
+  }
+
+  .pd-card-actions {
+    flex-direction: column;
+  }
+
+  .pd-import-summary-head {
+    min-width: 0;
+  }
+
+  .pd-import-analysis-copy {
+    min-width: 0;
   }
 }
