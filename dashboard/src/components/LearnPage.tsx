@@ -153,7 +153,7 @@ export default function LearnPage({ onBack }: LearnPageProps) {
               cursor: "pointer",
             }}
           >
-            Back to landing
+            Return to Landing Page
           </button>
         </div>
 

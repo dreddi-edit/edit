@@ -1,7 +1,7 @@
-import React from 'react';
-
-import { useState, useEffect, useRef } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import "./landing.css"
+import { AVAILABLE_UI_LANGUAGES, useTranslation } from "../i18n/useTranslation"
+import { applyThemeToDocument, persistThemeChoice, resolveThemePreference } from "../utils/theme"
 
 interface LandingPageProps {
   onEnter: () => void
@@ -22,56 +22,6 @@ function useVisible(threshold = 0.12) {
     return () => obs.disconnect()
   }, [threshold])
   return { ref, visible }
-}
-
-const TERMINAL_LINES = [
-  { delay: 0, text: "$ reframe import --url https://oldclient.com", type: "cmd" },
-  { delay: 600, text: "  -> Crawling 24 pages...", type: "info" },
-  { delay: 1100, text: "  -> Extracting blocks, assets, SEO...", type: "info" },
-  { delay: 1700, text: "  + Project ready  (24 pages, 312 blocks)", type: "ok" },
-  { delay: 2200, text: "$ reframe ai --rewrite 'make it more professional'", type: "cmd" },
-  { delay: 2900, text: "  -> Claude Sonnet - streaming...", type: "info" },
-  { delay: 3600, text: "  + 38 blocks rewritten", type: "ok" },
-  { delay: 4100, text: "$ reframe export --format wp-theme", type: "cmd" },
-  { delay: 4700, text: "  -> Compiling WordPress theme...", type: "info" },
-  { delay: 5200, text: "  + client-theme.zip ready  (4.2 MB)", type: "ok" },
-  { delay: 5700, text: "$ reframe deploy --target netlify", type: "cmd" },
-  { delay: 6300, text: "  + Live at  https://newclient.netlify.app", type: "ok" },
-]
-
-function Terminal() {
-  const [shown, setShown] = useState<number[]>([])
-  const bottomRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    const timers = TERMINAL_LINES.map((line, i) =>
-      setTimeout(() => setShown((p) => [...p, i]), line.delay + 800),
-    )
-    return () => timers.forEach((timer) => clearTimeout(timer))
-  }, [])
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [shown])
-
-  return (
-    <div className="lp-terminal">
-      <div className="lp-terminal__bar">
-        <span /><span /><span />
-        <div className="lp-terminal__title">reframe · agency workflow</div>
-      </div>
-      <div className="lp-terminal__body">
-        {TERMINAL_LINES.map((line, i) =>
-          shown.includes(i) ? (
-            <div key={i} className={`lp-terminal__line lp-terminal__line--${line.type}`}>
-              {line.text}
-            </div>
-          ) : null,
-        )}
-        <div ref={bottomRef} />
-      </div>
-    </div>
-  )
 }
 
 const FEATURES = [
@@ -99,9 +49,9 @@ const FEATURES = [
   {
     icon: "🌍",
     tag: "Translation",
-    title: "50+ languages, layout intact",
+    title: "All languages, layout intact",
     body: "Translate any page without touching the DOM structure. Language variants stored separately. Switch between English, German, French and more with no re-translating needed.",
-    items: ["DOM-preserving translation", "50+ languages", "Manual segment overrides", "Language-variant share links"],
+    items: ["DOM-preserving translation", "All languages", "Manual segment overrides", "Language-variant share links"],
   },
   {
     icon: "⚡",
@@ -122,9 +72,11 @@ const FEATURES = [
 function FeatureCard({
   feature,
   index,
+  tr,
 }: {
   feature: (typeof FEATURES)[number]
   index: number
+  tr: (value: string) => string
 }) {
   const { ref, visible } = useVisible()
   return (
@@ -134,11 +86,11 @@ function FeatureCard({
       style={{ transitionDelay: `${(index % 3) * 80}ms` }}
     >
       <div className="lp-feat__icon">{feature.icon}</div>
-      <div className="lp-feat__tag">{feature.tag}</div>
-      <div className="lp-feat__title">{feature.title}</div>
-      <div className="lp-feat__body">{feature.body}</div>
+      <div className="lp-feat__tag">{tr(feature.tag)}</div>
+      <div className="lp-feat__title">{tr(feature.title)}</div>
+      <div className="lp-feat__body">{tr(feature.body)}</div>
       <ul className="lp-feat__list">
-        {feature.items.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}
+        {feature.items.map((item, itemIndex) => <li key={itemIndex}>{tr(item)}</li>)}
       </ul>
     </div>
   )
@@ -177,7 +129,7 @@ const PLANS = [
     per: "/mo",
     sub: "5 projects · €16.50 credits",
     featured: false,
-    items: ["All 11 export formats", "Translation · 50+ languages", "Version history", "Claude Haiku AI"],
+    items: ["All 11 export formats", "Translation · all languages", "Version history", "Claude Haiku AI"],
     missing: ["AI Studio tools", "Teams"],
   },
   {
@@ -200,7 +152,7 @@ const PLANS = [
   },
 ]
 
-function ROICalc() {
+function ROICalc({ tr }: { tr: (value: string) => string }) {
   const [projects, setProjects] = useState(4)
   const [hours, setHours] = useState(35)
   const [rate, setRate] = useState(95)
@@ -211,35 +163,35 @@ function ROICalc() {
     <div ref={ref} className={`lp-roi ${visible ? "lp-roi--visible" : ""}`}>
       <div className="lp-roi__inputs">
         <label>
-          <span>Migrations / month</span>
+          <span>{tr("Migrations / month")}</span>
           <input type="range" min={1} max={20} value={projects} onChange={(e) => setProjects(Number(e.target.value))} />
           <strong>{projects}</strong>
         </label>
         <label>
-          <span>Manual hours / project</span>
+          <span>{tr("Manual hours / project")}</span>
           <input type="range" min={5} max={80} value={hours} onChange={(e) => setHours(Number(e.target.value))} />
           <strong>{hours}h</strong>
         </label>
         <label>
-          <span>Hourly rate (€)</span>
+          <span>{tr("Hourly rate (€)")}</span>
           <input type="range" min={30} max={250} step={5} value={rate} onChange={(e) => setRate(Number(e.target.value))} />
           <strong>€{rate}</strong>
         </label>
       </div>
       <div className="lp-roi__result">
         <div className="lp-roi__num">€{saved.toLocaleString()}</div>
-        <div className="lp-roi__label">recovered annually</div>
+        <div className="lp-roi__label">{tr("recovered annually")}</div>
         <div className="lp-roi__sub">
-          Reframe Pro costs €360/year.
+          {tr("Reframe Pro costs €360/year.")}
           <br />
-          ROI: <strong>{Math.round(saved / 360)}x</strong>
+          {tr("ROI:")} <strong>{Math.round(saved / 360)}x</strong>
         </div>
       </div>
     </div>
   )
 }
 
-function InquiryForm() {
+function InquiryForm({ tr }: { tr: (value: string) => string }) {
   const [email, setEmail] = useState("")
   const [type, setType] = useState("agency")
   const [msg, setMsg] = useState("")
@@ -268,8 +220,8 @@ function InquiryForm() {
       <div className="lp-inquiry lp-inquiry--sent">
         <div className="lp-inquiry__thanks">
           <span className="lp-inquiry__checkmark">✓</span>
-          <strong>You're on the list.</strong>
-          <p>We'll reach out within 48 hours with early-access details and a live demo offer.</p>
+          <strong>{tr("You're on the list.")}</strong>
+          <p>{tr("We'll reach out within 48 hours with early-access details and a live demo offer.")}</p>
         </div>
       </div>
     )
@@ -278,35 +230,49 @@ function InquiryForm() {
   return (
     <div className="lp-inquiry">
       <select value={type} onChange={(e) => setType(e.target.value)} className="lp-inquiry__select">
-        <option value="agency">Digital agency</option>
-        <option value="freelancer">Freelancer</option>
-        <option value="inhouse">In-house team</option>
-        <option value="investor">Investor</option>
-        <option value="other">Other</option>
+        <option value="agency">{tr("Digital agency")}</option>
+        <option value="freelancer">{tr("Freelancer")}</option>
+        <option value="inhouse">{tr("In-house team")}</option>
+        <option value="investor">{tr("Investor")}</option>
+        <option value="other">{tr("Other")}</option>
       </select>
       <input
         type="email"
-        placeholder="your@email.com"
+        placeholder={tr("your@email.com")}
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && submit()}
         className="lp-inquiry__input"
       />
       <textarea
-        placeholder="Anything specific you want to see? (optional)"
+        placeholder={tr("Anything specific you want to see? (optional)")}
         value={msg}
         onChange={(e) => setMsg(e.target.value)}
         className="lp-inquiry__textarea"
         rows={2}
       />
       <button onClick={submit} disabled={loading || !email.trim()} className="lp-inquiry__btn">
-        {loading ? "Sending..." : "Request early access ->"}
+        {loading ? tr("Sending...") : tr("Request early access →")}
       </button>
     </div>
   )
 }
 
-function AnimStat({ n, label, prefix = "", suffix = "" }: { n: number; label: string; prefix?: string; suffix?: string }) {
+function AnimStat({
+  n,
+  label,
+  prefix = "",
+  suffix = "",
+  display,
+  tr,
+}: {
+  n: number
+  label: string
+  prefix?: string
+  suffix?: string
+  display?: string
+  tr: (value: string) => string
+}) {
   const { ref, visible } = useVisible()
   const [count, setCount] = useState(0)
 
@@ -324,8 +290,8 @@ function AnimStat({ n, label, prefix = "", suffix = "" }: { n: number; label: st
 
   return (
     <div ref={ref} className="lp-stat">
-      <div className="lp-stat__num">{prefix}{count.toLocaleString()}{suffix}</div>
-      <div className="lp-stat__label">{label}</div>
+      <div className="lp-stat__num">{display ?? `${prefix}${count.toLocaleString()}${suffix}`}</div>
+      <div className="lp-stat__label">{tr(label)}</div>
     </div>
   )
 }
@@ -338,23 +304,32 @@ const FAQS = [
   { q: "How much does API usage cost?", a: "Credits only deduct when you run AI, not for editing, storing, or exporting. Each plan includes a monthly credit balance. You can see exact cost per action before approving it." },
 ]
 
-function FAQItem({ q, a }: { q: string; a: string }) {
+function FAQItem({ q, a, tr }: { q: string; a: string; tr: (value: string) => string }) {
   const [open, setOpen] = useState(false)
   return (
     <div className={`lp-faq__item ${open ? "lp-faq__item--open" : ""}`} onClick={() => setOpen((o) => !o)}>
-      <div className="lp-faq__q">{q}<span className="lp-faq__ic">{open ? "−" : "+"}</span></div>
-      {open && <div className="lp-faq__a">{a}</div>}
+      <div className="lp-faq__q">{tr(q)}<span className="lp-faq__ic">{open ? "−" : "+"}</span></div>
+      {open && <div className="lp-faq__a">{tr(a)}</div>}
     </div>
   )
 }
 
 export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const [theme, setTheme] = useState<"dark" | "light">(resolveThemePreference)
+  const { t, lang, setLang } = useTranslation()
+  const languageOptions = useMemo(() => AVAILABLE_UI_LANGUAGES.slice(0, 12), [])
+  const tr = (value: string) => t(value)
 
   const scrollTo = (id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth" })
     setMenuOpen(false)
   }
+
+  useEffect(() => {
+    applyThemeToDocument(theme)
+    persistThemeChoice(theme)
+  }, [theme])
 
   return (
     <div className="lp">
@@ -365,17 +340,31 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
             <span>Reframe</span>
           </div>
           <div className={`lp-nav__links ${menuOpen ? "lp-nav__links--open" : ""}`}>
-            <button onClick={() => scrollTo("features")}>Features</button>
-            <button onClick={() => scrollTo("compare")}>Compare</button>
-            <button onClick={() => scrollTo("pricing")}>Pricing</button>
-            <button onClick={() => scrollTo("faq")}>FAQ</button>
-            <button onClick={() => scrollTo("early-access")} className="lp-nav__cta-link">Early access</button>
+            <button onClick={() => scrollTo("features")}>{tr("Features")}</button>
+            <button onClick={() => scrollTo("compare")}>{tr("Compare")}</button>
+            <button onClick={() => scrollTo("pricing")}>{tr("Pricing")}</button>
+            <button onClick={() => scrollTo("faq")}>{tr("FAQ")}</button>
+            <button onClick={() => scrollTo("early-access")} className="lp-nav__cta-link">{tr("Early access")}</button>
           </div>
           <div className="lp-nav__actions">
-            <button className="lp-btn lp-btn--ghost" onClick={onEnter}>Sign in</button>
-            <button className="lp-btn lp-btn--ghost" onClick={() => onLearn?.()}>Learn</button>
-            <button className="lp-btn lp-btn--primary" onClick={onEnter}>Start free</button>
-            <button className="lp-nav__burger" onClick={() => setMenuOpen((o) => !o)} aria-label="Menu">
+            <select
+              className="lp-nav__select"
+              value={lang}
+              onChange={(event) => { void setLang(event.target.value) }}
+              aria-label={tr("Language")}
+            >
+              {languageOptions.map((option) => <option key={option.code} value={option.code}>{option.label}</option>)}
+            </select>
+            <button
+              className="lp-btn lp-btn--ghost lp-btn--compact"
+              onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+            >
+              {theme === "dark" ? tr("Light") : tr("Dark")}
+            </button>
+            <button className="lp-btn lp-btn--ghost lp-btn--compact" onClick={onEnter}>{tr("Sign in")}</button>
+            <button className="lp-btn lp-btn--ghost lp-btn--compact" onClick={() => onLearn?.()}>{tr("Learn")}</button>
+            <button className="lp-btn lp-btn--primary" onClick={onEnter}>{tr("Start free")}</button>
+            <button className="lp-nav__burger" onClick={() => setMenuOpen((o) => !o)} aria-label={tr("Menu")}>
               <span /><span /><span />
             </button>
           </div>
@@ -389,50 +378,50 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
           <div className="lp-hero__grid" />
         </div>
         <div className="lp-hero__inner">
-          <div className="lp-hero__copy">
-            <div className="lp-badge">
-              <span className="lp-badge__dot" />
-              Early access · Agency-first
-            </div>
-            <h1 className="lp-hero__h1">
-              The site
-              <br />
-              migration
-              <br />
-              <em>engine.</em>
-            </h1>
-            <p className="lp-hero__sub">
-              Import any existing website. Edit it visually with AI.
-              <br />
-              Export in whatever format your client needs.
-            </p>
-            <div className="lp-hero__btns">
-              <button className="lp-btn lp-btn--primary lp-btn--lg" onClick={onEnter}>
-                Start free - no card
-              </button>
-              <button className="lp-btn lp-btn--ghost lp-btn--lg" onClick={() => onLearn?.()}>
-                Learn
-              </button>
-            </div>
-            <div className="lp-hero__stats">
-              <AnimStat n={11} label="export formats" />
-              <div className="lp-hero__stat-div" />
-              <AnimStat n={50} label="languages" suffix="+" />
-              <div className="lp-hero__stat-div" />
-              <AnimStat n={17} label="hours saved/project" suffix="h" />
-            </div>
-          </div>
-          <div className="lp-hero__demo">
-            <div className="lp-video-card">
-              <div className="lp-video-card__top">
-                <span className="lp-video-card__badge">60s demo</span>
-                <span className="lp-video-card__meta">Guided walkthrough</span>
+            <div className="lp-hero__copy">
+              <div className="lp-badge">
+                <span className="lp-badge__dot" />
+                {tr("Early access · Agency-first")}
               </div>
+              <h1 className="lp-hero__h1">
+                {tr("The site")}
+                <br />
+                {tr("migration")}
+                <br />
+                <em>{tr("engine.")}</em>
+              </h1>
+              <p className="lp-hero__sub">
+                {tr("Import any existing website. Edit it visually with AI.")}
+                <br />
+                {tr("Export in whatever format your client needs.")}
+              </p>
+              <div className="lp-hero__btns">
+                <button className="lp-btn lp-btn--primary lp-btn--lg" onClick={onEnter}>
+                  {tr("Start free - no card")}
+                </button>
+                <button className="lp-btn lp-btn--ghost lp-btn--lg" onClick={() => onLearn?.()}>
+                  {tr("Learn")}
+                </button>
+              </div>
+              <div className="lp-hero__stats">
+                <AnimStat n={11} label="export formats" tr={tr} />
+                <div className="lp-hero__stat-div" />
+                <AnimStat n={0} label="languages" display={tr("all languages")} tr={tr} />
+                <div className="lp-hero__stat-div" />
+                <AnimStat n={17} label="hours saved/project" suffix="h" tr={tr} />
+              </div>
+            </div>
+            <div className="lp-hero__demo">
+              <div className="lp-video-card">
+                <div className="lp-video-card__top">
+                  <span className="lp-video-card__badge">{tr("60s demo")}</span>
+                  <span className="lp-video-card__meta">{tr("Guided walkthrough")}</span>
+                </div>
 
               <div className="lp-video-embed">
                 <iframe
                   src="https://embed.app.guidde.com/playbooks/iyeGPeTVt9anr6vLen1CC5?mode=videoOnly"
-                  title="Reframe demo"
+                  title={tr("Reframe demo")}
                   loading="lazy"
                   allow="fullscreen"
                   allowFullScreen
@@ -445,8 +434,8 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
 
       <section className="lp-workflow">
         <div className="lp-section__inner">
-          <div className="lp-eyebrow">How it works</div>
-          <h2 className="lp-h2">Four steps. One system.</h2>
+          <div className="lp-eyebrow">{tr("How it works")}</div>
+          <h2 className="lp-h2">{tr("Four steps. One system.")}</h2>
           <div className="lp-workflow__steps">
             {[
               { letter: "A", title: "Import", desc: "Any URL, ZIP, HTML file, PDF brief, or screenshot. Semantic parsing turns it into a structured project in minutes." },
@@ -456,8 +445,8 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
             ].map((step, i) => (
               <div key={i} className="lp-workflow__step">
                 <div className="lp-workflow__letter">{step.letter}</div>
-                <div className="lp-workflow__title">{step.title}</div>
-                <div className="lp-workflow__desc">{step.desc}</div>
+                <div className="lp-workflow__title">{tr(step.title)}</div>
+                <div className="lp-workflow__desc">{tr(step.desc)}</div>
               </div>
             ))}
           </div>
@@ -466,15 +455,15 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
 
       <section id="features" className="lp-features">
         <div className="lp-section__inner">
-          <div className="lp-eyebrow">Features</div>
+          <div className="lp-eyebrow">{tr("Features")}</div>
           <h2 className="lp-h2">
-            Everything agencies need.
+            {tr("Everything agencies need.")}
             <br />
-            Nothing they don't.
+            {tr("Nothing they don't.")}
           </h2>
           <div className="lp-features__grid">
             {FEATURES.map((feature, index) => (
-              <FeatureCard key={index} feature={feature} index={index} />
+              <FeatureCard key={index} feature={feature} index={index} tr={tr} />
             ))}
           </div>
         </div>
@@ -482,24 +471,24 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
 
       <section id="compare" className="lp-compare">
         <div className="lp-section__inner">
-          <div className="lp-eyebrow">Comparison</div>
-          <h2 className="lp-h2">How Reframe fits in.</h2>
-          <p className="lp-compare__sub">Honest comparison for agencies that start with existing sites, not agencies building from scratch.</p>
+          <div className="lp-eyebrow">{tr("Comparison")}</div>
+          <h2 className="lp-h2">{tr("How Reframe fits in.")}</h2>
+          <p className="lp-compare__sub">{tr("Honest comparison for agencies that start with existing sites, not agencies building from scratch.")}</p>
           <div className="lp-compare__wrap">
             <table className="lp-compare__table">
               <thead>
                 <tr>
-                  <th>Capability</th>
+                  <th>{tr("Capability")}</th>
                   <th className="lp-compare__th--rf">Reframe</th>
                   <th>Webflow</th>
-                  <th>AI generators</th>
-                  <th>Manual</th>
+                  <th>{tr("AI generators")}</th>
+                  <th>{tr("Manual")}</th>
                 </tr>
               </thead>
               <tbody>
                 {COMPARE_ROWS.map((row, i) => (
                   <tr key={i}>
-                    <td>{row.label}</td>
+                    <td>{tr(row.label)}</td>
                     <td className="lp-compare__td--rf"><Cell v={row.rf as CellVal} /></td>
                     <td><Cell v={row.wf as CellVal} /></td>
                     <td><Cell v={row.ai as CellVal} /></td>
@@ -514,37 +503,37 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
 
       <section className="lp-roi-section">
         <div className="lp-section__inner">
-          <div className="lp-eyebrow">ROI Calculator</div>
-          <h2 className="lp-h2">Calculate your margin recovery.</h2>
-          <p className="lp-compare__sub">Drag the sliders to match your workload.</p>
-          <ROICalc />
+          <div className="lp-eyebrow">{tr("ROI Calculator")}</div>
+          <h2 className="lp-h2">{tr("Calculate your margin recovery.")}</h2>
+          <p className="lp-compare__sub">{tr("Drag the sliders to match your workload.")}</p>
+          <ROICalc tr={tr} />
         </div>
       </section>
 
       <section id="pricing" className="lp-pricing">
         <div className="lp-section__inner">
-          <div className="lp-eyebrow">Pricing</div>
-          <h2 className="lp-h2">Pay for AI. Not for projects.</h2>
-          <p className="lp-compare__sub">Credits deduct only when you run AI, not for editing, exporting, or storing.</p>
+          <div className="lp-eyebrow">{tr("Pricing")}</div>
+          <h2 className="lp-h2">{tr("Pay for AI. Not for projects.")}</h2>
+          <p className="lp-compare__sub">{tr("Credits deduct only when you run AI, not for editing, exporting, or storing.")}</p>
           <div className="lp-pricing__grid">
             {PLANS.map((plan, i) => (
               <div key={i} className={`lp-plan ${plan.featured ? "lp-plan--featured" : ""}`}>
-                {plan.featured && <div className="lp-plan__badge">Most popular</div>}
-                <div className="lp-plan__name">{plan.name}</div>
+                {plan.featured && <div className="lp-plan__badge">{tr("Most popular")}</div>}
+                <div className="lp-plan__name">{tr(plan.name)}</div>
                 <div className="lp-plan__price">
                   {plan.price}
                   {plan.per && <span>{plan.per}</span>}
                 </div>
-                <div className="lp-plan__sub">{plan.sub}</div>
+                <div className="lp-plan__sub">{tr(plan.sub)}</div>
                 <ul className="lp-plan__items">
-                  {plan.items.map((item, j) => <li key={j}>{item}</li>)}
-                  {plan.missing.map((item, j) => <li key={`m${j}`} className="lp-plan__item--off">{item}</li>)}
+                  {plan.items.map((item, j) => <li key={j}>{tr(item)}</li>)}
+                  {plan.missing.map((item, j) => <li key={`m${j}`} className="lp-plan__item--off">{tr(item)}</li>)}
                 </ul>
                 <button
                   className={`lp-btn ${plan.featured ? "lp-btn--primary" : "lp-btn--ghost"} lp-btn--full`}
                   onClick={onEnter}
                 >
-                  {plan.price === "Free" ? "Start free" : "Get started"}
+                  {plan.price === "Free" ? tr("Start free") : tr("Get started")}
                 </button>
               </div>
             ))}
@@ -554,26 +543,27 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
 
       <section id="faq" className="lp-faq">
         <div className="lp-section__inner lp-section__inner--narrow">
-          <div className="lp-eyebrow">FAQ</div>
-          <h2 className="lp-h2">Common questions.</h2>
+          <div className="lp-eyebrow">{tr("FAQ")}</div>
+          <h2 className="lp-h2">{tr("Common questions.")}</h2>
           <div className="lp-faq__list">
-            {FAQS.map((faq, i) => <FAQItem key={i} q={faq.q} a={faq.a} />)}
+            {FAQS.map((faq, i) => <FAQItem key={i} q={faq.q} a={faq.a} tr={tr} />)}
           </div>
         </div>
       </section>
 
       <section id="early-access" className="lp-early">
         <div className="lp-section__inner lp-section__inner--narrow">
-          <div className="lp-eyebrow">Early access</div>
-          <h2 className="lp-h2">Get in early.</h2>
+          <div className="lp-eyebrow">{tr("Early access")}</div>
+          <h2 className="lp-h2">{tr("Get in early.")}</h2>
           <p className="lp-early__sub">
-            We're onboarding the first wave of agencies manually, each with a live demo call and a direct line to the team.
-            Leave your email and we'll reach out within 48 hours.
+            {tr("We're onboarding the first wave of agencies manually, each with a live demo call and a direct line to the team.")}
+            {" "}
+            {tr("Leave your email and we'll reach out within 48 hours.")}
           </p>
-          <InquiryForm />
+          <InquiryForm tr={tr} />
           <div className="lp-early__or">
-            Already have an account?{" "}
-            <button className="lp-early__link" onClick={onEnter}>Sign in {"->"}</button>
+            {tr("Already have an account?")}{" "}
+            <button className="lp-early__link" onClick={onEnter}>{tr("Sign in")} {"→"}</button>
           </div>
         </div>
       </section>
@@ -584,14 +574,14 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
             <div className="lp-nav__mark" />
             <span>Reframe</span>
           </div>
-          <div className="lp-footer__tagline">"Import. Edit. Export."</div>
+          <div className="lp-footer__tagline">"{tr("Import. Edit. Export.")}"</div>
           <div className="lp-footer__links">
-            <button onClick={onEnter}>Sign in</button>
-            <button onClick={() => scrollTo("pricing")}>Pricing</button>
-            <button onClick={() => scrollTo("faq")}>FAQ</button>
-            <button onClick={() => scrollTo("early-access")}>Contact</button>
+            <button onClick={onEnter}>{tr("Sign in")}</button>
+            <button onClick={() => scrollTo("pricing")}>{tr("Pricing")}</button>
+            <button onClick={() => scrollTo("faq")}>{tr("FAQ")}</button>
+            <button onClick={() => scrollTo("early-access")}>{tr("Contact")}</button>
           </div>
-          <div className="lp-footer__copy">© 2025 Reframe · Early access</div>
+          <div className="lp-footer__copy">© 2026 Reframe · {tr("Early access")}</div>
         </div>
       </footer>
     </div>
