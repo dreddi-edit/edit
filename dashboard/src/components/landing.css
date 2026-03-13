@@ -867,6 +867,11 @@
   .lp-workflow__steps::before { display: none; }
   .lp-roi { grid-template-columns: 1fr; gap: 32px; }
 }
+@media (max-width: 820px) {
+  .lp-compare__table { min-width: 540px; }
+  .lp-compare__table th:nth-child(4),
+  .lp-compare__table td:nth-child(4) { display: none; }
+}
 @media (max-width: 640px) {
   .lp-nav__links { display: none; position: absolute; top: 60px; left: 0; right: 0; flex-direction: column; background: rgba(6,8,12,.96); border-bottom: 1px solid var(--lp-border); padding: 12px; gap: 2px; z-index: 99; }
   .lp-nav__links--open { display: flex; }
@@ -875,6 +880,7 @@
   .lp-features__grid { grid-template-columns: 1fr; }
   .lp-pricing__grid { grid-template-columns: 1fr; }
   .lp-workflow__steps { grid-template-columns: 1fr; }
+  .lp-compare__table { min-width: 100%; }
   .lp-compare__table th:nth-child(3),
   .lp-compare__table td:nth-child(3),
   .lp-compare__table th:nth-child(4),
