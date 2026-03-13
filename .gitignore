@@ -24,3 +24,9 @@ server/thumbnails/
 repo/
 roadmap/
 server/data/
+
+# local assessment / scratch files
+auth_assessment.html
+checklist_items.txt
+generate_report.py
+yc_assessment_report.html
