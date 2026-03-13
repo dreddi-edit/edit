@@ -11,12 +11,14 @@ import {
   apiStripeSubscriptionCheckout,
 } from "../api/credits"
 import type { StripePackage, StripeSubscriptionPlan, CreditTransaction } from "../api/types"
+import { apiMe, type User } from "../api/auth"
 
 export default function CreditsPanel({ onClose }: { onClose: () => void }) {
   const [balance, setBalance] = useState<number | null>(null)
   const [packages, setPackages] = useState<StripePackage[]>([])
   const [subscriptionPlans, setSubscriptionPlans] = useState<StripeSubscriptionPlan[]>([])
   const [transactions, setTransactions] = useState<CreditTransaction[]>([])
+  const [currentUser, setCurrentUser] = useState<User | null>(null)
   const [loading, setLoading] = useState<string | null>(null)
 
   useEffect(() => {
@@ -38,10 +40,11 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
 
   const load = async () => {
     try {
-      const [b, p, t] = await Promise.all([
+      const [b, p, t, me] = await Promise.all([
         apiGetBalance(),
         apiGetStripePackages(),
         apiGetCreditsTransactions(),
+        apiMe(),
       ])
       if (b != null) setBalance(b)
       if (p.ok) {
@@ -49,6 +52,7 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
         setSubscriptionPlans(p.subscription_plans || [])
       }
       if (t.ok) setTransactions(t.transactions)
+      setCurrentUser(me)
     } catch (e) { toast.error(errMsg(e)) }
   }
 
@@ -176,6 +180,22 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
                   plan.id === "scale" ? PLAN_STYLE.scale :
                   PLAN_STYLE.starter
 
+                const currentPlanId = String(currentUser?.plan_id || "").toLowerCase()
+                const planId = String(plan.id || "").toLowerCase()
+                const planLabel = String(plan.label || "").toLowerCase()
+                const normalizedCurrent = currentPlanId === "basis" ? "" : currentPlanId
+                const isCurrent =
+                  currentUser?.plan_status !== "canceled" &&
+                  Boolean(
+                    normalizedCurrent &&
+                    (
+                      planId === normalizedCurrent ||
+                      planId.endsWith(`_${normalizedCurrent}`) ||
+                      planId.endsWith(`-${normalizedCurrent}`) ||
+                      planLabel.includes(normalizedCurrent)
+                    )
+                  )
+
                 return (
                   <div key={plan.id} style={style}>
                     {plan.id === "pro" ? (
@@ -200,16 +220,17 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
                       • VAT handled at checkout
                     </div>
                     <div
-                      onClick={() => void subscribe(plan)}
+                      onClick={() => { if (!isCurrent) void subscribe(plan) }}
                       style={{
                         marginTop: 14, width: "100%", height: 38, borderRadius: 12, border: "1px solid rgba(138,164,255,0.26)",
                         background: loading === `plan:${plan.id}` ? "rgba(138,164,255,0.16)" : "linear-gradient(180deg, #9bb1ff 0%, #7f99f6 100%)",
                         color: loading === `plan:${plan.id}` ? "var(--text-primary)" : "#0d1320", fontWeight: 700, fontSize: 13,
                         display: "flex", alignItems: "center", justifyContent: "center",
-                        cursor: "pointer",
+                        cursor: isCurrent ? "default" : "pointer",
+                        opacity: isCurrent ? 0.65 : 1,
                       }}
                     >
-                      {loading === `plan:${plan.id}` ? "Loading..." : `Start ${plan.label}`}
+                      {isCurrent ? "Current plan" : loading === `plan:${plan.id}` ? "Loading..." : `Start ${plan.label}`}
                     </div>
                   </div>
                 )
