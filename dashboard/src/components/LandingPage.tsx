@@ -345,6 +345,12 @@ const FAQS_EN = [
   { q: "How much does API usage cost?", a: "Credits only deduct when you run AI, not for editing, storing, or exporting. Each plan includes a monthly credit balance. You can see exact cost per action before approving it." },
 ]
 
+const LANG_LABELS: Record<string, string> = {
+  en: "EN", de: "DE", es: "ES", fr: "FR", pt: "PT", it: "IT",
+  nl: "NL", pl: "PL", ru: "RU", zh: "ZH", ja: "JA", ko: "KO",
+  ar: "AR", hi: "HI", tr: "TR",
+}
+
 function FAQItem({ q, a }: { q: string; a: string }) {
   const [open, setOpen] = useState(false)
   return (
@@ -410,12 +416,6 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
   const translatedFaqs = FAQS_EN.map(f => ({ q: rt(f.q), a: rt(f.a) }))
   const translatedCompare = COMPARE_ROWS.map(r => ({ ...r, label: rt(r.label) }))
 
-  const LANG_LABELS: Record<string, string> = {
-    en: "EN", de: "DE", es: "ES", fr: "FR", pt: "PT", it: "IT",
-    nl: "NL", pl: "PL", ru: "RU", zh: "ZH", ja: "JA", ko: "KO",
-    ar: "AR", hi: "HI", tr: "TR",
-  }
-
   const scrollTo = (id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth" })
     setMenuOpen(false)
@@ -458,7 +458,7 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
                       role="option"
                       aria-selected={lang === code}
                       className={`lp-lang-menu__item ${lang === code ? "lp-lang-menu__item--active" : ""}`}
-                      onClick={() => { setLangMenuOpen(false); void setLang(code) }}
+                      onClick={() => { setLangMenuOpen(false); setLang(code) }}
                     >
                       {label}
                     </button>
