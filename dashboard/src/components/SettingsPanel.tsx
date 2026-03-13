@@ -345,10 +345,40 @@ export default function SettingsPanel({
     }
   }
 
-  const startSubscription = async (planId: "starter" | "pro" | "scale") => {
-    setAccountBusy(`subscribe-${planId}`)
+  const startSubscription = async (planKey: string) => {
+    setAccountBusy(`subscribe-${planKey}`)
     try {
-      const url = await apiStripeSubscriptionCheckout(planId)
+      const aliasMap: Record<string, string> = {
+        starter: "starter",
+        pro: "pro",
+        scale: "scale",
+        sub_starter: "starter",
+        sub_pro: "pro",
+        sub_scale: "scale",
+      }
+
+      const normalized = String(planKey || "").trim()
+      const wantedAlias = aliasMap[normalized] || normalized
+
+      const matchedPlan =
+        subscriptionPlans.find((plan) => String(plan.id) === normalized) ||
+        subscriptionPlans.find((plan) => {
+          const planId = String(plan.id || "").toLowerCase()
+          const planLabel = String(plan.label || "").toLowerCase()
+          return (
+            planId === wantedAlias ||
+            planId.endsWith(`_${wantedAlias}`) ||
+            planId.endsWith(`-${wantedAlias}`) ||
+            planLabel.includes(wantedAlias)
+          )
+        })
+
+      const checkoutPriceId = String(matchedPlan?.id || "").trim()
+      if (!checkoutPriceId) {
+        throw new Error("No valid subscription plan available for checkout")
+      }
+
+      const url = await apiStripeSubscriptionCheckout(checkoutPriceId)
       window.location.href = url
     } catch (error) {
       toast.error(errMsg(error))
