@@ -48,6 +48,7 @@ import {
 } from "./api/projects"
 import AuthScreen from "./components/AuthScreen"
 import LandingPage from "./components/LandingPage"
+import LearnPage from "./components/LearnPage"
 import ResetPasswordScreen from "./components/ResetPasswordScreen"
 import ProjectDashboard from "./components/ProjectDashboard"
 import AssistantWidget from "./components/AssistantWidget"
@@ -2686,7 +2687,17 @@ useEffect(() => {
 
   if (view === "landing") return (
     <>
-      <LandingPage onEnter={() => setView("auth")} />
+      <LandingPage
+        onEnter={() => setView("auth")}
+        onLearn={() => setView("learn")}
+      />
+      <ToastContainer />
+    </>
+  )
+
+  if (view === "learn") return (
+    <>
+      <LearnPage onBack={() => setView("landing")} />
       <ToastContainer />
     </>
   )

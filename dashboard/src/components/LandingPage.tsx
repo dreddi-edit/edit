@@ -6,6 +6,7 @@ import "./landing.css"
 interface LandingPageProps {
   onEnter: () => void
   onDemoRequest?: () => void
+  onLearn?: () => void
 }
 
 function useVisible(threshold = 0.12) {
@@ -347,7 +348,7 @@ function FAQItem({ q, a }: { q: string; a: string }) {
   )
 }
 
-export default function LandingPage({ onEnter }: LandingPageProps) {
+export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
   const [menuOpen, setMenuOpen] = useState(false)
 
   const scrollTo = (id: string) => {
@@ -372,6 +373,7 @@ export default function LandingPage({ onEnter }: LandingPageProps) {
           </div>
           <div className="lp-nav__actions">
             <button className="lp-btn lp-btn--ghost" onClick={onEnter}>Sign in</button>
+            <button className="lp-btn lp-btn--ghost" onClick={() => onLearn?.()}>Learn</button>
             <button className="lp-btn lp-btn--primary" onClick={onEnter}>Start free</button>
             <button className="lp-nav__burger" onClick={() => setMenuOpen((o) => !o)} aria-label="Menu">
               <span /><span /><span />
@@ -408,8 +410,8 @@ export default function LandingPage({ onEnter }: LandingPageProps) {
               <button className="lp-btn lp-btn--primary lp-btn--lg" onClick={onEnter}>
                 Start free - no card
               </button>
-              <button className="lp-btn lp-btn--ghost lp-btn--lg" onClick={() => scrollTo("features")}>
-                See how it works ↓
+              <button className="lp-btn lp-btn--ghost lp-btn--lg" onClick={() => onLearn?.()}>
+                Learn
               </button>
             </div>
             <div className="lp-hero__stats">
