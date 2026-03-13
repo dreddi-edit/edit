@@ -2864,7 +2864,7 @@ useEffect(() => {
   }
 
   return (
-    <div className={`editor-shell ${theme === "light" ? "theme-light" : ""}`} style={editorShellStyle}>
+    <div className={`editor-shell ${theme === "light" ? "theme-light" : ""} ${isEdit ? "is-editing" : ""}`} style={editorShellStyle}>
 
       <header className="editor-toolbar" role="banner">
         <div className="editor-toolbar__cluster editor-toolbar__cluster--tight">

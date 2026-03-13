@@ -1279,6 +1279,10 @@
   backdrop-filter: blur(14px);
 }
 
+.editor-shell.is-editing .editor-viewport__device-meta {
+  display: none;
+}
+
 .editor-viewport__frame {
   position: absolute;
   inset: 0;
