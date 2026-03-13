@@ -214,7 +214,6 @@ export default function App() {
 
   // Auth check beim Start
   useEffect(() => {
-    apiGetPlan(), apiFetch("/api/organisations"), apiFetch("/api/google-services/status").then(p => p != null && setDemoPlan(p))
     apiMe().then(user => {
       if (user) { setAuthUser(user); setView("dashboard") }
       else { setAuthUser(null); setView("landing") }

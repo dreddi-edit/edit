@@ -6,16 +6,15 @@ export const ApiKeyManager: React.FC = () => {
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-xl font-bold text-white">API Keys</h3>
         <span className="text-[10px] uppercase tracking-[0.2em] text-gray-500">
-          Placeholder removed
+          Managed in Settings
         </span>
       </div>
-
       <div className="rounded-lg border border-gray-800 bg-gray-950/70 p-4">
         <p className="text-sm text-gray-300">
           API key management is handled by the main Settings panel.
         </p>
         <p className="text-xs text-gray-500 mt-2">
-          This placeholder component was showing fake generated keys and has been disabled.
+          The old local fake key generator has been removed.
         </p>
       </div>
     </div>

@@ -144,14 +144,18 @@ export function registerStripeRoutes(app) {
         return res.status(500).json({ ok: false, error: 'APP_URL or ALLOWED_ORIGIN is not configured' });
       }
 
+      const catalog = defaultPackages();
+      const isSubscription = Array.isArray(catalog.subscription_plans)
+        && catalog.subscription_plans.some((plan) => String(plan.id) === priceId);
+
       const session = await stripe.checkout.sessions.create({
         payment_method_types: ['card'],
         line_items: [{ price: priceId, quantity: 1 }],
-        mode: 'payment',
+        mode: isSubscription ? 'subscription' : 'payment',
         success_url: `${baseUrl}/dashboard?payment=success`,
         cancel_url: `${baseUrl}/dashboard?payment=cancel`,
         client_reference_id: String(user.id),
-        metadata: { userId: String(user.id) },
+        metadata: { userId: String(user.id), priceId, mode: isSubscription ? 'subscription' : 'payment' },
       });
 
       res.json({ ok: true, url: session.url });
