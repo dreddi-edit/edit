@@ -1,28 +1,10 @@
-export function createRateLimit({ windowMs, max, keyPrefix = "global", message = "Too many requests. Try again later.", keyFn } = {}) {
-  const buckets = new Map()
+import rateLimit from 'express-rate-limit';
 
-  return function rateLimit(req, res, next) {
-    const now = Date.now()
-    const baseKey = keyFn
-      ? keyFn(req)
-      : (req.user?.id ? `user:${req.user.id}` : (req.ip || req.socket?.remoteAddress || "unknown"))
-    const key = `${keyPrefix}:${baseKey}`
-    const bucket = buckets.get(key) || { count: 0, resetAt: now + windowMs }
-
-    if (now > bucket.resetAt) {
-      bucket.count = 0
-      bucket.resetAt = now + windowMs
-    }
-
-    bucket.count += 1
-    buckets.set(key, bucket)
-
-    if (bucket.count > max) {
-      const retryAfterSec = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000))
-      res.setHeader("Retry-After", String(retryAfterSec))
-      return res.status(429).json({ ok: false, error: message, retry_after_sec: retryAfterSec })
-    }
-
-    next()
-  }
-}
+export const aiRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 Minuten
+  max: 20, // Maximal 20 KI-Anfragen pro User in diesem Fenster
+  message: { error: "Zu viele Anfragen. Bitte versuche es in 15 Minuten erneut." },
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id || req.ip
+});
