@@ -63,6 +63,15 @@ export function readOptionalNumber(value, label, { min, max, integer } = {}) {
   return n;
 }
 
+export function readOptionalBoolean(value) {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value === "boolean") return value;
+  const s = String(value).toLowerCase();
+  if (s === "true" || s === "1" || s === "yes") return true;
+  if (s === "false" || s === "0" || s === "no") return false;
+  return undefined;
+}
+
 export function readId(value, label = "ID") {
   const n = Number(value);
   if (isNaN(n) || n < 1 || !Number.isInteger(n)) throw new ValidationError(`Ungültige ${label}`);
