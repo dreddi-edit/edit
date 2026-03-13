@@ -1,3 +1,4 @@
+import React from 'react';
 import React, { useState } from 'react';
 
 export const FormConfigEditor: React.FC<{ selectedBlockId?: string }> = ({ selectedBlockId }) => {

@@ -1,3 +1,4 @@
+import React from 'react';
 import React, { useState } from 'react';
 
 export const ProjectSharing: React.FC<{ projectId: number }> = ({ projectId }) => {

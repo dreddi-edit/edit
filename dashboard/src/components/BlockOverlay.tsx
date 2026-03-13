@@ -1,3 +1,4 @@
+import React from 'react';
 import { useTranslation } from "../i18n/useTranslation";
 import React, { useCallback, useEffect, useRef,
 useState } from "react";

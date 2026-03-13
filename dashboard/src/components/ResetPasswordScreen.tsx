@@ -1,3 +1,4 @@
+import React from 'react';
 import { ResetRateLimitUI } from './ResetRateLimitUI';
 import { useState } from "react"
 import { apiResetPassword } from "../api/auth"
