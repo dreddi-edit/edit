@@ -232,7 +232,7 @@ body[data-theme="light"] {
 .draft-auth-glow::before {
   top: 14%;
   left: 50%;
-  width: 620px;
+  width: min(620px, 100%);
   height: 420px;
   transform: translateX(-50%);
   background: radial-gradient(ellipse, rgba(96,165,250,0.06) 0%, transparent 72%);
@@ -241,7 +241,7 @@ body[data-theme="light"] {
 .draft-auth-glow::after {
   left: 22%;
   bottom: 10%;
-  width: 360px;
+  width: min(360px, 90%);
   height: 260px;
   background: radial-gradient(ellipse, rgba(74,222,128,0.04) 0%, transparent 72%);
 }
@@ -380,8 +380,11 @@ body[data-theme="light"] {
 .draft-auth-muted-link {
   border: none;
   background: none;
-  padding: 0;
+  padding: 4px 2px;
   cursor: pointer;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .draft-auth-link {
@@ -520,7 +523,7 @@ body[data-theme="light"] {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 30px;
+  min-height: 36px;
   padding: 0 12px;
   border-radius: 9px;
   border: 1px solid rgba(255,255,255,0.08);
@@ -1599,6 +1602,48 @@ body[data-theme="light"] .draft-settings-api-button:hover {
   .draft-settings-select,
   .draft-settings-row-input {
     width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .draft-auth-screen {
+    padding: 16px;
+    align-items: flex-start;
+    padding-top: 10vh;
+  }
+
+  .draft-auth-card {
+    padding: 24px 16px 20px;
+    border-radius: 14px;
+  }
+
+  .draft-auth-title {
+    font-size: 24px;
+  }
+
+  .draft-dashboard-header {
+    padding: 12px;
+    gap: 10px;
+  }
+
+  .draft-dashboard-sidebar {
+    padding: 16px 12px;
+  }
+
+  .draft-dashboard-main {
+    padding: 16px 12px 24px;
+  }
+
+  .draft-dashboard-button {
+    min-height: 40px;
+    padding: 0 14px;
+    font-size: 13px;
+  }
+
+  .draft-auth-input,
+  .draft-auth-submit {
+    height: 46px;
+    font-size: 14px;
   }
 }
 
