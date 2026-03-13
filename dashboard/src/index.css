@@ -1629,3 +1629,42 @@ body[data-theme="light"] .draft-settings-api-button:hover {
   font-weight: 700;
   cursor: pointer;
 }
+
+@media (max-width: 480px) {
+  .draft-auth-screen {
+    padding: 16px;
+  }
+
+  .draft-auth-card {
+    padding: 24px 16px 20px;
+    max-width: 100%;
+  }
+
+  .draft-settings-modal {
+    max-height: 95vh;
+    border-radius: 14px;
+  }
+
+  .draft-settings-backdrop {
+    padding: 8px;
+  }
+
+  .draft-settings-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .draft-settings-tab {
+    min-height: 40px;
+  }
+
+  .draft-dashboard-header {
+    padding: 10px 12px;
+  }
+}
+
+@media (max-width: 375px) {
+  .draft-auth-card {
+    padding: 20px 14px 16px;
+  }
+}
