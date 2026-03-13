@@ -14,9 +14,13 @@ function createTransporter() {
   });
 }
 
+function getBaseUrl() {
+  return String(process.env.ALLOWED_ORIGIN || process.env.APP_URL || '').replace(/\/$/, '');
+}
+
 export async function sendEmail({ to, subject, html }) {
   const transporter = createTransporter();
-  return await transporter.sendMail({
+  return transporter.sendMail({
     from: process.env.SMTP_FROM || '"Site Editor" <noreply@example.com>',
     to,
     subject,
@@ -24,12 +28,12 @@ export async function sendEmail({ to, subject, html }) {
   });
 }
 
-function getBaseUrl() {
-  return (process.env.ALLOWED_ORIGIN || process.env.APP_URL || '').replace(/\/$/, '');
-}
-
 export async function sendWelcome(email, token, name = '') {
-  const verifyUrl = `${getBaseUrl()}/verify?token=${encodeURIComponent(token)}`;
+  const baseUrl = getBaseUrl();
+  const verifyUrl = baseUrl
+    ? `${baseUrl}/verify?token=${encodeURIComponent(token)}`
+    : `Token: ${token}`;
+
   return sendEmail({
     to: email,
     subject: 'Willkommen beim Site Editor!',
@@ -38,7 +42,11 @@ export async function sendWelcome(email, token, name = '') {
 }
 
 export async function sendPasswordReset(email, token, name = '') {
-  const resetUrl = `${getBaseUrl()}/reset-password?token=${encodeURIComponent(token)}`;
+  const baseUrl = getBaseUrl();
+  const resetUrl = baseUrl
+    ? `${baseUrl}/reset-password?token=${encodeURIComponent(token)}`
+    : `Token: ${token}`;
+
   return sendEmail({
     to: email,
     subject: 'Passwort zurücksetzen',
@@ -55,10 +63,12 @@ export async function sendShareLink(email, projectName, url, senderName = 'Jeman
 }
 
 export async function sendTeamInvite(email, orgName, senderName = 'Jemand') {
-  const orgUrl = `${getBaseUrl()}/dashboard`;
+  const baseUrl = getBaseUrl();
+  const inviteUrl = baseUrl ? `${baseUrl}/dashboard` : '#';
+
   return sendEmail({
     to: email,
     subject: `Einladung zum Team "${orgName}"`,
-    html: `<p>${senderName} hat dich zum Team <strong>${orgName}</strong> eingeladen.</p><p><a href="${orgUrl}">${orgUrl}</a></p>`
+    html: `<p>${senderName} hat dich zum Team <strong>${orgName}</strong> eingeladen.</p><p><a href="${inviteUrl}">${inviteUrl}</a></p>`
   });
 }
