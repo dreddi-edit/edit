@@ -329,7 +329,12 @@ app.get("/asset", asset)
 app.get("/health", (_req, res) => {
   res.status(200).json({ ok: true, port: process.env.PORT || 8787 })
 })
+
 app.get("/status", (_req, res) => {
+  res.status(200).json({ ok: true, status: "healthy", port: process.env.PORT || 8787 })
+})
+
+=> {
   res.status(200).json({ ok: true, status: "healthy", port: process.env.PORT || 8787 })
 })
 })
