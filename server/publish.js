@@ -281,15 +281,15 @@ export function registerPublishRoutes(app) {
         {
           id: "wordpress",
           label: "WordPress",
-          configured: false,
+          configured: true,
           requiredEnv: [],
           requiredBody: ["wpUrl", "wpUser", "wpAppPassword"],
         },
         {
           id: "shopify",
           label: "Shopify",
-          configured: !!process.env.SHOPIFY_THEME_ID,
-          requiredEnv: ["SHOPIFY_THEME_ID"],
+          configured: true,
+          requiredEnv: [],
           requiredBody: ["shopDomain", "accessToken"],
         },
       ],
@@ -535,11 +535,15 @@ export function registerPublishRoutes(app) {
 
       let result = {};
       if (target === "firebase") {
-        result = await firebaseDeploy({ html: rollbackHtml, siteId: manifest.siteId });
+        const siteId = readOptionalString(req.body?.siteId, "siteId", { max: 128, empty: "" }) || manifest.siteId || "";
+        result = await firebaseDeploy({ html: rollbackHtml, siteId });
       } else if (target === "netlify") {
-        result = await netlifyDeploy({ html: rollbackHtml, siteId: manifest.siteId });
+        const siteId = readOptionalString(req.body?.siteId, "siteId", { max: 128, empty: "" }) || manifest.siteId || "";
+        const token = readOptionalString(req.body?.token, "token", { max: 512, empty: "" });
+        result = await netlifyDeploy({ html: rollbackHtml, siteId, token });
       } else if (target === "vercel") {
-        result = await vercelDeploy({ html: rollbackHtml, projectName: project.name });
+        const token = readOptionalString(req.body?.token, "token", { max: 512, empty: "" });
+        result = await vercelDeploy({ html: rollbackHtml, projectName: project.name, token });
       } else if (target === "wordpress") {
         const wpUrl = readRequiredString(req.body?.wpUrl, "wpUrl", { max: 512 });
         const wpUser = readRequiredString(req.body?.wpUser, "wpUser", { max: 200 });
