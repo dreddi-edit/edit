@@ -1054,10 +1054,8 @@ function matchesStage(filter: DashboardStage, stage?: string) {
   return (stage || "draft") === filter
 }
 
-function mockSeoScore(project: Project) {
-  if (!project.url && !project.thumbnail) return null
-  if ((project.id + (project.name?.length || 0)) % 4 === 0) return null
-  return 34 + ((project.id * 17) % 62)
+function mockSeoScore(_project: Project) {
+  return null
 }
 
 function gradientFromName(name: string) {
