@@ -1,6 +1,6 @@
-import React, { useTranslation } from "../i18n/useTranslation";
-import React, { useCallback, useEffect, useRef,
-useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from "../i18n/useTranslation";
+
 import { fetchWithAuth } from "../api/client";
 import { toast } from "./Toast";
 import { getRequireApproval } from "../approval-settings";
@@ -846,7 +846,6 @@ function serializeIframeHtml(doc: Document): string {
     }
   });
 
-
   const dt = doc.doctype ? `<!DOCTYPE ${doc.doctype.name}>` : "<!DOCTYPE html>";
   
     // Export rule: local-preview images must NOT be shipped in ZIP.
@@ -1178,7 +1177,6 @@ export default function BlockOverlay({ iframeRef, enabled, canvasMode, blockFilt
     }
   }, [enabled, canvasMode, iframeRef])
 
-
   useEffect(() => {
     if (!enabled) return
 
@@ -1238,7 +1236,6 @@ export default function BlockOverlay({ iframeRef, enabled, canvasMode, blockFilt
       }
     }
   }, [enabled, iframeRef])
-
 
 useEffect(() => {
     const onPick = (ev: Event) => {
@@ -1551,7 +1548,6 @@ useEffect(() => {
       doc.removeEventListener("drop", onDrop)
     }
   }, [commitDocumentMutation, iframeRef, onHtmlChange])
-
 
 /* BO_DRAGGRID_GLOBAL_V1 */
 const [isDraggingBlock, setIsDraggingBlock] = useState(false)
@@ -2080,7 +2076,6 @@ const [pendingAiAction, setPendingAiAction] = useState<null | (() => void)>(null
       try { doc.removeEventListener("drop", onDrop as any); } catch {}
     };
   }, [commitDocumentMutation, enabled, getDoc, onHtmlChange]);
-
 
   // Boxes neu zeichnen
   useEffect(() => {
@@ -2702,7 +2697,6 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
           targetEl = doc.querySelector(`[data-block-id="${sid}"]`) as HTMLElement | null;
         }
 
-
         const localPrompt = String(prompt || "").trim();
         const makeLocalNodeFromText = (rest: string) => {
           const quoted =
@@ -3095,7 +3089,6 @@ const runLeftAiPrompt = useCallback(async (model: string, prompt: string) => {
           approvalGranted = true;
         }
 
-
         // Streaming fetch
         const streamResp = await fetchWithAuth(ENDPOINTS.rewriteStream, {
           method: "POST",
@@ -3235,8 +3228,6 @@ const aiRescan = useCallback(async (mode: "block" | "page") => {
     return () => window.removeEventListener("bo:undo-last-change", handler as any)
   }, [undoLastChange]);
 
-
-
   useEffect(() => {
     if (!enabled) { setBlocks([]); setHoverId(null); setSelectedId(null); resetEditorPanelState(); return; }
     const iframe = getIframe();
@@ -3298,7 +3289,6 @@ return () => { iframe.removeEventListener("load", onLoad); win?.removeEventListe
     if (!selectedId) return
     deleteBlockTree(selectedId)
   }
-
 
 const applyEdit = useCallback(() => {
     const doc = getDoc();
@@ -3773,7 +3763,6 @@ const applyEdit = useCallback(() => {
     };
   }, [commitDocumentMutation, enabled, iframeRef, onHtmlChange, scanFreePrecise]);
   // BO_DRAGGRID_END
-
 
   if (!enabled) return null;
 

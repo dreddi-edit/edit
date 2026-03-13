@@ -1,5 +1,5 @@
-import { PresenceAvatars } from './PresenceAvatars';
 import React from 'react';
+import { PresenceAvatars } from './PresenceAvatars';
 
 interface HeaderProps {
   user: { email?: string } | null;

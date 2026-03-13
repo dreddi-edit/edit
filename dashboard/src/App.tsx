@@ -1,3 +1,4 @@
+import React, { useCallback, useRef, useState, useEffect, type CSSProperties } from 'react';
 import React, { readSavedTheme, DEFAULT_CHROME_BACKGROUND, DEFAULT_CHROME_BORDER, VIEWPORT_PRESETS, EXPORT_MODE_OPTIONS, WORKFLOW_STAGE_OPTIONS, PROJECT_VERSION_SOURCE_LABELS, DEFAULT_GLOBAL_STYLE_OVERRIDES, BLOCK_FILTER_OPTIONS, EDIT_RAIL_EXPANDED_WIDTH, EDIT_RAIL_COLLAPSED_WIDTH, titleCaseFallback, formatEditorDateTime, pickEditorChromeFromDocument, getDownloadFilename, collectProjectAssets, mergeAssetLibraries, collectCssVariables, applyGlobalStylesToHtml, applyTranslationOverridesToHtml, getLanguageVariantEffectiveHtml, buildLocalAudit, buildDiffPreview, readFileAsDataUrl, buildTranslationSegmentsWithOverrides } from "./editorHelpers";
 import { useAdmin } from "./hooks/useAdmin";
 import { apiMe, type User } from "./api/auth"
@@ -51,7 +52,7 @@ import ProjectDashboard from "./components/ProjectDashboard"
 import AssistantWidget from "./components/AssistantWidget"
 import KeyboardShortcuts from "./components/KeyboardShortcuts"
 import { toast, ToastContainer } from "./components/Toast"
-import { useCallback, useRef, useState, useEffect, type CSSProperties } from 'react';
+
 import BlockOverlay from "./components/BlockOverlay";
 import { ENDPOINTS } from './config';
 import { COMPONENT_LIBRARY } from './components/ComponentLibrary';
@@ -219,15 +220,6 @@ export default function App() {
     })
   }, [])
 
-
-
-
-
-
-
-
-
-
   const trackUsage = (payload: unknown) => {
     if (!payload || typeof payload !== "object") return;
     const p = payload as Record<string, unknown>;
@@ -264,7 +256,6 @@ export default function App() {
       setSessionCost(prev => prev + finalCost)
     }
   };
-
 
   const [isDraggingBlock, setIsDraggingBlock] = useState(false)
   const [authUser, setAuthUser] = useState<User | null | "loading">("loading")
@@ -2556,7 +2547,6 @@ const autoSave = async (html: string) => {
       },
     },
   ])
-
 
   const isEdit = mode === "edit";
   const isLoading = status === "blocked";

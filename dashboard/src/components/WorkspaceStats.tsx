@@ -1,4 +1,5 @@
 import React from 'react';
+
 type Props = {
   theme: "dark" | "light"
   projectCount: number

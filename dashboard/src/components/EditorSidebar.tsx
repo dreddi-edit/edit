@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState } from 'react';
+
 import { EditorAudits } from "./EditorAudits";
 import { EditorOverlay } from "./EditorOverlay";
 import { EditorStructure } from "./EditorStructure";

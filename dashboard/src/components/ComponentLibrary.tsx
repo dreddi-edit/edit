@@ -1,4 +1,5 @@
 import React from 'react';
+
 // Professional Component Library for Site Editor
 export const COMPONENT_LIBRARY = {
   heroSection: {

@@ -1,4 +1,5 @@
 import React from 'react';
+
 import { useState, useEffect } from "react"
 
 const STORAGE_KEY = "se_onboarding_checklist"

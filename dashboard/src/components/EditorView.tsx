@@ -1,3 +1,4 @@
+import React from 'react';
 import { PseudoElementEditor } from './PseudoElementEditor';
 import { ZIndexInspector } from './ZIndexInspector';
 import { DesignRulers } from './DesignRulers';
@@ -9,7 +10,6 @@ import { UndoRedoControls } from './UndoRedoControls';
 import { AiSuggestionChip } from './AiSuggestionChip';
 import { DeviceToggle } from './DeviceToggle';
 import { useAutoSave } from '../hooks/useAutoSave';
-import React from 'react';
 
 interface EditorViewProps {
   currentProject: { name?: string } | null;
