@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import React, { SystemHealth } from './SystemHealth';
+
+import {  SystemHealth  } from './SystemHealth';
 import { FraudMonitor } from './FraudMonitor';
 
 export const AdminDashboardModal: React.FC = () => {

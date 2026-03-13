@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import React, { ImageEnhancer } from './ImageEnhancer';
+
+import {  ImageEnhancer  } from './ImageEnhancer';
 import { ImageOptimizer } from './ImageOptimizer';
 
 export const MediaLibrary: React.FC = () => {
