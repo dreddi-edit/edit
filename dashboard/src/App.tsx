@@ -2724,7 +2724,7 @@ useEffect(() => {
   // Auth screen
   if (view === "auth") return (
     <>
-      <AuthScreen onAuth={user => { setAuthUser(user); setView("dashboard") }} />
+      <AuthScreen onAuth={user => { setAuthUser(user); setView("dashboard") }} onBack={() => setView("landing")} />
 
 <ToastContainer />
     </>

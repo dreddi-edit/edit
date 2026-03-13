@@ -258,6 +258,25 @@ body[data-theme="light"] {
   box-shadow: 0 32px 80px rgba(0,0,0,0.48), 0 0 0 1px rgba(255,255,255,0.02);
 }
 
+.draft-auth-back {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 20px;
+  padding: 6px 0;
+  border: none;
+  background: none;
+  color: rgba(255,255,255,0.38);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.draft-auth-back:hover {
+  color: rgba(255,255,255,0.72);
+}
+
 .draft-auth-logo-wrap {
   display: flex;
   justify-content: center;

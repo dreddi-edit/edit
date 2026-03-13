@@ -12,8 +12,10 @@ import {
 } from "../api/auth"
 import { toast } from "./Toast"
 import { errMsg } from "../utils/errMsg"
+import { useTranslation } from "../i18n/useTranslation"
 
-export default function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
+export default function AuthScreen({ onAuth, onBack }: { onAuth: (u: User) => void; onBack?: () => void }) {
+  const { t } = useTranslation()
   const [mode, setMode] = useState<"login" | "register" | "forgot">("login")
   const [resetSent, setResetSent] = useState(false)
   const [email, setEmail] = useState("")
@@ -129,6 +131,15 @@ export default function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
     <div className="draft-auth-screen">
       <div className="draft-auth-glow" />
       <div className="draft-auth-card">
+        {onBack && (
+          <button
+            className="draft-auth-back"
+            onClick={onBack}
+            aria-label="Return to landing page"
+          >
+            {t("lp.cta.return_landing")}
+          </button>
+        )}
         <div className="draft-auth-logo-wrap">
           <div className="draft-auth-logo-mark">
             <svg width="18" height="18" viewBox="0 0 12 12" fill="none" aria-hidden="true">
