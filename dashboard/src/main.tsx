@@ -1,4 +1,3 @@
-import React from 'react';
 import React, { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
@@ -25,7 +24,7 @@ if (!hasExplicitThemePreference() && typeof window !== 'undefined') {
   }
 }
 
-createRoot(document.getElementById('root')).render(
+createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
       <App />

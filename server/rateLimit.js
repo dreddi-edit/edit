@@ -1,12 +1,12 @@
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 
-const buildKey = (req) => {
+function buildKey(req) {
   if (req.user?.id) return `user:${req.user.id}`;
   return `ip:${ipKeyGenerator(req.ip)}`;
-};
+}
 
-export const createRateLimit = ({ windowMs, max, message }) => {
-  return rateLimit({
+export const createRateLimit = ({ windowMs, max, message }) =>
+  rateLimit({
     windowMs: windowMs || 15 * 60 * 1000,
     max: max || 100,
     message: { error: message || 'Zu viele Anfragen.' },
@@ -14,7 +14,6 @@ export const createRateLimit = ({ windowMs, max, message }) => {
     legacyHeaders: false,
     keyGenerator: (req) => buildKey(req),
   });
-};
 
 export const aiRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000,
