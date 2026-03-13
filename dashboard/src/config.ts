@@ -18,3 +18,16 @@ export const AI_PRICING: Record<string, { input: number; output: number }> = {
   "groq:llama-3.3-70b-versatile": { input: 0.9, output: 1.8 },
   "ollama:qwen2.5-coder:7b": { input: 0, output: 0 },
 };
+
+function readFeatureFlag(name: string, fallback = false): boolean {
+  const env = import.meta.env as Record<string, string | undefined>;
+  const value = String(env[name] ?? "").trim().toLowerCase();
+  if (!value) return fallback;
+  return ["1", "true", "yes", "on"].includes(value);
+}
+
+export const FEATURE_FLAGS = Object.freeze({
+  asyncJobs: readFeatureFlag("VITE_FEATURE_ASYNC_JOBS", true),
+  strictShareSanitization: readFeatureFlag("VITE_FEATURE_STRICT_SHARE_SANITIZATION", true),
+  learnContentValidation: readFeatureFlag("VITE_FEATURE_LEARN_CONTENT_VALIDATION", true),
+});

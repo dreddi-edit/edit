@@ -14,6 +14,7 @@ import db from "./db.js"
 import { sendWelcome, sendPasswordReset } from "./email.js"
 import { logAudit } from "./auditLog.js"
 import { createRateLimit } from "./rateLimit.js"
+import { FEATURE_FLAGS } from "./featureFlags.js"
 import {
   isValidationError,
   readEmail,
@@ -33,6 +34,7 @@ const AUTH_IDLE_TIMEOUT_MS = AUTH_IDLE_TIMEOUT_MIN * 60 * 1000
 const AUTH_ACTIVITY_RENEW_SECONDS = Math.max(30, Math.min(10 * 60, Number(process.env.AUTH_ACTIVITY_RENEW_SECONDS || 90) || 90))
 const AVATAR_UPLOAD_MAX_BYTES = Math.max(128_000, Math.min(8_000_000, Number(process.env.AVATAR_UPLOAD_MAX_BYTES || 4_000_000) || 4_000_000))
 const OAUTH_STATE_MAX_AGE_MS = 10 * 60 * 1000
+const REFRESH_HASH_SECRET = process.env.REFRESH_TOKEN_HASH_SECRET || SECRET
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const THUMBNAILS_DIR = path.join(__dirname, "thumbnails")
@@ -92,6 +94,18 @@ const login2faRateLimit = createRateLimit({
     return `${ip}:${sessionToken}`
   },
 })
+const login2faUserRateLimit = createRateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 8,
+  keyPrefix: "auth-login-2fa-user",
+  message: authRateMessage,
+  keyFn: (req) => {
+    const sessionToken = String(req.body?.session_token || "").trim().slice(0, 128)
+    if (!sessionToken) return "missing"
+    const pending = db.prepare("SELECT user_id FROM totp_pending_sessions WHERE session_token = ?").get(sessionToken)
+    return String(pending?.user_id || "missing")
+  },
+})
 
 function normalizeNotificationPrefs(raw) {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
@@ -129,11 +143,12 @@ function signAccessToken(userId, email) {
 function setAuthCookies(res, userId, email) {
   const token = signAccessToken(userId, email)
   const refreshToken = crypto.randomBytes(40).toString("hex")
+  const refreshTokenHash = hashRefreshToken(refreshToken)
   const csrfToken = crypto.randomBytes(32).toString("hex")
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
 
   db.prepare("DELETE FROM refresh_tokens WHERE user_id = ? OR expires_at <= datetime('now')").run(userId)
-  db.prepare("INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, ?)").run(userId, refreshToken, expiresAt)
+  db.prepare("INSERT INTO refresh_tokens (user_id, token, expires_at) VALUES (?, ?, ?)").run(userId, refreshTokenHash, expiresAt)
 
   res.cookie(COOKIE, token, { ...AUTH_COOKIE_OPTIONS, maxAge: 15 * 60 * 1000 })
   res.cookie(REFRESH_COOKIE, refreshToken, { ...AUTH_COOKIE_OPTIONS, maxAge: 7 * 24 * 60 * 60 * 1000, path: "/api/auth" })
@@ -195,6 +210,19 @@ function parseAvatarDataUrl(raw) {
   if (!buffer.length || buffer.length > AVATAR_UPLOAD_MAX_BYTES) return null
   const extension = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : mime === "image/gif" ? "gif" : "jpg"
   return { mime, buffer, extension }
+}
+
+function hashRefreshToken(token) {
+  return crypto.createHmac("sha256", REFRESH_HASH_SECRET).update(String(token || "")).digest("hex")
+}
+
+function detectImageMimeFromMagicBytes(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 12) return ""
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47 && buffer[4] === 0x0d && buffer[5] === 0x0a && buffer[6] === 0x1a && buffer[7] === 0x0a) return "image/png"
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "image/jpeg"
+  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x38 && (buffer[4] === 0x37 || buffer[4] === 0x39) && buffer[5] === 0x61) return "image/gif"
+  if (buffer.slice(0, 4).toString("ascii") === "RIFF" && buffer.slice(8, 12).toString("ascii") === "WEBP") return "image/webp"
+  return ""
 }
 
 function generateBase32Secret(byteLength = 20) {
@@ -452,7 +480,7 @@ export function registerAuthRoutes(app) {
     }
   })
 
-  app.post("/api/auth/login/2fa", login2faRateLimit, (req, res) => {
+  app.post("/api/auth/login/2fa", login2faRateLimit, login2faUserRateLimit, (req, res) => {
     try {
       const sessionToken = readRequiredString(req.body?.session_token, "session_token", { max: 128 })
       const code = readRequiredString(String(req.body?.code || ""), "code", { max: 10 })
@@ -530,18 +558,19 @@ export function registerAuthRoutes(app) {
     try {
       const refreshToken = req.cookies?.[REFRESH_COOKIE]
       if (!refreshToken) return res.status(401).json({ ok: false, error: "Kein Refresh-Token" })
+      const refreshTokenHash = hashRefreshToken(refreshToken)
 
       const record = db.prepare(`
         SELECT *
         FROM refresh_tokens
-        WHERE token = ? AND expires_at > datetime('now')
-      `).get(refreshToken)
+        WHERE token IN (?, ?) AND expires_at > datetime('now')
+      `).get(refreshTokenHash, refreshToken)
       if (!record) return res.status(401).json({ ok: false, error: "Refresh-Token ungültig oder abgelaufen" })
 
       const user = db.prepare("SELECT id, email FROM users WHERE id = ?").get(record.user_id)
       if (!user) return res.status(401).json({ ok: false, error: "Benutzer nicht gefunden" })
 
-      db.prepare("DELETE FROM refresh_tokens WHERE token = ?").run(refreshToken)
+      db.prepare("DELETE FROM refresh_tokens WHERE token IN (?, ?)").run(refreshTokenHash, refreshToken)
       setAuthCookies(res, user.id, user.email)
       res.json({ ok: true })
     } catch (error) {
@@ -722,7 +751,8 @@ export function registerAuthRoutes(app) {
     } catch {}
     if (refreshToken) {
       try {
-        db.prepare("DELETE FROM refresh_tokens WHERE token = ?").run(refreshToken)
+        const refreshTokenHash = hashRefreshToken(refreshToken)
+        db.prepare("DELETE FROM refresh_tokens WHERE token IN (?, ?)").run(refreshTokenHash, refreshToken)
       } catch {}
     }
     clearAuthCookies(res)
@@ -804,6 +834,10 @@ app.post("/api/auth/avatar", authMiddleware, upload.single("avatar"), async (req
     }
 
     const mime = req.file.mimetype;
+    const magicMime = detectImageMimeFromMagicBytes(req.file.buffer);
+    if (FEATURE_FLAGS.strictAvatarMagicBytes && (!magicMime || magicMime !== mime)) {
+      return res.status(400).json({ ok: false, error: "Invalid image signature." });
+    }
     const extension = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : mime === "image/gif" ? "gif" : "jpg";
     
     await fs.mkdir(THUMBNAILS_DIR, { recursive: true });

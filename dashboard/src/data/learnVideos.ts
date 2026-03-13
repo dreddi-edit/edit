@@ -1,3 +1,5 @@
+import { FEATURE_FLAGS } from "../config"
+
 export type LearnVideoCategory =
   | "getting-started"
   | "editor"
@@ -436,6 +438,37 @@ export const LEARN_VIDEOS: LearnVideo[] = [
     order: 71,
   },
 ]
+
+export const LEARN_VIDEOS_VERSION = 1
+
+function validateLearnVideoCatalog() {
+  const categoryIds = new Set(LEARN_VIDEO_CATEGORIES.map((item) => item.id))
+  const subcategoryIds = new Set(LEARN_VIDEO_SUBCATEGORIES.map((item) => item.id))
+  const seenVideoIds = new Set<string>()
+
+  for (const video of LEARN_VIDEOS) {
+    if (!video.id || seenVideoIds.has(video.id)) {
+      throw new Error(`Invalid learn video id: ${video.id || "<empty>"}`)
+    }
+    seenVideoIds.add(video.id)
+    if (!categoryIds.has(video.category)) {
+      throw new Error(`Unknown learn video category on ${video.id}: ${video.category}`)
+    }
+    if (!subcategoryIds.has(video.subcategory)) {
+      throw new Error(`Unknown learn video subcategory on ${video.id}: ${video.subcategory}`)
+    }
+    if (!String(video.title || "").trim()) {
+      throw new Error(`Missing learn video title on ${video.id}`)
+    }
+    if (!String(video.ctaLabel || "").trim()) {
+      throw new Error(`Missing learn video CTA label on ${video.id}`)
+    }
+  }
+}
+
+if (FEATURE_FLAGS.learnContentValidation) {
+  validateLearnVideoCatalog()
+}
 
 export function getCategoryLabel(category: LearnVideoCategory) {
   return LEARN_VIDEO_CATEGORIES.find((item) => item.id === category)?.label || category

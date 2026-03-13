@@ -8,7 +8,11 @@
     "dev": "concurrently -n s,d \"npm run dev:server\" \"npm run dev:dashboard\"",
     "dev:server": "npm --prefix server run dev",
     "dev:dashboard": "npm --prefix dashboard run dev",
-    "launch": "npm run build && npm start"
+    "launch": "npm run build && npm start",
+    "lint": "npm --prefix dashboard run lint && node scripts/check-server-syntax.mjs",
+    "test": "npm --prefix server run test",
+    "smoke": "node scripts/smoke-e2e.mjs",
+    "audit": "npm audit --audit-level=high && npm --prefix server audit --audit-level=high && npm --prefix dashboard audit --audit-level=high"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

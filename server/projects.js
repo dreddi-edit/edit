@@ -5,6 +5,7 @@ import { normalizeManagedThumbnailUrl } from "./cloudStorage.js"
 import { sendShareLink } from "./email.js"
 import crypto from "node:crypto"
 import { buildProjectImportPreview } from "./projectImport.js"
+import { enqueueJob, getJobForUser } from "./jobQueue.js"
 import { getPlatformGuide, normalizeProjectDocument } from "./siteMeta.js"
 import {
   ValidationError,
@@ -76,6 +77,14 @@ function mapProjectRow(row, assignees = []) {
 
 function cleanText(value) {
   return String(value || "").replace(/\s+/g, " ").trim()
+}
+
+function shouldRunImportPreviewAsync(req) {
+  if (String(req.query?.async || "") === "1") return true
+  const payload = req.body || {}
+  const hugeBase64 = String(payload?.contentBase64 || "").length > 4_000_000
+  const hugeEntries = Array.isArray(payload?.entries) && payload.entries.length > 40
+  return hugeBase64 || hugeEntries
 }
 
 function normalizeProjectTag(value) {
@@ -646,7 +655,46 @@ function archiveProjectRecord(projectId, userId) {
 }
 
 export function registerProjectRoutes(app) {
+  app.get("/api/projects/import-preview/jobs/:jobId", authMiddleware, (req, res) => {
+    const job = getJobForUser(req.params.jobId, req.user.id)
+    if (!job) return res.status(404).json({ ok: false, error: "Job not found" })
+    return res.json({
+      ok: true,
+      job: {
+        id: job.id,
+        type: job.type,
+        status: job.status,
+        createdAt: job.createdAt,
+        startedAt: job.startedAt,
+        finishedAt: job.finishedAt,
+        result: job.status === "completed" ? job.result : null,
+        error: job.status === "failed" ? job.error : null,
+      },
+    })
+  })
+
   app.post("/api/projects/import-preview", authMiddleware, async (req, res) => {
+    if (shouldRunImportPreviewAsync(req)) {
+      const job = enqueueJob({
+        type: "import-preview",
+        userId: req.user.id,
+        task: async () => {
+          const preview = await buildProjectImportPreview(req.body || {}, {
+            userId: req.user.id,
+            forceAiAnalysis: true,
+            requireImportAnalysis: true,
+          })
+          return { ok: true, preview }
+        },
+      })
+      return res.status(202).json({
+        ok: true,
+        queued: true,
+        jobId: job.id,
+        statusUrl: `/api/projects/import-preview/jobs/${job.id}`,
+      })
+    }
+
     try {
       const preview = await buildProjectImportPreview(req.body || {}, {
         userId: req.user.id,

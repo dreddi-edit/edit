@@ -6,6 +6,7 @@ import 'dotenv/config';
 import { rewriteHtmlAssets, rewriteCssUrls } from './rewriteAssets.js';
 import express from "express"
 import cookieParser from "cookie-parser"
+import helmet from "helmet"
 import { registerAuthRoutes, authMiddleware } from "./auth.js"
 import { registerCreditRoutes, getBalance, deductCredits, hasEnoughCredits, estimateCreditCost } from "./credits.js"
 import { registerSettingsRoutes } from "./settings.js"
@@ -66,6 +67,8 @@ import fs from "node:fs"
 import dns from "node:dns"
 import { fileURLToPath } from "url"
 import { fetchWithSsrfProtection, ProxySafetyError } from "./proxy.js"
+import { enqueueJob, getJobForUser } from "./jobQueue.js"
+import { FEATURE_FLAGS } from "./featureFlags.js"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -80,6 +83,26 @@ function safeErrorMessage(e, status = 500) {
     return "Internal server error"
   }
   return String(e?.message || e || "Unknown error")
+}
+
+function sanitizeSharedHtml(rawHtml) {
+  let html = String(rawHtml || "")
+  if (!html) return ""
+  html = html.replace(/<\s*script\b[^>]*>[\s\S]*?<\s*\/\s*script\s*>/gi, "")
+  html = html.replace(/<\s*(iframe|object|embed)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, "")
+  html = html.replace(/<\s*meta\b[^>]*http-equiv\s*=\s*['\"]?refresh['\"]?[^>]*>/gi, "")
+  html = html.replace(/\son[a-z]+\s*=\s*(['\"]).*?\1/gi, "")
+  html = html.replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, "")
+  html = html.replace(/\s(href|src)\s*=\s*(['\"])\s*javascript:[\s\S]*?\2/gi, ' $1="#"')
+  html = html.replace(/\ssrcset\s*=\s*(['\"])([\s\S]*?)\1/gi, (_m, quote, value) => {
+    const cleaned = String(value || "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter((entry) => !/^javascript:/i.test(entry))
+      .join(", ")
+    return ` srcset=${quote}${cleaned}${quote}`
+  })
+  return html
 }
 
 try {
@@ -154,6 +177,48 @@ function localRebuild(html) {
 
 const app = express()
 app.set("trust proxy", 1)
+app.disable("x-powered-by")
+app.use(helmet({
+  frameguard: { action: "sameorigin" },
+  noSniff: true,
+  referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      "default-src": ["'self'"],
+      "script-src": ["'self'"],
+      "style-src": ["'self'", "'unsafe-inline'"],
+      "img-src": ["'self'", "data:", "https:"],
+      "font-src": ["'self'", "data:", "https:"],
+      "connect-src": ["'self'", "https:"],
+      "frame-ancestors": ["'self'"],
+    },
+  },
+}))
+app.use((req, res, next) => {
+  const incomingRequestId = String(req.headers["x-request-id"] || "").trim()
+  const requestId = incomingRequestId || crypto.randomUUID()
+  req.requestId = requestId
+  res.setHeader("X-Request-Id", requestId)
+  const start = Date.now()
+  res.on("finish", () => {
+    const payload = {
+      level: res.statusCode >= 500 ? "error" : res.statusCode >= 400 ? "warn" : "info",
+      event: "http.request",
+      requestId,
+      method: req.method,
+      path: req.originalUrl,
+      statusCode: res.statusCode,
+      durationMs: Date.now() - start,
+      userId: req.user?.id || null,
+    }
+    const line = JSON.stringify(payload)
+    if (res.statusCode >= 500) console.error(line)
+    else if (res.statusCode >= 400) console.warn(line)
+    else console.log(line)
+  })
+  next()
+})
 const corsOrigin = process.env.NODE_ENV === "production"
   ? ((process.env.ALLOWED_ORIGIN || process.env.APP_URL || "").split(",").map(s => s.trim()).filter(Boolean))
   : [`http://localhost:${process.env.PORT || 8787}`, "http://localhost:8788"]
@@ -307,6 +372,10 @@ app.get("/status", (_req, res) => {
   res.status(200).json({ ok: true, status: "healthy", port: process.env.PORT || 8787 })
 })
 
+app.get("/api/feature-flags", (_req, res) => {
+  res.json({ ok: true, flags: FEATURE_FLAGS })
+})
+
 app.get("/api/platforms/:platform", authMiddleware, (req, res) => {
   const requested = readOptionalString(req.params.platform, "Platform", { max: 32, empty: "unknown" })
   res.json({ ok: true, platform: requested, guide: getPlatformGuide(requested) })
@@ -326,7 +395,8 @@ app.get("/share/:token", (req, res, next) => {
     const sharedHtml = String(row?.html_snapshot || row?.html || "")
     if (!row || !sharedHtml) return res.status(404).send("Share link not found or expired")
     res.setHeader("Content-Type", "text/html; charset=utf-8")
-    res.send(sharedHtml)
+    const htmlToSend = FEATURE_FLAGS.strictShareSanitization ? sanitizeSharedHtml(sharedHtml) : sharedHtml
+    res.send(htmlToSend)
   } catch (e) {
     next(e)
   }
@@ -1327,6 +1397,75 @@ app.post("/api/export", authMiddleware, exportRateLimit, async (req, res) => {
   }
 })
 
+app.post("/api/export/jobs", authMiddleware, exportRateLimit, async (req, res) => {
+  if (!FEATURE_FLAGS.asyncJobs) {
+    return res.status(400).json({ ok: false, error: "Async export jobs are disabled." })
+  }
+
+  const port = Number(process.env.PORT || 8787)
+  const cookie = String(req.headers.cookie || "")
+  const csrfToken = String(req.headers["x-csrf-token"] || "")
+  const authorization = String(req.headers.authorization || "")
+  const payload = req.body || {}
+
+  const job = enqueueJob({
+    type: "export",
+    userId: req.user.id,
+    task: async () => {
+      const response = await fetch(`http://127.0.0.1:${port}/api/export?cloud=1`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-csrf-token": csrfToken,
+          cookie,
+          authorization,
+        },
+        body: JSON.stringify(payload),
+      })
+
+      const contentType = String(response.headers.get("content-type") || "")
+      if (contentType.includes("application/json")) {
+        return await response.json()
+      }
+
+      const data = Buffer.from(await response.arrayBuffer())
+      return {
+        ok: response.ok,
+        streamed: true,
+        status: response.status,
+        contentType,
+        bytes: data.length,
+        fileBase64: data.toString("base64"),
+      }
+    },
+  })
+
+  return res.status(202).json({
+    ok: true,
+    queued: true,
+    jobId: job.id,
+    statusUrl: `/api/export/jobs/${job.id}`,
+  })
+})
+
+app.get("/api/export/jobs/:jobId", authMiddleware, (req, res) => {
+  const job = getJobForUser(req.params.jobId, req.user.id)
+  if (!job) return res.status(404).json({ ok: false, error: "Job not found" })
+  return res.json({
+    ok: true,
+    job: {
+      id: job.id,
+      type: job.type,
+      status: job.status,
+      createdAt: job.createdAt,
+      startedAt: job.startedAt,
+      finishedAt: job.finishedAt,
+      result: job.status === "completed" ? job.result : null,
+      error: job.status === "failed" ? job.error : null,
+    },
+  })
+})
+
 // WP asset fallback
 app.get(['/wp-content/*', '/wp-includes/*', '/_static/*'], (req, res) => {
   const ref = req.query.ref || '';
@@ -1965,8 +2104,15 @@ app.post("/reset-password", async (req, res) => {
   `)
 })
 
-app.use((err, _req, res, _next) => {
-  console.error("Unhandled error:", err?.message || err)
+app.use((err, req, res, _next) => {
+  console.error(JSON.stringify({
+    level: "error",
+    event: "http.unhandled_error",
+    requestId: req?.requestId || null,
+    path: req?.originalUrl || "",
+    method: req?.method || "",
+    message: String(err?.message || err || "Unknown error"),
+  }))
   sendError(res, 500, safeErrorMessage(err))
 })
 
