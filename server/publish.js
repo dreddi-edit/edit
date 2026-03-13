@@ -420,7 +420,17 @@ export function registerPublishRoutes(app) {
         manifest: { ...result, target, exportMode },
       });
 
-      db.prepare("UPDATE projects SET last_activity_at = datetime('now'), updated_at = datetime('now') WHERE id = ?").run(projectId);
+      db.prepare(`
+        UPDATE projects
+        SET
+          last_activity_at = datetime('now'),
+          updated_at = datetime('now'),
+          last_export_at = datetime('now'),
+          last_export_mode = ?,
+          last_export_warning_count = 0,
+          delivery_status = 'published'
+        WHERE id = ?
+      `).run(exportMode, projectId);
       logAudit({
         userId: req.user.id,
         action: `project.publish.${target}`,
@@ -562,6 +572,18 @@ export function registerPublishRoutes(app) {
         deployUrl: result.deployUrl || null,
         manifest: { ...result, target, rollbackOf: sourceDeploymentId },
       });
+
+      db.prepare(`
+        UPDATE projects
+        SET
+          last_activity_at = datetime('now'),
+          updated_at = datetime('now'),
+          last_export_at = datetime('now'),
+          last_export_mode = ?,
+          last_export_warning_count = 0,
+          delivery_status = 'published'
+        WHERE id = ?
+      `).run(sourceDeploy.export_mode || "html-clean", projectId);
 
       logAudit({
         userId: req.user.id,
