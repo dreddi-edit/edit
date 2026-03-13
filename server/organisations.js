@@ -149,28 +149,29 @@ export function registerOrgRoutes(app) {
   // Mitglied einladen
   app.post("/api/orgs/:id/invite", authMiddleware, (req, res) => {
     const { email, role } = req.body
-    if (!email) return res.status(400).json({ ok: false, error: "Email erforderlich" })
+    const normalizedEmail = String(email || "").trim().toLowerCase()
+    if (!normalizedEmail) return res.status(400).json({ ok: false, error: "Email erforderlich" })
     if (!canInviteWithRole(role || "editor")) return res.status(400).json({ ok: false, error: "Rolle ungültig" })
     const org = db.prepare("SELECT * FROM organisations WHERE id = ? AND owner_id = ?").get(req.params.id, req.user.id)
     if (!org) return res.status(403).json({ ok: false, error: "Kein Zugriff" })
 
-    const existing = db.prepare("SELECT id FROM org_members WHERE org_id = ? AND invite_email = ?").get(req.params.id, email)
+    const existing = db.prepare("SELECT id FROM org_members WHERE org_id = ? AND lower(invite_email) = ?").get(req.params.id, normalizedEmail)
     if (existing) return res.status(400).json({ ok: false, error: "Bereits eingeladen" })
 
     // Check ob User existiert
-    const user = db.prepare("SELECT id FROM users WHERE email = ?").get(email)
+    const user = db.prepare("SELECT id FROM users WHERE lower(email) = ?").get(normalizedEmail)
     db.prepare("INSERT INTO org_members (org_id, user_id, invite_email, role) VALUES (?, ?, ?, ?)").run(
-      req.params.id, user?.id || null, email, normalizeAgencyRole(role, "editor")
+      req.params.id, user?.id || null, normalizedEmail, normalizeAgencyRole(role, "editor")
     )
     // Einladungs-Mail senden
-    sendTeamInvite(email, org.name, req.user.name || req.user.email).catch(e => console.error("Invite mail:", e.message))
+    sendTeamInvite(normalizedEmail, org.name, req.user.name || req.user.email).catch(e => console.error("Invite mail:", e.message))
     res.json({ ok: true })
   })
 
   // Einladung annehmen (beim Login prüfen)
   app.post("/api/orgs/accept-invite", authMiddleware, (req, res) => {
     const pending = db.prepare(
-      "SELECT om.* FROM org_members om JOIN users u ON u.email = om.invite_email WHERE u.id = ? AND om.status = 'pending'"
+      "SELECT om.* FROM org_members om JOIN users u ON lower(u.email) = lower(om.invite_email) WHERE u.id = ? AND om.status = 'pending'"
     ).all(req.user.id)
 
     for (const inv of pending) {
