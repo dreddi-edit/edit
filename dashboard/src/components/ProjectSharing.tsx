@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 
-export const ProjectSharing: React.FC<{ projectId: number }> = ({ projectId }) => {
-  const [token, setToken] = useState('example-share-token');
+export const ProjectSharing: React.FC<{ projectId: number }> = () => {
+  const [token] = useState('example-share-token');
   const [copied, setCopied] = useState(false);
 
   const shareUrl = `${window.location.origin}/share/${token}`;

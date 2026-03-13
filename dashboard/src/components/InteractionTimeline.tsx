@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 
 export const InteractionTimeline: React.FC = () => {
-  const [duration, setDuration] = useState(0.3);
+  const [duration] = useState(0.3);
 
   return (
     <div className="p-6 border border-gray-800 bg-gray-900/50 rounded-xl mt-6">

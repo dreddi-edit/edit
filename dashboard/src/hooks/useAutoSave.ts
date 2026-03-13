@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-export function useAutoSave(data: any, saveFn: (data: any) => Promise<void>, delay = 2000) {
+export function useAutoSave(data: unknown, saveFn: (data: unknown) => Promise<void>, delay = 2000) {
   const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const isInitialMount = useRef(true);
@@ -19,7 +19,7 @@ export function useAutoSave(data: any, saveFn: (data: any) => Promise<void>, del
       try {
         await saveFn(data);
         setStatus('saved');
-      } catch (e) {
+      } catch {
         setStatus('error');
       }
     }, delay);

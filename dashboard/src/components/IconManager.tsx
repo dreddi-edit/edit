@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 
 export const IconManager: React.FC = () => {
-  const [icon, setIcon] = useState<string | null>(null);
+  const [icon] = useState<string | null>(null);
 
   return (
     <div className="p-6 border border-gray-800 bg-gray-900/50 rounded-xl mt-6">

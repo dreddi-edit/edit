@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 
 export const ContrastAuditor: React.FC = () => {
-  const [issues, setIssues] = useState([
+  const [issues] = useState([
     { id: 1, element: 'Hero CTA', current: '#94a3b8 on #ffffff', ratio: '2.4:1', suggestion: '#475569' }
   ]);
 

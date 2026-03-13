@@ -3,10 +3,8 @@ import React, { useCallback, useRef, useState, useEffect, type CSSProperties } f
 import {  readSavedTheme, DEFAULT_CHROME_BACKGROUND, DEFAULT_CHROME_BORDER, VIEWPORT_PRESETS, EXPORT_MODE_OPTIONS, WORKFLOW_STAGE_OPTIONS, PROJECT_VERSION_SOURCE_LABELS, DEFAULT_GLOBAL_STYLE_OVERRIDES, BLOCK_FILTER_OPTIONS, EDIT_RAIL_EXPANDED_WIDTH, EDIT_RAIL_COLLAPSED_WIDTH, titleCaseFallback, formatEditorDateTime, pickEditorChromeFromDocument, getDownloadFilename, collectProjectAssets, mergeAssetLibraries, collectCssVariables, applyGlobalStylesToHtml, applyTranslationOverridesToHtml, getLanguageVariantEffectiveHtml, buildLocalAudit, buildDiffPreview, readFileAsDataUrl, buildTranslationSegmentsWithOverrides  } from "./editorHelpers";
 import { useAdmin } from "./hooks/useAdmin";
 import { apiMe, type User } from "./api/auth"
-import { apiGetPlan } from "./api/credits"
 import { apiFetch, fetchWithAuth } from "./api/client"
 import { EditorSidebar } from "./components/EditorSidebar";
-const SettingsPanel = React.lazy(() => import("./components/SettingsPanel"));
 import { EditorModals } from "./components/EditorModals";
 import {
   apiCreateProjectShare,

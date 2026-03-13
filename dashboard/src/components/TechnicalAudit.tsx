@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 
 export const TechnicalAudit: React.FC = () => {
   const [scanning, setScanning] = useState(false);
-  const [results, setResults] = useState<any>(null);
+  const [results, setResults] = useState<{ score: number; issues: Array<{ type: string; message: string }> } | null>(null);
 
   const runScan = () => {
     setScanning(true);

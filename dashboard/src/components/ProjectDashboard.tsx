@@ -1063,6 +1063,7 @@ function matchesStage(filter: DashboardStage, stage?: string) {
   return (stage || "draft") === filter
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function mockSeoScore(_project: Project) {
   return null
 }

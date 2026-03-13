@@ -10,7 +10,7 @@ export const PseudoElementEditor: React.FC = () => {
         {['before', 'after'].map(p => (
           <button 
             key={p}
-            onClick={() => setTarget(p as any)}
+            onClick={() => setTarget(p as 'before' | 'after')}
             className={`flex-1 py-1.5 rounded text-[10px] font-bold uppercase transition-all border ${
               target === p ? 'bg-orange-600/20 border-orange-500 text-orange-400' : 'bg-gray-800 border-gray-700 text-gray-500'
             }`}

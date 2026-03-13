@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 export const PlatformHelpGuide: React.FC = () => {
   const [platform, setPlatform] = useState('webflow');
 
-  const guides: any = {
+  const guides: Record<string, string> = {
     webflow: "Publish your site to a .webflow.io domain first. Ensure all assets are public.",
     shopify: "Export your theme as a .zip or provide the URL of a published store preview.",
     wordpress: "Use our 'WP Export' plugin or provide the URL of a front-page.php based theme."
