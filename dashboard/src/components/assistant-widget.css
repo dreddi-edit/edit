@@ -96,7 +96,7 @@
 }
 
 .assistant-widget__panel {
-  width: min(440px, calc(100vw - 24px));
+  width: min(500px, calc(100vw - 24px));
   max-height: min(80vh, 760px);
   display: flex;
   flex-direction: column;
@@ -124,8 +124,8 @@
 .assistant-widget__messages,
 .assistant-widget__quick-prompts,
 .assistant-widget__composer {
-  padding-left: 18px;
-  padding-right: 18px;
+  padding-left: 20px;
+  padding-right: 20px;
 }
 
 .assistant-widget__hero {
@@ -200,7 +200,7 @@
 }
 
 .assistant-widget__title {
-  font-size: 28px;
+  font-size: 24px;
   line-height: 1;
   font-weight: 800;
   letter-spacing: -0.04em;
@@ -211,7 +211,7 @@
   max-width: 280px;
   font-size: 13px;
   line-height: 1.45;
-  color: rgba(226, 232, 240, 0.72);
+  color: rgba(226, 232, 240, 0.86);
 }
 
 .assistant-widget--light .assistant-widget__subtitle {
@@ -380,7 +380,7 @@
   flex-direction: column;
   gap: 12px;
   min-height: 190px;
-  max-height: 340px;
+  max-height: 380px;
   overflow: auto;
   padding-top: 18px;
   padding-bottom: 14px;
@@ -402,7 +402,7 @@
   max-width: 92%;
   padding: 14px 16px;
   border-radius: 18px;
-  font-size: 13px;
+  font-size: 13.5px;
   line-height: 1.6;
   white-space: pre-wrap;
 }
@@ -431,7 +431,7 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  padding-bottom: 16px;
+  padding-bottom: 14px;
 }
 
 .assistant-widget__prompt-chip {
@@ -442,7 +442,7 @@
   border: 1px solid rgba(148, 163, 184, 0.14);
   background: rgba(255, 255, 255, 0.03);
   color: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   line-height: 1.4;
   cursor: pointer;
@@ -481,6 +481,8 @@
   border: 1px solid rgba(148, 163, 184, 0.14);
   background: rgba(255, 255, 255, 0.04);
   color: inherit;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .assistant-widget__textarea::placeholder {
@@ -513,6 +515,13 @@
 .assistant-widget__send:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+.assistant-widget button:focus-visible,
+.assistant-widget select:focus-visible,
+.assistant-widget textarea:focus-visible {
+  outline: 2px solid rgba(96, 165, 250, 0.92);
+  outline-offset: 2px;
 }
 
 @media (max-width: 1180px) {

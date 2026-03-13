@@ -268,7 +268,7 @@ export default function AssistantWidget({
       className={`assistant-widget assistant-widget--${theme} ${open ? "is-open" : ""} ${avoidOverlay ? "assistant-widget--avoid" : ""} ${avoidOverlay && !open ? "assistant-widget--compact" : ""}`}
     >
       {open ? (
-        <div className="assistant-widget__panel" role="dialog" aria-label={t("Assistant")}>
+        <div id="assistant-widget-panel" className="assistant-widget__panel" role="dialog" aria-label={t("Assistant")}>
           <div className="assistant-widget__hero">
             <div className="assistant-widget__hero-top">
               <div className="assistant-widget__eyebrow-row">
@@ -434,7 +434,13 @@ export default function AssistantWidget({
         </div>
       ) : null}
 
-      <button type="button" className="assistant-widget__launcher" onClick={() => setOpen((value) => !value)}>
+      <button
+        type="button"
+        className="assistant-widget__launcher"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-controls="assistant-widget-panel"
+      >
         <span className="assistant-widget__launcher-mark">AI</span>
         <span className="assistant-widget__launcher-copy">
           <strong>{t("Open copilot")}</strong>

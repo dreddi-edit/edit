@@ -288,7 +288,8 @@ export default function SettingsPanel({
     try {
       const acceptInviteData = await request("/api/orgs/accept-invite", { method: "POST" }).catch(() => null)
 
-      const [settingsData, keysData, orgsData, meData, billingData, invoicesData] = await Promise.all([
+      const [settingsDataResult, keysDataResult, orgsDataResult, meDataResult, billingDataResult, invoicesDataResult] =
+        await Promise.allSettled([
         request("/api/settings"),
         request("/api/keys"),
         request("/api/orgs"),
@@ -296,6 +297,16 @@ export default function SettingsPanel({
         apiGetStripePackages(),
         apiGetStripeInvoices(),
       ])
+
+      if (settingsDataResult.status === "rejected") throw settingsDataResult.reason
+      if (keysDataResult.status === "rejected") throw keysDataResult.reason
+      if (orgsDataResult.status === "rejected") throw orgsDataResult.reason
+      if (meDataResult.status === "rejected") throw meDataResult.reason
+
+      const settingsData = settingsDataResult.value
+      const keysData = keysDataResult.value
+      const orgsData = orgsDataResult.value
+      const meData = meDataResult.value
 
       if ((acceptInviteData as { accepted?: number } | null)?.accepted) {
         toast.success(`Organisation invites accepted: ${(acceptInviteData as { accepted: number }).accepted}`)
@@ -307,8 +318,20 @@ export default function SettingsPanel({
       setMemberOrgs((orgsData.member || []) as Org[])
       const me = (meData.user || null) as CurrentUser | null
       applyCurrentUser(me)
-      setSubscriptionPlans(billingData.ok ? billingData.subscription_plans || [] : [])
-      setInvoiceRows(invoicesData.ok ? invoicesData.invoices || [] : [])
+
+      if (billingDataResult.status === "fulfilled") {
+        const billingData = billingDataResult.value
+        setSubscriptionPlans(billingData.ok ? billingData.subscription_plans || [] : [])
+      } else {
+        setSubscriptionPlans([])
+      }
+
+      if (invoicesDataResult.status === "fulfilled") {
+        const invoicesData = invoicesDataResult.value
+        setInvoiceRows(invoicesData.ok ? invoicesData.invoices || [] : [])
+      } else {
+        setInvoiceRows([])
+      }
 
       const nextOwned = (orgsData.owned?.[0] || null) as Org | null
       if (nextOwned) {

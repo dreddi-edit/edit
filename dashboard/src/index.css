@@ -310,10 +310,15 @@ body[data-theme="light"] {
   gap: 10px;
 }
 
+.draft-auth-form > * {
+  max-width: 100%;
+}
+
 .draft-auth-input {
   width: 100%;
   height: 42px;
   padding: 0 13px;
+  box-sizing: border-box;
   border-radius: 10px;
   border: 1px solid rgba(255,255,255,0.06);
   background: #171717;
@@ -334,6 +339,7 @@ body[data-theme="light"] {
   width: 100%;
   height: 42px;
   margin-top: 4px;
+  box-sizing: border-box;
   border-radius: 10px;
   border: 1px solid rgba(96,165,250,0.26);
   background: rgba(96,165,250,0.18);
@@ -642,7 +648,7 @@ body[data-theme="light"] {
 }
 
 .draft-settings-modal {
-  width: min(100%, 560px);
+  width: min(100%, 860px);
   max-height: 88vh;
   display: flex;
   flex-direction: column;
@@ -722,11 +728,21 @@ body[data-theme="light"] {
 .draft-settings-content {
   flex: 1;
   overflow: auto;
-  padding: 18px 18px 20px;
+  padding: 20px;
+}
+
+.draft-settings-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .draft-settings-section {
-  margin-bottom: 20px;
+  margin-bottom: 0;
+  padding: 14px;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 12px;
+  background: rgba(255,255,255,0.02);
 }
 
 .draft-settings-section:last-child {
@@ -735,7 +751,7 @@ body[data-theme="light"] {
 
 .draft-settings-label {
   margin-bottom: 10px;
-  color: #404040;
+  color: #9aa8ba;
   font-size: 9.5px;
   font-weight: 700;
   letter-spacing: 0.09em;
@@ -744,7 +760,7 @@ body[data-theme="light"] {
 
 .draft-settings-description {
   margin: 0 0 16px;
-  color: #404040;
+  color: #a5b2c3;
   font-size: 12px;
   line-height: 1.55;
 }
@@ -783,7 +799,7 @@ body[data-theme="light"] {
   display: block;
   min-height: 14px;
   margin-top: 1px;
-  color: #404040;
+  color: #8d9aae;
   font-size: 10px;
   font-weight: 600;
 }
@@ -794,8 +810,9 @@ body[data-theme="light"] {
 
 .draft-settings-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   margin-bottom: 6px;
   padding: 11px 13px;
@@ -826,7 +843,7 @@ body[data-theme="light"] {
 
 .draft-settings-row-sub {
   margin-top: 1px;
-  color: #404040;
+  color: #98a7b9;
   font-size: 11px;
 }
 
@@ -874,7 +891,7 @@ body[data-theme="light"] {
 }
 
 .draft-settings-text-input::placeholder {
-  color: #404040;
+  color: #8393a7;
 }
 
 .draft-settings-toggle {
@@ -924,8 +941,15 @@ body[data-theme="light"] {
 
 .draft-settings-input-row {
   display: flex;
-  align-items: center;
+  align-items: stretch;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.draft-settings-input-row > .draft-settings-text-input,
+.draft-settings-input-row > .draft-settings-select,
+.draft-settings-input-row > .draft-settings-row-input {
+  flex: 1 1 220px;
 }
 
 .draft-settings-input-row--stack-mobile {
@@ -991,7 +1015,7 @@ body[data-theme="light"] {
 
 .draft-settings-detected-sub {
   margin-bottom: 10px;
-  color: #808080;
+  color: #98a7b9;
   font-size: 11px;
 }
 
@@ -1157,8 +1181,9 @@ body[data-theme="light"] {
 
 .draft-settings-list-card {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 12px 14px;
   border: 1px solid #1d1d1d;
@@ -1183,7 +1208,7 @@ body[data-theme="light"] {
 
 .draft-settings-list-meta {
   margin-top: 3px;
-  color: #808080;
+  color: #9aabbe;
   font-size: 11px;
   line-height: 1.45;
 }
@@ -1243,7 +1268,7 @@ body[data-theme="light"] {
   padding: 14px;
   border: 1px dashed #2a2a2a;
   border-radius: 10px;
-  color: #808080;
+  color: #a2b1c2;
   font-size: 12px;
   text-align: center;
 }
@@ -1278,7 +1303,7 @@ body[data-theme="light"] {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #404040;
+  color: #a2b1c2;
   font-size: 9.5px;
   font-weight: 700;
   letter-spacing: 0.09em;
@@ -1290,7 +1315,7 @@ body[data-theme="light"] {
 }
 
 .draft-settings-api-arrow {
-  color: #404040;
+  color: #9fb0c3;
   font-size: 7px;
   transition: transform 0.18s;
 }
@@ -1360,6 +1385,7 @@ body[data-theme="light"] .draft-settings-modal {
 
 body[data-theme="light"] .draft-settings-close,
 body[data-theme="light"] .draft-settings-toggle-button,
+body[data-theme="light"] .draft-settings-section,
 body[data-theme="light"] .draft-settings-row,
 body[data-theme="light"] .draft-settings-row-input,
 body[data-theme="light"] .draft-settings-text-input,
