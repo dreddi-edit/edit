@@ -421,7 +421,22 @@ export default function LandingPage({ onEnter }: LandingPageProps) {
             </div>
           </div>
           <div className="lp-hero__demo">
-            <Terminal />
+            <div className="lp-video-card">
+              <div className="lp-video-card__top">
+                <span className="lp-video-card__badge">60s demo</span>
+                <span className="lp-video-card__meta">Guided walkthrough</span>
+              </div>
+
+              <div className="lp-video-embed">
+                <iframe
+                  src="https://embed.app.guidde.com/playbooks/iyeGPeTVt9anr6vLen1CC5?mode=videoOnly"
+                  title="Reframe demo"
+                  loading="lazy"
+                  allow="fullscreen"
+                  allowFullScreen
+                />
+              </div>
+            </div>
           </div>
         </div>
       </section>
