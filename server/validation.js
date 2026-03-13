@@ -1,108 +1,64 @@
-export class ValidationError extends Error {
-  constructor(message) {
-    super(message)
-    this.name = "ValidationError"
+export function isValidationError(e) {
+  return e?.name === "ValidationError";
+}
+
+export function readEmail(value) {
+  const s = String(value || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) throw new Error("Ungültige E-Mail-Adresse");
+  return s;
+}
+
+export function readPassword(value, label = "Passwort") {
+  const s = String(value || "");
+  // Erhöhte Sicherheit: Mind. 8 Zeichen, 1 Großbuchstabe, 1 Zahl
+  if (s.length < 8 || !/[A-Z]/.test(s) || !/[0-9]/.test(s)) {
+    throw new Error(`${label} muss mindestens 8 Zeichen lang sein und einen Großbuchstaben sowie eine Zahl enthalten.`);
   }
+  return s;
 }
 
-function asTrimmedString(value, field) {
-  if (typeof value !== "string") throw new ValidationError(`${field} ungültig`)
-  return value.trim()
+export function readRequiredString(value, label, { max = 255 } = {}) {
+  const s = String(value || "").trim();
+  if (!s) throw new Error(`${label} ist erforderlich`);
+  if (s.length > max) throw new Error(`${label} ist zu lang (max ${max})`);
+  return s;
 }
 
-export function readEmail(value, field = "Email") {
-  const email = asTrimmedString(value, field).toLowerCase()
-  if (!email) throw new ValidationError(`${field} erforderlich`)
-  if (email.length > 320) throw new ValidationError(`${field} zu lang`)
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new ValidationError(`${field} ungültig`)
-  return email
+export function readOptionalString(value, label, { max = 255, empty = "" } = {}) {
+  const s = String(value || "").trim();
+  if (!s) return empty;
+  if (s.length > max) throw new Error(`${label} ist zu lang (max ${max})`);
+  return s;
 }
 
-export function readPassword(value, field = "Passwort", minLength = 8) {
-  if (typeof value !== "string") throw new ValidationError(`${field} ungültig`)
-  const password = value
-  if (!password.trim()) throw new ValidationError(`${field} erforderlich`)
-  if (password.length < minLength) throw new ValidationError(`${field} min. ${minLength} Zeichen`)
-  if (!/[A-Z]/.test(password)) throw new ValidationError(`${field} benötigt einen Großbuchstaben`)
-  if (!/[a-z]/.test(password)) throw new ValidationError(`${field} benötigt einen Kleinbuchstaben`)
-  if (!/[0-9]/.test(password)) throw new ValidationError(`${field} benötigt eine Zahl`)
-  if (password.length > 128) throw new ValidationError(`${field} zu lang`)
-  return password
+export function readRequiredHtml(value, label = "HTML") {
+  const s = String(value || "").trim();
+  if (!s) throw new Error(`${label} ist erforderlich`);
+  return s;
 }
 
-export function readRequiredString(value, field, { max = 200 } = {}) {
-  const text = asTrimmedString(value, field)
-  if (!text) throw new ValidationError(`${field} erforderlich`)
-  if (text.length > max) throw new ValidationError(`${field} zu lang`)
-  return text
+export function readOptionalHtml(value, label = "HTML") {
+  return String(value || "").trim();
 }
 
-export function readOptionalString(value, field, { max = 500, empty = "" } = {}) {
-  if (value == null || value === "") return empty
-  const text = asTrimmedString(value, field)
-  if (text.length > max) throw new ValidationError(`${field} zu lang`)
-  return text
+export function readOptionalUrl(value) {
+  const s = String(value || "").trim();
+  if (!s) return "";
+  try { new URL(s); return s; } catch { throw new Error("Ungültige URL"); }
 }
 
-export function readOptionalHtml(value, field = "HTML", { max = 2_000_000 } = {}) {
-  if (value == null || value === "") return ""
-  if (typeof value !== "string") throw new ValidationError(`${field} ungültig`)
-  if (value.length > max) throw new ValidationError(`${field} zu groß`)
-  return value
+export function readOptionalNumber(value, label, { min, max, integer } = {}) {
+  if (value === undefined || value === null || value === "") return undefined;
+  const n = Number(value);
+  if (isNaN(n)) throw new Error(`${label} muss eine Zahl sein`);
+  if (min !== undefined && n < min) throw new Error(`${label} muss mindestens ${min} sein`);
+  if (max !== undefined && n > max) throw new Error(`${label} darf maximal ${max} sein`);
+  if (integer && !Number.isInteger(n)) throw new Error(`${label} muss eine Ganzzahl sein`);
+  return n;
 }
 
-export function readRequiredHtml(value, field = "HTML", { max = 2_000_000 } = {}) {
-  if (typeof value !== "string") throw new ValidationError(`${field} ungültig`)
-  if (!value.trim()) throw new ValidationError(`${field} erforderlich`)
-  if (value.length > max) throw new ValidationError(`${field} zu groß`)
-  return value
-}
-
-export function readOptionalUrl(value, field = "URL") {
-  if (value == null || value === "") return ""
-  const url = asTrimmedString(value, field)
-  if (url.length > 2048) throw new ValidationError(`${field} zu lang`)
-  return url
-}
-
-export function readId(value, field = "ID") {
-  const num = Number(value)
-  if (!Number.isInteger(num) || num <= 0) throw new ValidationError(`${field} ungültig`)
-  return num
-}
-
-export function readOptionalBoolean(value, field = "Wert") {
-  if (value === undefined) return undefined
-  if (typeof value === "boolean") return value ? 1 : 0
-  if (value === 1 || value === "1" || value === "true") return 1
-  if (value === 0 || value === "0" || value === "false") return 0
-  throw new ValidationError(`${field} ungültig`)
-}
-
-export function readOptionalNumber(value, field = "Wert", { min = -Infinity, max = Infinity, integer = false } = {}) {
-  if (value === undefined || value === null || value === "") return undefined
-  const num = Number(value)
-  if (!Number.isFinite(num)) throw new ValidationError(`${field} ungültig`)
-  if (integer && !Number.isInteger(num)) throw new ValidationError(`${field} ungültig`)
-  if (num < min || num > max) throw new ValidationError(`${field} ungültig`)
-  return num
-}
-
-export function readOptionalEnum(value, allowed, field = "Wert", empty = undefined) {
-  if (value === undefined || value === null || value === "") return empty
-  const normalized = asTrimmedString(String(value).toLowerCase(), field)
-  if (!allowed.includes(normalized)) throw new ValidationError(`${field} ungültig`)
-  return normalized
-}
-
-export function readOptionalIsoDate(value, field = "Datum") {
-  if (value === undefined || value === null || value === "") return ""
-  const text = asTrimmedString(value, field)
-  const date = new Date(text)
-  if (Number.isNaN(date.getTime())) throw new ValidationError(`${field} ungültig`)
-  return date.toISOString()
-}
-
-export function isValidationError(error) {
-  return error instanceof ValidationError
+export function readId(value, label = "ID") {
+  const n = Number(value);
+  if (isNaN(n) || n < 1 || !Number.isInteger(n)) throw new Error(`Ungültige ${label}`);
+  return n;
 }
