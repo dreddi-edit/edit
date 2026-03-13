@@ -64,6 +64,7 @@ import db from "./db.js"
 import path from "path"
 import fs from "node:fs"
 import dns from "node:dns"
+import dnsPromises from "node:dns/promises"
 import { fileURLToPath } from "url"
 
 const __filename = fileURLToPath(import.meta.url)
@@ -167,6 +168,19 @@ app.use(cors({
 }))
 
 app.use(cookieParser())
+// CSRF Middleware
+app.use((req, res, next) => {
+  if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return next();
+  if (req.path === "/api/stripe/webhook" || req.path.startsWith("/api/auth/google")) return next();
+
+  const headerToken = req.headers["x-csrf-token"];
+  const cookieToken = req.cookies?.csrf_token;
+
+  if (!headerToken || !cookieToken || headerToken !== cookieToken) {
+    return res.status(403).json({ ok: false, error: "Invalid or missing CSRF token." });
+  }
+  next();
+})
 const API_BODY_LIMIT = process.env.API_BODY_LIMIT || "20mb"
 app.use(express.urlencoded({ extended: true, limit: API_BODY_LIMIT }))
 const jsonBodyParser = express.json({ limit: API_BODY_LIMIT })
@@ -210,37 +224,84 @@ app.get("/", (_req, res) => {
   `)
 })
 
+// Helper to detect local/private IPs
+function isPrivateIP(ip) {
+  if (!ip) return false;
+  if (ip === '::1' || ip.toLowerCase() === '::ffff:127.0.0.1') return true;
+  const parts = ip.split('.').map(Number);
+  if (parts.length !== 4) return false;
+  return (
+    parts[0] === 10 || 
+    (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || 
+    (parts[0] === 192 && parts[1] === 168) || 
+    parts[0] === 127 || 
+    parts[0] === 169 || 
+    parts[0] === 0
+  );
+}
+
 app.get("/proxy", async (req, res) => {
   try {
-    const url = normalizeSiteUrl(req.query.url)
+    const url = normalizeSiteUrl(req.query.url);
     if (!url || typeof url !== "string") {
-      return res.status(400).send("Missing url")
+      return res.status(400).send("Missing url");
     }
+
     const urlObj = new URL(url);
-    const host = urlObj.hostname;
-    const isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|169\.254\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2[0-9]|3[0-1])\.\d+\.\d+|::1)$/i.test(host) || host.endsWith('.local');
-    if (isLocal || !['http:', 'https:'].includes(urlObj.protocol)) {
-      return res.status(403).send("Proxying to this destination is forbidden.");
+    if (!['http:', 'https:'].includes(urlObj.protocol)) {
+      return res.status(403).send("Only HTTP/HTTPS allowed.");
     }
+
+    try {
+      const lookup = await dnsPromises.lookup(urlObj.hostname);
+      if (isPrivateIP(lookup.address)) {
+        return res.status(403).send("Proxying to this destination is forbidden.");
+      }
+    } catch (dnsErr) {
+      return res.status(400).send("Could not resolve hostname.");
+    }
+
     const r = await fetch(url, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; SiteEditor/1.0)"
+        "User-Agent": req.headers["user-agent"] || "Mozilla/5.0 (compatible; SiteEditor/1.0)",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
       }
-    })
-    if (!r.ok) {
-      return res.status(r.status).send(`Proxy error: ${r.status}`)
-    }
-    const html = await r.text()
-    const finalUrl = r.url || url
-    const prepared = prepareEditorDocument(html, finalUrl)
-    const meta = prepared.meta
+    });
 
-    res.setHeader("X-Site-Platform", meta.platform)
-    if (meta.title) res.setHeader("X-Site-Title", meta.title)
-    if (meta.url) res.setHeader("X-Site-Url", meta.url)
-    res.send(prepared.html)
+    if (!r.ok) return res.status(r.status).send(`Proxy error: ${r.status}`);
+
+    const MAX_SIZE = 5 * 1024 * 1024;
+    const contentLength = r.headers.get("content-length");
+    if (contentLength && parseInt(contentLength, 10) > MAX_SIZE) {
+      return res.status(413).send("Payload Too Large");
+    }
+
+    let html = "";
+    let size = 0;
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        size += value.length;
+        if (size > MAX_SIZE) {
+          return res.status(413).send("Payload Too Large");
+        }
+        html += decoder.decode(value, { stream: true });
+      }
+    }
+
+    const finalUrl = r.url || url;
+    const prepared = prepareEditorDocument(html, finalUrl);
+    
+    res.setHeader("X-Site-Platform", prepared.meta.platform);
+    if (prepared.meta.title) res.setHeader("X-Site-Title", prepared.meta.title);
+    if (prepared.meta.url) res.setHeader("X-Site-Url", prepared.meta.url);
+    res.send(prepared.html);
   } catch (e) {
-    sendError(res, 500, safeErrorMessage(e))
+    sendError(res, 500, safeErrorMessage(e));
   }
 })
 app.get("/asset", asset)
@@ -1609,70 +1670,50 @@ app.delete("/api/admin/users/:id", authMiddleware, ownerOnly, (req, res) => {
     
     // Delete in correct order to avoid foreign key constraints
     try {
-      const projectIds = db.prepare("SELECT id FROM projects WHERE user_id = ?").all(userId).map(row => row.id)
-      for (const projectId of projectIds) {
-        db.prepare("DELETE FROM project_assignees WHERE project_id = ?").run(projectId)
-        db.prepare("DELETE FROM project_shares WHERE project_id = ?").run(projectId)
-        db.prepare("DELETE FROM project_exports WHERE project_id = ?").run(projectId)
-        db.prepare("DELETE FROM project_versions WHERE project_id = ?").run(projectId)
-        db.prepare("DELETE FROM project_workflow_events WHERE project_id = ?").run(projectId)
-        db.prepare("DELETE FROM publish_deployments WHERE project_id = ?").run(projectId)
-        db.prepare("DELETE FROM project_preview_tokens WHERE project_id = ?").run(projectId)
-        db.prepare("DELETE FROM block_comments WHERE project_id = ?").run(String(projectId))
-      }
+      db.transaction(() => {
+        const projectIds = db.prepare("SELECT id FROM projects WHERE user_id = ?").all(userId).map(row => row.id)
+        for (const projectId of projectIds) {
+          db.prepare("DELETE FROM project_assignees WHERE project_id = ?").run(projectId)
+          db.prepare("DELETE FROM project_shares WHERE project_id = ?").run(projectId)
+          db.prepare("DELETE FROM project_exports WHERE project_id = ?").run(projectId)
+          db.prepare("DELETE FROM project_versions WHERE project_id = ?").run(projectId)
+          db.prepare("DELETE FROM project_workflow_events WHERE project_id = ?").run(projectId)
+          db.prepare("DELETE FROM publish_deployments WHERE project_id = ?").run(projectId)
+          db.prepare("DELETE FROM project_preview_tokens WHERE project_id = ?").run(projectId)
+          db.prepare("DELETE FROM block_comments WHERE project_id = ?").run(String(projectId))
+        }
 
-      // Delete credit transactions first
-      db.prepare("DELETE FROM credit_transactions WHERE user_id = ?").run(userId)
+        db.prepare("DELETE FROM credit_transactions WHERE user_id = ?").run(userId)
+        db.prepare("DELETE FROM credits WHERE user_id = ?").run(userId)
+        db.prepare("DELETE FROM user_invoices WHERE user_id = ?").run(userId)
+        db.prepare("DELETE FROM refresh_tokens WHERE user_id = ?").run(userId)
+        db.prepare("DELETE FROM email_verifications WHERE user_id = ?").run(userId)
+        db.prepare("DELETE FROM totp_pending_sessions WHERE user_id = ?").run(userId)
+        db.prepare("DELETE FROM product_events WHERE user_id = ?").run(userId)
+        db.prepare("DELETE FROM audit_logs WHERE user_id = ?").run(userId)
+        db.prepare("DELETE FROM ai_studio_runs WHERE user_id = ?").run(userId)
+        db.prepare("DELETE FROM projects WHERE user_id = ?").run(userId)
+        db.prepare("DELETE FROM templates WHERE user_id = ?").run(userId)
+        db.prepare("DELETE FROM deleted_projects WHERE user_id = ?").run(userId)
+        db.prepare("DELETE FROM deleted_templates WHERE user_id = ?").run(userId)
+        db.prepare("DELETE FROM user_settings WHERE user_id = ?").run(userId)
+        db.prepare("DELETE FROM team_members WHERE member_email = ?").run(user.email)
+        db.prepare("DELETE FROM team_members WHERE owner_id = ?").run(userId)
+        db.prepare("DELETE FROM org_members WHERE user_id = ?").run(userId)
+        
+        try {
+          db.prepare("DELETE FROM organisations WHERE owner_id = ?").run(userId)
+        } catch (e) {
+          db.prepare("UPDATE organisations SET owner_id = NULL WHERE owner_id = ?").run(userId)
+        }
+        
+        db.prepare("DELETE FROM user_api_keys WHERE user_id = ?").run(userId)
+        db.prepare("DELETE FROM password_resets WHERE user_id = ?").run(userId)
+        
+        const result = db.prepare("DELETE FROM users WHERE id = ?").run(userId)
+        if (result.changes === 0) throw new Error("User not found during transaction");
+      })();
       
-      // Delete user's credits
-      db.prepare("DELETE FROM credits WHERE user_id = ?").run(userId)
-
-      db.prepare("DELETE FROM user_invoices WHERE user_id = ?").run(userId)
-      db.prepare("DELETE FROM refresh_tokens WHERE user_id = ?").run(userId)
-      db.prepare("DELETE FROM email_verifications WHERE user_id = ?").run(userId)
-      db.prepare("DELETE FROM totp_pending_sessions WHERE user_id = ?").run(userId)
-      db.prepare("DELETE FROM product_events WHERE user_id = ?").run(userId)
-      db.prepare("DELETE FROM audit_logs WHERE user_id = ?").run(userId)
-      db.prepare("DELETE FROM ai_studio_runs WHERE user_id = ?").run(userId)
-      
-      // Delete user's projects
-      db.prepare("DELETE FROM projects WHERE user_id = ?").run(userId)
-      db.prepare("DELETE FROM templates WHERE user_id = ?").run(userId)
-      db.prepare("DELETE FROM deleted_projects WHERE user_id = ?").run(userId)
-      db.prepare("DELETE FROM deleted_templates WHERE user_id = ?").run(userId)
-      
-      // Delete user's settings
-      db.prepare("DELETE FROM user_settings WHERE user_id = ?").run(userId)
-      
-      // Delete user's team memberships (as member)
-      db.prepare("DELETE FROM team_members WHERE member_email = ?").run(user.email)
-      
-      // Delete user's team memberships (as owner)
-      db.prepare("DELETE FROM team_members WHERE owner_id = ?").run(userId)
-      
-      // Delete user's org memberships
-      db.prepare("DELETE FROM org_members WHERE user_id = ?").run(userId)
-      
-      // Delete user's org ownerships (this might fail if others depend on it)
-      try {
-        db.prepare("DELETE FROM organisations WHERE owner_id = ?").run(userId)
-      } catch (e) {
-        // If org deletion fails, update owner to another user or set to NULL
-        db.prepare("UPDATE organisations SET owner_id = NULL WHERE owner_id = ?").run(userId)
-      }
-      
-      // Delete user's API keys
-      db.prepare("DELETE FROM user_api_keys WHERE user_id = ?").run(userId)
-      
-      // Delete user's password resets
-      db.prepare("DELETE FROM password_resets WHERE user_id = ?").run(userId)
-      
-      // Finally delete the user
-      const result = db.prepare("DELETE FROM users WHERE id = ?").run(userId)
-      
-      if (result.changes === 0) {
-        return res.status(404).json({ ok: false, error: "User not found" })
-      }
       logAudit({ userId: req.user.id, action: "admin.delete_user", targetType: "user", targetId: userId, meta: { email: user.email } })
       res.json({ ok: true, message: "User deleted successfully" })
     } catch (fkError) {

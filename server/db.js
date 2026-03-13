@@ -16,6 +16,10 @@ try {
 const DB_PATH = process.env.DB_PATH || join(dataDir, "editor.db")
 const db = new Database(DB_PATH)
 
+// Enable WAL mode for concurrent performance and strictly enforce foreign keys
+db.pragma("journal_mode = WAL");
+db.pragma("foreign_keys = ON");
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

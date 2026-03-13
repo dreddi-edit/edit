@@ -11,7 +11,7 @@
     "launch": "npm run build && npm start"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "concurrently": "^9.2.1"
   },
   "engines": {
     "node": ">=22.13.0"

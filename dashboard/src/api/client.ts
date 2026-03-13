@@ -55,19 +55,39 @@ function shouldAttemptRefresh(url: string): boolean {
   ].includes(pathname)
 }
 
+let refreshPromise: Promise<boolean> | null = null;
+
 async function tryRefreshSession(): Promise<boolean> {
-  try {
-    const response = await fetch("/api/auth/refresh", {
-      method: "POST",
-      credentials: "include",
-    })
-    return response.ok
-  } catch {
-    return false
-  }
+  // If a refresh is already in progress, wait for it instead of starting a new one
+  if (refreshPromise) return refreshPromise;
+  
+  refreshPromise = (async () => {
+    try {
+      const response = await fetch("/api/auth/refresh", {
+        method: "POST",
+        credentials: "include",
+        headers: { "x-csrf-token": getCsrfToken() }
+      });
+      return response.ok;
+    } catch {
+      return false;
+    } finally {
+      refreshPromise = null; // Clear lock when done
+    }
+  })();
+  
+  return refreshPromise;
+}
+
+// Helper to grab the CSRF token from cookies
+function getCsrfToken(): string {
+  if (typeof document === "undefined") return "";
+  const match = document.cookie.match(new RegExp("(^| )csrf_token=([^;]+)"));
+  return match ? match[2] : "";
 }
 
 export async function fetchWithAuth(url: string, opts: RequestInit = {}): Promise<Response> {
+  opts.headers = { ...opts.headers, "x-csrf-token": getCsrfToken() };
   const execute = () => fetch(url, { credentials: "include", ...opts })
   let response = await execute()
   if (response.status === 401 && shouldAttemptRefresh(url)) {

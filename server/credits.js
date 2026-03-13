@@ -34,35 +34,36 @@ export function hasEnoughCredits(userId, model, inputTokens, outputTokens) {
   }
 }
 
-export function deductCredits(userId, model, inputTokens, outputTokens, taskLabel = "AI usage") {
-  const costs = COSTS_EUR[model] || COSTS_EUR["claude-sonnet-4-6"]
-  const amount = ((inputTokens / 1_000_000) * costs.input) + ((outputTokens / 1_000_000) * costs.output)
-  if (amount === 0) return 0
+export const deductCredits = db.transaction((userId, model, inputTokens, outputTokens, taskLabel = "AI usage") => {
+  const costs = COSTS_EUR[model] || COSTS_EUR["claude-sonnet-4-6"];
+  const amount = ((inputTokens / 1_000_000) * costs.input) + ((outputTokens / 1_000_000) * costs.output);
+  if (amount <= 0) return 0;
 
+  // Fix: Insert negative amount if user doesn't exist, otherwise subtract
   db.prepare(`
-    INSERT INTO credits (user_id, balance_eur) VALUES (?, 0)
+    INSERT INTO credits (user_id, balance_eur) VALUES (?, ?)
     ON CONFLICT(user_id) DO UPDATE SET balance_eur = balance_eur - ?
-  `).run(userId, amount)
+  `).run(userId, -amount, amount);
 
   db.prepare(`
     INSERT INTO credit_transactions (user_id, amount_eur, type, description)
     VALUES (?, ?, 'deduct', ?)
-  `).run(userId, -amount, `AI: ${taskLabel} | ${model} (${inputTokens}in/${outputTokens}out tokens)`)
+  `).run(userId, -amount, `AI: ${taskLabel} | ${model} (${inputTokens}in/${outputTokens}out tokens)`);
 
-  return amount
-}
+  return amount;
+});
 
-export function addCredits(userId, amountEur) {
+export const addCredits = db.transaction((userId, amountEur) => {
   db.prepare(`
     INSERT INTO credits (user_id, balance_eur) VALUES (?, ?)
     ON CONFLICT(user_id) DO UPDATE SET balance_eur = balance_eur + ?
-  `).run(userId, amountEur, amountEur)
+  `).run(userId, amountEur, amountEur);
 
   db.prepare(`
     INSERT INTO credit_transactions (user_id, amount_eur, type, description)
     VALUES (?, ?, 'topup', 'Manuelle Aufladung')
-  `).run(userId, amountEur)
-}
+  `).run(userId, amountEur);
+});
 
 export function registerCreditRoutes(app) {
 

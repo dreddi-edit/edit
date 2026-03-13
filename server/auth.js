@@ -1,6 +1,7 @@
 import crypto from "crypto"
 import bcrypt from "bcryptjs"
 import jwt from "jsonwebtoken"
+import multer from "multer"
 import fs from "node:fs/promises"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -111,6 +112,7 @@ function signAccessToken(userId, email) {
 function setAuthCookies(res, userId, email) {
   const token = signAccessToken(userId, email)
   const refreshToken = crypto.randomBytes(40).toString("hex")
+  const csrfToken = crypto.randomBytes(32).toString("hex")
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
 
   db.prepare("DELETE FROM refresh_tokens WHERE user_id = ? OR expires_at <= datetime('now')").run(userId)
@@ -118,6 +120,7 @@ function setAuthCookies(res, userId, email) {
 
   res.cookie(COOKIE, token, { ...AUTH_COOKIE_OPTIONS, maxAge: 15 * 60 * 1000 })
   res.cookie(REFRESH_COOKIE, refreshToken, { ...AUTH_COOKIE_OPTIONS, maxAge: 7 * 24 * 60 * 60 * 1000, path: "/api/auth" })
+  res.cookie("csrf_token", csrfToken, { ...AUTH_COOKIE_OPTIONS, httpOnly: false, maxAge: 15 * 60 * 1000 })
 }
 
 function clearAuthCookies(res) {
@@ -270,7 +273,7 @@ function consumeEmailVerification(token) {
   return { ok: true, userId: record.user_id }
 }
 
-function deleteOwnedProjects(userId) {
+const deleteOwnedProjects = db.transaction((userId) => {
   const projectIds = db.prepare("SELECT id FROM projects WHERE user_id = ?").all(userId).map((row) => row.id)
   for (const projectId of projectIds) {
     db.prepare("DELETE FROM project_assignees WHERE project_id = ?").run(projectId)
@@ -283,9 +286,9 @@ function deleteOwnedProjects(userId) {
     db.prepare("DELETE FROM block_comments WHERE project_id = ?").run(String(projectId))
     db.prepare("DELETE FROM projects WHERE id = ?").run(projectId)
   }
-}
+});
 
-function deleteUserData(userId, email) {
+const deleteUserData = db.transaction((userId, email) => {
   deleteOwnedProjects(userId)
   db.prepare("DELETE FROM templates WHERE user_id = ?").run(userId)
   db.prepare("DELETE FROM deleted_projects WHERE user_id = ?").run(userId)
@@ -310,7 +313,7 @@ function deleteUserData(userId, email) {
   db.prepare("DELETE FROM password_resets WHERE user_id = ?").run(userId)
   db.prepare("DELETE FROM user_settings WHERE user_id = ?").run(userId)
   db.prepare("DELETE FROM users WHERE id = ?").run(userId)
-}
+});
 
 export function authMiddleware(req, res, next) {
   const token = req.cookies?.[COOKIE] || req.headers.authorization?.replace("Bearer ", "")
@@ -732,34 +735,48 @@ export function registerAuthRoutes(app) {
     }
   })
 
-  app.post("/api/auth/avatar", authMiddleware, async (req, res) => {
-    try {
-      const parsed = parseAvatarDataUrl(req.body?.data_url || req.body?.dataUrl || "")
-      if (!parsed) {
-        return res.status(400).json({
-          ok: false,
-          error: `Upload failed. Please upload PNG, JPG, WEBP, or GIF up to ${Math.round(AVATAR_UPLOAD_MAX_BYTES / 1_000_000)}MB.`,
-        })
-      }
-
-      await fs.mkdir(THUMBNAILS_DIR, { recursive: true })
-      const fileName = `avatar-${req.user.id}-${Date.now()}.${parsed.extension}`
-      const diskPath = path.join(THUMBNAILS_DIR, fileName)
-      await fs.writeFile(diskPath, parsed.buffer)
-      const avatarUrl = `/thumbnails/${fileName}`
-      db.prepare("UPDATE users SET avatar_url = ? WHERE id = ?").run(avatarUrl, req.user.id)
-      logAudit({
-        userId: req.user.id,
-        action: "auth.avatar_uploaded",
-        targetType: "user",
-        targetId: req.user.id,
-        meta: { mime: parsed.mime, bytes: parsed.buffer.length },
-      })
-      res.json({ ok: true, avatar_url: avatarUrl, user: readUserProfile(req.user.id) })
-    } catch (error) {
-      res.status(500).json({ ok: false, error: error?.message || "Avatar upload failed" })
+  const upload = multer({
+  limits: { fileSize: 4 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+    if (!allowed.includes(file.mimetype)) {
+      return cb(new Error("Only PNG, JPG, WEBP, and GIF are allowed"));
     }
-  })
+    cb(null, true);
+  }
+});
+
+app.post("/api/auth/avatar", authMiddleware, upload.single("avatar"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ ok: false, error: "No image provided or file too large." });
+    }
+
+    const mime = req.file.mimetype;
+    const extension = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : mime === "image/gif" ? "gif" : "jpg";
+    
+    await fs.mkdir(THUMBNAILS_DIR, { recursive: true });
+    const fileName = `avatar-${req.user.id}-${Date.now()}.${extension}`;
+    const diskPath = path.join(THUMBNAILS_DIR, fileName);
+    
+    await fs.writeFile(diskPath, req.file.buffer);
+    
+    const avatarUrl = `/thumbnails/${fileName}`;
+    db.prepare("UPDATE users SET avatar_url = ? WHERE id = ?").run(avatarUrl, req.user.id);
+    
+    logAudit({
+      userId: req.user.id,
+      action: "auth.avatar_uploaded",
+      targetType: "user",
+      targetId: req.user.id,
+      meta: { mime, bytes: req.file.size },
+    });
+    
+    res.json({ ok: true, avatar_url: avatarUrl, user: readUserProfile(req.user.id) });
+  } catch (error) {
+    res.status(500).json({ ok: false, error: error?.message || "Avatar upload failed" });
+  }
+})
 
   app.delete("/api/auth/me", authMiddleware, async (req, res) => {
     try {
