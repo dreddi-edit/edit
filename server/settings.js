@@ -66,28 +66,16 @@ export function registerSettingsRoutes(app) {
     }
   })
 
-  // Team Members laden
-  app.get("/api/team", authMiddleware, (req, res) => {
-    const members = db.prepare(
-      "SELECT tm.*, u.name, u.email FROM team_members tm LEFT JOIN users u ON u.email = tm.member_email WHERE tm.owner_id = ?"
-    ).all(req.user.id)
-    res.json({ ok: true, members })
+  // Legacy team routes deprecated in favour of organisations
+  app.get("/api/team", authMiddleware, (_req, res) => {
+    res.status(410).json({ ok: false, error: "Legacy team routes removed. Use /api/orgs instead." })
   })
 
-  // Team Member einladen
-  app.post("/api/team/invite", authMiddleware, (req, res) => {
-    const { email, role } = req.body
-    if (!email) return res.status(400).json({ ok: false, error: "Email erforderlich" })
-    if (!canInviteWithRole(role || "editor")) return res.status(400).json({ ok: false, error: "Rolle ungültig" })
-    const existing = db.prepare("SELECT id FROM team_members WHERE owner_id = ? AND member_email = ?").get(req.user.id, email)
-    if (existing) return res.status(400).json({ ok: false, error: "Bereits eingeladen" })
-    db.prepare("INSERT INTO team_members (owner_id, member_email, role) VALUES (?, ?, ?)").run(req.user.id, email, normalizeAgencyRole(role, "editor"))
-    res.json({ ok: true })
+  app.post("/api/team/invite", authMiddleware, (_req, res) => {
+    res.status(410).json({ ok: false, error: "Legacy team routes removed. Use /api/orgs/:id/invite instead." })
   })
 
-  // Team Member entfernen
-  app.delete("/api/team/:id", authMiddleware, (req, res) => {
-    db.prepare("DELETE FROM team_members WHERE id = ? AND owner_id = ?").run(req.params.id, req.user.id)
-    res.json({ ok: true })
+  app.delete("/api/team/:id", authMiddleware, (_req, res) => {
+    res.status(410).json({ ok: false, error: "Legacy team routes removed. Use /api/orgs/:orgId/members/:memberId instead." })
   })
 }
