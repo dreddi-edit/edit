@@ -13,7 +13,13 @@ export const SnapshotGallery: React.FC = () => {
       <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
         {snapshots.map(s => (
           <div key={s.id} className="group relative aspect-video bg-gray-800 rounded-lg overflow-hidden border border-gray-700 cursor-pointer hover:border-blue-500 transition-all">
-            <img src={s.thumb} alt="snapshot" className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" />
+            {s.thumb ? (
+              <img src={s.thumb} alt="snapshot" className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition-opacity" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-[11px] font-bold uppercase tracking-[0.18em] text-gray-400 bg-gradient-to-br from-gray-800 to-gray-900">
+                No Snapshot
+              </div>
+            )}
             <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent p-3 flex flex-col justify-end">
               <p className="text-[10px] text-white font-bold">{s.date}</p>
             </div>

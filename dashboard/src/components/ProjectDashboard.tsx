@@ -2119,8 +2119,12 @@ export default function ProjectDashboard({
             setProjects(previous =>
               previous.map(item => (item.id === project.id ? { ...item, thumbnail: normalizedThumbnail } : item))
             )
+          } else {
+            requestedThumbnailIds.current.delete(project.id)
           }
-        } catch {}
+        } catch {
+          requestedThumbnailIds.current.delete(project.id)
+        }
       }
     }
 
