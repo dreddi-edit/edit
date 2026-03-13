@@ -40,9 +40,9 @@ export default function ResetPasswordScreen({ token, onDone }: { token: string, 
   }
 
   return (
-    <div style={{ height: "100vh", background: "#080c18", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "#080c18", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", padding: "20px 16px", boxSizing: "border-box" }}>
       <div style={{ position: "fixed", top: "20%", left: "50%", transform: "translateX(-50%)", width: 600, height: 600, borderRadius: "50%", background: "radial-gradient(circle, rgba(99,102,241,0.12) 0%, transparent 70%)", pointerEvents: "none" }} />
-      <div style={{ width: 420, padding: 40, background: "rgba(15,23,42,0.95)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 20, boxShadow: "0 32px 80px rgba(0,0,0,0.5)" }}>
+      <div style={{ width: "min(420px, 100%)", padding: "clamp(20px, 5vw, 40px)", background: "rgba(15,23,42,0.95)", border: "1px solid rgba(99,102,241,0.2)", borderRadius: 20, boxShadow: "0 32px 80px rgba(0,0,0,0.5)", boxSizing: "border-box" }}>
         <div style={{ textAlign: "center", marginBottom: 32 }}>
           <div style={{ fontSize: 32, fontWeight: 900, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", marginBottom: 8 }}>⬡ Site Editor</div>
           <div style={{ color: "rgba(148,163,184,0.7)", fontSize: 14 }}>Neues Passwort setzen</div>
