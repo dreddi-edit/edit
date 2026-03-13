@@ -243,6 +243,17 @@ type ProjectRes = { ok: boolean; error?: string; project: Project; latestExport?
 type CreateProjectRes = { ok: boolean; error?: string; id: number; project?: Project }
 type PageProjectRes = { ok: boolean; error?: string; project: Project; page?: ProjectPage }
 type ImportPreviewRes = { ok: boolean; error?: string; preview: ProjectImportPreview }
+type ImportPreviewQueuedRes = { ok: boolean; queued: boolean; jobId: string; statusUrl: string }
+type ImportPreviewJobStatusRes = {
+  ok: boolean
+  error?: string
+  job?: {
+    id: string
+    status: "queued" | "running" | "completed" | "failed"
+    result?: { ok: boolean; preview?: ProjectImportPreview; error?: string } | null
+    error?: string | null
+  }
+}
 type ProjectVersionsRes = { ok: boolean; error?: string; versions: ProjectVersion[] }
 type ProjectVersionRes = { ok: boolean; error?: string; version: ProjectVersionDetail }
 type ProjectShareRow = ProjectShare & {
@@ -317,13 +328,42 @@ export async function apiPreviewProjectImport(payload: {
     headers?: Array<{ key?: string; value?: string }>
   }
 }): Promise<ProjectImportPreview> {
-  const d = await apiFetch<ImportPreviewRes>(`${BASE}/api/projects/import-preview`, {
+  const d = await apiFetch<ImportPreviewRes | ImportPreviewQueuedRes>(`${BASE}/api/projects/import-preview`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   })
   if (!d?.ok) throw new Error((d as ImportPreviewRes)?.error || "Failed to import source.")
-  return (d as ImportPreviewRes).preview
+
+  if ((d as ImportPreviewRes).preview) {
+    return (d as ImportPreviewRes).preview
+  }
+
+  const queued = d as ImportPreviewQueuedRes
+  if (!queued.queued || !queued.statusUrl) {
+    throw new Error("Import preview did not return data.")
+  }
+
+  const timeoutMs = 120_000
+  const pollIntervalMs = 1200
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const status = await apiFetch<ImportPreviewJobStatusRes>(`${BASE}${queued.statusUrl}`)
+    const job = status?.job
+    if (!job) throw new Error("Import preview job not found.")
+    if (job.status === "failed") {
+      throw new Error(job.error || job.result?.error || "Import preview failed.")
+    }
+    if (job.status === "completed") {
+      const preview = job.result?.preview
+      if (!preview) throw new Error("Import preview completed without preview data.")
+      return preview
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs))
+  }
+
+  throw new Error("Import preview timed out. Please try again.")
 }
 
 export async function apiSaveProject(

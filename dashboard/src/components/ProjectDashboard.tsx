@@ -1509,6 +1509,24 @@ function ProjectPageTreeBranch({
   )
 }
 
+function SectionLoadingMask({
+  active,
+  label,
+}: {
+  active: boolean
+  label: string
+}) {
+  if (!active) return null
+  return (
+    <div className="pd-section-loading-mask" role="status" aria-live="polite" aria-label={label}>
+      <div className="pd-section-loading-card">
+        <span className="pd-loading-spinner" aria-hidden="true" />
+        <strong>{label}</strong>
+      </div>
+    </div>
+  )
+}
+
 function ProjectExplorerModal({
   project,
   rt,
@@ -1593,34 +1611,43 @@ function ProjectExplorerModal({
               <button className="pd-btn" type="button" onClick={onEditTags}>
                 {rt("Tags")}
               </button>
-              <button className="pd-btn pd-btn-primary" type="button" onClick={onOpenHome}>
+              <button className="pd-btn pd-btn-primary" type="button" onClick={onOpenHome} disabled={scanning}>
                 {rt("Open homepage")}
               </button>
             </div>
           </div>
 
-          {pages.length ? (
-            view === "grid" ? (
-              <div className="pd-page-grid">
-                {pages.map((page) => (
-                  <button key={page.id} className="pd-page-card" type="button" onClick={() => onOpenPage(page.id)}>
-                    <div className="pd-page-card-title">{page.title || page.name}</div>
-                    <div className="pd-page-card-path">{page.path}</div>
-                    <div className="pd-page-card-state">{page.html ? rt("Saved page") : rt("Load and open")}</div>
-                  </button>
-                ))}
-              </div>
+          <div className="pd-section-loading-wrap">
+            <SectionLoadingMask active={scanning} label={rt("Scanning pages...")} />
+            {pages.length ? (
+              view === "grid" ? (
+                <div className="pd-page-grid">
+                  {pages.map((page) => (
+                    <button
+                      key={page.id}
+                      className="pd-page-card"
+                      type="button"
+                      onClick={() => onOpenPage(page.id)}
+                      disabled={scanning}
+                    >
+                      <div className="pd-page-card-title">{page.title || page.name}</div>
+                      <div className="pd-page-card-path">{page.path}</div>
+                      <div className="pd-page-card-state">{page.html ? rt("Saved page") : rt("Load and open")}</div>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="pd-page-tree">
+                  <ProjectPageTreeBranch node={tree} depth={0} onOpenPage={onOpenPage} />
+                </div>
+              )
             ) : (
-              <div className="pd-page-tree">
-                <ProjectPageTreeBranch node={tree} depth={0} onOpenPage={onOpenPage} />
+              <div className="pd-page-empty">
+                <strong>{rt("No internal pages yet")}</strong>
+                <span>{rt("Run a page scan to map the website into this project.")}</span>
               </div>
-            )
-          ) : (
-            <div className="pd-page-empty">
-              <strong>{rt("No internal pages yet")}</strong>
-              <span>{rt("Run a page scan to map the website into this project.")}</span>
-            </div>
-          )}
+            )}
+          </div>
 
           <div className="pd-project-activity">
             <div className="pd-project-activity-head">{rt("Project activity")}</div>
@@ -4916,8 +4943,15 @@ export default function ProjectDashboard({
                     </div>
                   ) : null}
                   <div
+                    className={`pd-import-dropzone-wrap${newImporting ? " is-loading" : ""}`}
+                  >
+                    <SectionLoadingMask active={newImporting} label={rt("Analyzing upload...")} />
+                    <div
                     className={`pd-import-dropzone${newImportDragActive ? " is-dragging" : ""}`}
-                    onClick={() => uploadInputRef.current?.click()}
+                    onClick={() => {
+                      if (newImporting) return
+                      uploadInputRef.current?.click()
+                    }}
                     onDragEnter={handleUploadDragEnter}
                     onDragOver={handleUploadDragOver}
                     onDragLeave={handleUploadDragLeave}
@@ -4927,6 +4961,7 @@ export default function ProjectDashboard({
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault()
+                        if (newImporting) return
                         uploadInputRef.current?.click()
                       }
                     }}
@@ -4939,8 +4974,10 @@ export default function ProjectDashboard({
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation()
+                          if (newImporting) return
                           uploadInputRef.current?.click()
                         }}
+                        disabled={newImporting}
                       >
                         {rt("Browse files")}
                       </button>
@@ -4949,14 +4986,17 @@ export default function ProjectDashboard({
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation()
+                          if (newImporting) return
                           folderInputRef.current?.click()
                         }}
+                        disabled={newImporting}
                       >
                         {rt("Choose folder")}
                       </button>
                     </div>
                     <div className="pd-import-drop-hints">
                       <span>{rt("HTML, ZIP, PDF, DOCX, screenshots, logos, and multi-file site folders all work here.")}</span>
+                    </div>
                     </div>
                   </div>
                   {(newUploadName || newImportSummary) ? (
@@ -5155,7 +5195,7 @@ export default function ProjectDashboard({
             </div>
             <div className="pd-modal-actions">
               <button className="pd-btn" type="button" onClick={resetNewProjectForm}>{rt("Cancel")}</button>
-              <button className="pd-btn pd-btn-primary" type="button" onClick={createProject} disabled={creatingProject}>
+              <button className="pd-btn pd-btn-primary" type="button" onClick={createProject} disabled={creatingProject || newImporting}>
                 {creatingProject ? rt("Creating...") : rt("Create project")}
               </button>
             </div>

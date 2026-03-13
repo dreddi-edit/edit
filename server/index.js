@@ -1779,6 +1779,59 @@ app.get("/api/admin/users", authMiddleware, ownerOnly, (req, res) => {
   }
 })
 
+app.post("/api/admin/users/:id/ban", authMiddleware, ownerOnly, (req, res) => {
+  try {
+    const userId = readId(req.params.id, "User ID")
+    if (Number(req.user?.id || 0) === userId) {
+      return res.status(400).json({ ok: false, error: "You cannot ban your own account" })
+    }
+    const reason = readOptionalString(req.body?.reason, "Reason", { max: 280, empty: "" }) || ""
+    const target = db.prepare("SELECT id, email, plan_status FROM users WHERE id = ?").get(userId)
+    if (!target) return res.status(404).json({ ok: false, error: "User not found" })
+
+    const ownerEmail = String(process.env.OWNER_EMAIL || "").trim().toLowerCase()
+    if (ownerEmail && String(target.email || "").toLowerCase() === ownerEmail) {
+      return res.status(400).json({ ok: false, error: "Owner account cannot be banned" })
+    }
+
+    db.prepare("UPDATE users SET plan_status = 'banned' WHERE id = ?").run(userId)
+    db.prepare("DELETE FROM refresh_tokens WHERE user_id = ?").run(userId)
+    db.prepare("DELETE FROM totp_pending_sessions WHERE user_id = ?").run(userId)
+    logAudit({
+      userId: req.user.id,
+      action: "admin.ban_user",
+      targetType: "user",
+      targetId: userId,
+      meta: { email: target.email, previousStatus: target.plan_status || "active", reason },
+    })
+    res.json({ ok: true, userId, plan_status: "banned" })
+  } catch (e) {
+    if (isValidationError(e)) return sendError(res, 400, e.message)
+    return sendError(res, 500, safeErrorMessage(e))
+  }
+})
+
+app.post("/api/admin/users/:id/unban", authMiddleware, ownerOnly, (req, res) => {
+  try {
+    const userId = readId(req.params.id, "User ID")
+    const target = db.prepare("SELECT id, email, plan_status FROM users WHERE id = ?").get(userId)
+    if (!target) return res.status(404).json({ ok: false, error: "User not found" })
+
+    db.prepare("UPDATE users SET plan_status = 'active' WHERE id = ?").run(userId)
+    logAudit({
+      userId: req.user.id,
+      action: "admin.unban_user",
+      targetType: "user",
+      targetId: userId,
+      meta: { email: target.email, previousStatus: target.plan_status || "active" },
+    })
+    res.json({ ok: true, userId, plan_status: "active" })
+  } catch (e) {
+    if (isValidationError(e)) return sendError(res, 400, e.message)
+    return sendError(res, 500, safeErrorMessage(e))
+  }
+})
+
 
 app.post("/api/admin/send-reset", authMiddleware, ownerOnly, adminResetRateLimit, async (req, res) => {
   try {

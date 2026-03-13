@@ -1562,6 +1562,57 @@ body[data-theme="light"] .pd-onboarding__card {
   justify-content: flex-end;
 }
 
+.pd-section-loading-wrap {
+  position: relative;
+}
+
+.pd-section-loading-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 7;
+  border-radius: 16px;
+  background: rgba(4, 8, 20, 0.6);
+  backdrop-filter: blur(1px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: all;
+}
+
+body[data-theme="light"] .pd-section-loading-mask {
+  background: rgba(241, 245, 249, 0.7);
+}
+
+.pd-section-loading-card {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--pd-border);
+  background: var(--pd-bg-1);
+  color: var(--pd-text);
+  box-shadow: 0 12px 28px rgba(2, 6, 23, 0.26);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.pd-loading-spinner {
+  width: 15px;
+  height: 15px;
+  border-radius: 999px;
+  border: 2px solid rgba(148, 163, 184, 0.5);
+  border-top-color: var(--pd-blue);
+  animation: pd-spin 0.8s linear infinite;
+}
+
+@keyframes pd-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .pd-segment-btn {
   height: 30px;
   padding: 0 10px;
@@ -2248,6 +2299,15 @@ body[data-theme="light"] .pd-onboarding__card {
   text-align: left;
   cursor: pointer;
   transition: border-color 0.14s ease, background 0.14s ease, transform 0.14s ease, box-shadow 0.14s ease;
+}
+
+.pd-import-dropzone-wrap {
+  position: relative;
+  border-radius: 16px;
+}
+
+.pd-import-dropzone-wrap.is-loading .pd-import-dropzone {
+  pointer-events: none;
 }
 
 .pd-import-dropzone:hover,

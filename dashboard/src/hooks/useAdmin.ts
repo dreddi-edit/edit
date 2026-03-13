@@ -10,6 +10,7 @@ type AdminUser = {
   credits?: number
   created_at?: string
   plan?: AdminPlan
+  plan_status?: string
 }
 
 type NewUserPayload = {
@@ -125,6 +126,36 @@ export function useAdmin() {
     }
   }
 
+  const banUser = async (userId: number, userEmail: string) => {
+    const reason = window.prompt(`Ban user "${userEmail}". Optional reason:`, "")
+    if (reason === null) return
+    if (!window.confirm(`Really ban "${userEmail}"? Active sessions will be ended.`)) return
+    try {
+      const response = await fetchWithAuth(`/api/admin/users/${userId}/ban`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ reason: String(reason || "").trim() }),
+      })
+      await parseResponse(response)
+      await loadAdminUsers()
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Ban failed")
+    }
+  }
+
+  const unbanUser = async (userId: number, userEmail: string) => {
+    if (!window.confirm(`Unban user "${userEmail}"?`)) return
+    try {
+      const response = await fetchWithAuth(`/api/admin/users/${userId}/unban`, {
+        method: "POST",
+      })
+      await parseResponse(response)
+      await loadAdminUsers()
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Unban failed")
+    }
+  }
+
   const createUser = async (payload?: NewUserPayload) => {
     const email = String(payload?.email || "").trim() || window.prompt("Email")?.trim() || ""
     const password = String(payload?.password || "").trim() || window.prompt("Password")?.trim() || ""
@@ -163,6 +194,8 @@ export function useAdmin() {
     addCredits,
     resetPassword,
     assignPlan,
+    banUser,
+    unbanUser,
     createUser,
   }
 }

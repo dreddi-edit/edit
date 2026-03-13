@@ -388,6 +388,15 @@ export function authMiddleware(req, res, next) {
   if (!token) return res.status(401).json({ ok: false, error: "Nicht eingeloggt" })
   try {
     const decoded = jwt.verify(token, SECRET)
+    const account = db.prepare("SELECT id, plan_status FROM users WHERE id = ?").get(decoded.id)
+    if (!account?.id) {
+      clearAuthCookies(res)
+      return res.status(401).json({ ok: false, error: "Session abgelaufen" })
+    }
+    if (String(account.plan_status || "active").toLowerCase() === "banned") {
+      clearAuthCookies(res)
+      return res.status(403).json({ ok: false, error: "Account is banned. Contact support." })
+    }
     const lastActive = Number(decoded?.act || 0) || Number(decoded?.iat || 0) * 1000
     if (!Number.isFinite(lastActive) || Date.now() - lastActive > AUTH_IDLE_TIMEOUT_MS) {
       clearAuthCookies(res)
@@ -459,6 +468,9 @@ export function registerAuthRoutes(app) {
 
       const valid = await bcrypt.compare(password, user.password_hash)
       if (!valid) return res.status(401).json({ ok: false, error: "Email oder Passwort falsch" })
+      if (String(user.plan_status || "active").toLowerCase() === "banned") {
+        return res.status(403).json({ ok: false, error: "Account is banned. Contact support." })
+      }
 
       if (user.totp_enabled) {
         const sessionToken = crypto.randomBytes(32).toString("hex")
@@ -494,6 +506,10 @@ export function registerAuthRoutes(app) {
 
       const user = db.prepare("SELECT * FROM users WHERE id = ?").get(pending.user_id)
       if (!user) return res.status(401).json({ ok: false, error: "Benutzer nicht gefunden" })
+      if (String(user.plan_status || "active").toLowerCase() === "banned") {
+        db.prepare("DELETE FROM totp_pending_sessions WHERE user_id = ?").run(user.id)
+        return res.status(403).json({ ok: false, error: "Account is banned. Contact support." })
+      }
       if (!verifyTotp(user.totp_secret, code)) {
         return res.status(401).json({ ok: false, error: "Code falsch" })
       }
@@ -569,6 +585,12 @@ export function registerAuthRoutes(app) {
 
       const user = db.prepare("SELECT id, email FROM users WHERE id = ?").get(record.user_id)
       if (!user) return res.status(401).json({ ok: false, error: "Benutzer nicht gefunden" })
+      const userStatus = db.prepare("SELECT plan_status FROM users WHERE id = ?").get(user.id)
+      if (String(userStatus?.plan_status || "active").toLowerCase() === "banned") {
+        db.prepare("DELETE FROM refresh_tokens WHERE token IN (?, ?)").run(refreshTokenHash, refreshToken)
+        clearAuthCookies(res)
+        return res.status(403).json({ ok: false, error: "Account is banned. Contact support." })
+      }
 
       db.prepare("DELETE FROM refresh_tokens WHERE token IN (?, ?)").run(refreshTokenHash, refreshToken)
       setAuthCookies(res, user.id, user.email)

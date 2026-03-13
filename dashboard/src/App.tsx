@@ -139,7 +139,19 @@ type GlobalStyleOverrides = {
 }
 
 export default function App() {
-  const { adminUsers, adminUserPlans, adminLoading, loadAdminUsers, deleteUser, addCredits, resetPassword, assignPlan, createUser } = useAdmin();
+  const {
+    adminUsers,
+    adminUserPlans,
+    adminLoading,
+    loadAdminUsers,
+    deleteUser,
+    addCredits,
+    resetPassword,
+    assignPlan,
+    banUser,
+    unbanUser,
+    createUser,
+  } = useAdmin();
 
   const { t } = useTranslation();
   const resolvePlatform = (platform?: string | null, pageUrl?: string, html?: string): SitePlatform => {
@@ -307,7 +319,14 @@ export default function App() {
 
   const currentAiApproval = aiApprovalQueue.length ? aiApprovalQueue[0] : aiApproval
 
-type AdminUser = { id: number; email: string; name?: string; credits?: number; created_at?: string }
+type AdminUser = {
+  id: number
+  email: string
+  name?: string
+  credits?: number
+  created_at?: string
+  plan_status?: string
+}
   const [showCreateUser, setShowCreateUser] = useState(false)
   const [newUser, setNewUser] = useState({ email: "", password: "", name: "", credits: 0 })
   const [demoPlan, setDemoPlan] = useState<"basis" | "starter" | "pro" | "scale">("basis")
@@ -2750,6 +2769,11 @@ useEffect(() => {
 
   if (view === "admin") {
     const planColors: Record<string, string> = { basis: "#6366f1", starter: "#22c55e", pro: "#a855f7", scale: "#f59e0b" }
+    const statusPalette: Record<string, { bg: string; border: string; color: string }> = {
+      active: { bg: "#10b9811a", border: "#10b98140", color: "#34d399" },
+      canceled: { bg: "#64748b1a", border: "#64748b40", color: "#94a3b8" },
+      banned: { bg: "#ef44441a", border: "#ef444440", color: "#f87171" },
+    }
     return (
       <div style={{ minHeight: "100vh", background: "#060b14", color: "white", fontFamily: "system-ui, sans-serif", padding: "32px 40px" }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
@@ -2765,14 +2789,16 @@ useEffect(() => {
             </div>
           </div>
           <div style={{ background: "#0d1525", border: "1px solid #1e293b", borderRadius: 14, overflow: "hidden" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "48px 1fr 140px 100px 100px 160px", padding: "10px 20px", background: "#0f172a", borderBottom: "1px solid #1e293b", fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: 0.8 }}>
-              <div>ID</div><div>User</div><div>Plan</div><div>Credits</div><div>Joined</div><div style={{ textAlign: "right" }}>Actions</div>
+            <div style={{ display: "grid", gridTemplateColumns: "48px 1fr 140px 110px 110px 100px 260px", padding: "10px 20px", background: "#0f172a", borderBottom: "1px solid #1e293b", fontSize: 11, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: 0.8 }}>
+              <div>ID</div><div>User</div><div>Plan</div><div>Status</div><div>Credits</div><div>Joined</div><div style={{ textAlign: "right" }}>Actions</div>
             </div>
             {adminUsers.map((u: AdminUser) => {
               const plan = adminUserPlans[u.id] || "basis"
               const color = planColors[plan] || "#6366f1"
+              const status = String(u.plan_status || "active").toLowerCase()
+              const statusStyle = statusPalette[status] || statusPalette.active
               return (
-                <div key={u.id} style={{ display: "grid", gridTemplateColumns: "48px 1fr 140px 100px 100px 160px", padding: "14px 20px", borderBottom: "1px solid #0f172a", alignItems: "center" }}>
+                <div key={u.id} style={{ display: "grid", gridTemplateColumns: "48px 1fr 140px 110px 110px 100px 260px", padding: "14px 20px", borderBottom: "1px solid #0f172a", alignItems: "center" }}>
                   <div style={{ fontSize: 12, color: "#334155", fontWeight: 700 }}>#{u.id}</div>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>{u.email}</div>
@@ -2783,12 +2809,22 @@ useEffect(() => {
                       {plan.charAt(0).toUpperCase() + plan.slice(1)}
                     </span>
                   </div>
+                  <div>
+                    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 999, fontSize: 11, fontWeight: 700, background: statusStyle.bg, border: `1px solid ${statusStyle.border}`, color: statusStyle.color }}>
+                      {status}
+                    </span>
+                  </div>
                   <div style={{ fontSize: 13, color: "#94a3b8" }}>€{Number(u.credits || 0).toFixed(2)}</div>
                   <div style={{ fontSize: 11, color: "#475569" }}>{(u.created_at || "").slice(0, 10)}</div>
                   <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                     <button onClick={() => addCredits(u.id, u.email)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #10b98130", background: "#10b98115", color: "#10b981", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Credits</button>
                     <button onClick={() => assignPlan(u.id, u.email)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #6366f130", background: "#6366f115", color: "#818cf8", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Plan</button>
                     <button onClick={() => resetPassword(u.id, u.email)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #f59e0b30", background: "#f59e0b15", color: "#fbbf24", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>PW</button>
+                    {status === "banned" ? (
+                      <button onClick={() => unbanUser(u.id, u.email)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #22c55e30", background: "#22c55e15", color: "#4ade80", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Unban</button>
+                    ) : (
+                      <button onClick={() => banUser(u.id, u.email)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #ef444430", background: "#ef444415", color: "#f87171", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Ban</button>
+                    )}
                     <button onClick={() => deleteUser(u.id, u.email)} style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #ef444430", background: "#ef444415", color: "#f87171", cursor: "pointer", fontSize: 11, fontWeight: 600 }}>Del</button>
                   </div>
                 </div>
