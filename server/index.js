@@ -163,20 +163,40 @@ if (process.env.NODE_ENV === "production" && corsOrigin.length === 0) {
 app.use(cors({
   origin: corsOrigin,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-CSRF-Token"],
   credentials: true
 }))
 
 app.use(cookieParser())
+const CSRF_COOKIE_MAX_AGE_MS = 15 * 60 * 1000
+
+function ensureCsrfToken(req, res) {
+  const existingToken = String(req.cookies?.csrf_token || "")
+  if (existingToken) return existingToken
+  const token = crypto.randomBytes(32).toString("hex")
+  res.cookie("csrf_token", token, {
+    httpOnly: false,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    maxAge: CSRF_COOKIE_MAX_AGE_MS,
+  })
+  req.cookies = { ...(req.cookies || {}), csrf_token: token }
+  return token
+}
+
 // CSRF Middleware
 app.use((req, res, next) => {
-  if (["GET", "HEAD", "OPTIONS"].includes(req.method)) return next();
+  if (["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+    ensureCsrfToken(req, res)
+    return next()
+  }
   if (req.path === "/api/stripe/webhook" || req.path.startsWith("/api/auth/google")) return next();
 
-  const headerToken = req.headers["x-csrf-token"];
-  const cookieToken = req.cookies?.csrf_token;
+  const headerToken = String(req.headers["x-csrf-token"] || "")
+  const cookieToken = String(req.cookies?.csrf_token || "")
 
   if (!headerToken || !cookieToken || headerToken !== cookieToken) {
+    if (!cookieToken) ensureCsrfToken(req, res)
     return res.status(403).json({ ok: false, error: "Invalid or missing CSRF token." });
   }
   next();
