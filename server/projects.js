@@ -69,12 +69,46 @@ function mapProjectRow(row, assignees = []) {
     platformGuide: getPlatformGuide(row.platform || "unknown"),
     pages: parseProjectPages(row.pages_json, row.url),
     assetLibrary: parseProjectAssetLibrary(row.asset_library_json),
+    tags: parseProjectTags(row.tags_json),
     assignees,
   }
 }
 
 function cleanText(value) {
   return String(value || "").replace(/\s+/g, " ").trim()
+}
+
+function normalizeProjectTag(value) {
+  return cleanText(String(value || "").replace(/^#+/, "")).slice(0, 40)
+}
+
+function normalizeProjectTags(values = []) {
+  const seen = new Set()
+  const normalized = []
+  for (const value of Array.isArray(values) ? values : []) {
+    const tag = normalizeProjectTag(value)
+    const key = tag.toLowerCase()
+    if (!tag || seen.has(key)) continue
+    seen.add(key)
+    normalized.push(tag)
+    if (normalized.length >= 24) break
+  }
+  return normalized
+}
+
+function parseProjectTags(rawTagsJson) {
+  if (!rawTagsJson) return []
+  try {
+    const parsed = typeof rawTagsJson === "string" ? JSON.parse(rawTagsJson) : rawTagsJson
+    if (!Array.isArray(parsed)) return []
+    return normalizeProjectTags(parsed)
+  } catch {
+    return []
+  }
+}
+
+function serializeProjectTags(tags = []) {
+  return JSON.stringify(normalizeProjectTags(tags))
 }
 
 function stripHtml(value) {
@@ -317,6 +351,13 @@ function parseProjectAssetLibrary(rawAssetLibraryJson) {
 
 function serializeProjectAssetLibrary(assetLibrary = []) {
   return JSON.stringify(parseProjectAssetLibrary(JSON.stringify(assetLibrary)))
+}
+
+function readProjectTags(value) {
+  if (value === undefined) return undefined
+  if (Array.isArray(value)) return normalizeProjectTags(value)
+  if (typeof value === "string") return normalizeProjectTags(value.split(/[\r\n,]+/))
+  throw new ValidationError("Project tags must be a list.")
 }
 
 async function fetchSitePage(url) {
@@ -654,7 +695,7 @@ export function registerProjectRoutes(app) {
     if (q) {
       projects = db.prepare(
         `SELECT id, user_id, name, client_name, url, html, platform, workflow_status, workflow_stage, delivery_status, due_at,
-                approved_at, shipped_at, thumbnail, pinned, pages_json, asset_library_json, last_activity_at, last_export_at, last_export_mode, last_export_warning_count,
+                approved_at, shipped_at, thumbnail, pinned, pages_json, asset_library_json, tags_json, last_activity_at, last_export_at, last_export_mode, last_export_warning_count,
                 approval_status, brand_context,
                 updated_at, created_at
          FROM projects
@@ -663,7 +704,7 @@ export function registerProjectRoutes(app) {
     } else {
       projects = db.prepare(
         `SELECT id, user_id, name, client_name, url, html, platform, workflow_status, workflow_stage, delivery_status, due_at,
-                approved_at, shipped_at, thumbnail, pinned, pages_json, asset_library_json, last_activity_at, last_export_at, last_export_mode, last_export_warning_count,
+                approved_at, shipped_at, thumbnail, pinned, pages_json, asset_library_json, tags_json, last_activity_at, last_export_at, last_export_mode, last_export_warning_count,
                 approval_status, brand_context,
                 updated_at, created_at
          FROM projects
@@ -728,7 +769,8 @@ export function registerProjectRoutes(app) {
           user_id, name, client_name, url, html, pages_json, asset_library_json, platform, workflow_status, workflow_stage,
           delivery_status, due_at, last_activity_at, last_export_at, last_export_mode,
           last_export_warning_count, approved_at, shipped_at, thumbnail, pinned, approval_status, brand_context
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          , tags_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         req.user.id,
         restoredName,
@@ -751,7 +793,8 @@ export function registerProjectRoutes(app) {
         project.thumbnail || null,
         project.pinned || 0,
         project.approval_status || "draft",
-        project.brand_context || "{}"
+        project.brand_context || "{}",
+        project.tags_json || "[]"
       )
 
       const newProjectId = Number(insert.lastInsertRowid)
@@ -806,14 +849,15 @@ export function registerProjectRoutes(app) {
       const workflowStage = readOptionalEnum(req.body?.workflowStage ?? req.body?.workflow_stage, WORKFLOW_STAGES, "Workflow Stage", "draft") || "draft"
       const deliveryStatus = readOptionalEnum(req.body?.deliveryStatus ?? req.body?.delivery_status, DELIVERY_STATUSES, "Delivery status", "not_exported") || "not_exported"
       const assignees = readProjectAssignees(req.body?.assignees) || []
+      const tags = readProjectTags(req.body?.tags) || []
       const normalized = normalizeProjectDocument({ html, url, platform })
       const pages = req.body?.pages ? parseProjectPages(JSON.stringify(req.body.pages), normalized.meta.url || url || "") : []
       const assetLibrary = req.body?.assetLibrary ? parseProjectAssetLibrary(JSON.stringify(req.body.assetLibrary)) : []
       const result = db.prepare(
         `INSERT INTO projects (
           user_id, name, client_name, url, html, pages_json, asset_library_json, platform, workflow_status, workflow_stage,
-          delivery_status, due_at, approval_status, brand_context, last_activity_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', '{}', datetime('now'))`
+          delivery_status, due_at, approval_status, brand_context, last_activity_at, tags_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', '{}', datetime('now'), ?)`
       ).run(
         req.user.id,
         name,
@@ -826,7 +870,8 @@ export function registerProjectRoutes(app) {
         workflowStage,
         workflowStage,
         deliveryStatus,
-        dueAt || null
+        dueAt || null,
+        serializeProjectTags(tags)
       )
       syncProjectAssignees(result.lastInsertRowid, assignees)
       db.prepare(
@@ -837,7 +882,7 @@ export function registerProjectRoutes(app) {
         action: "project.create",
         targetType: "project",
         targetId: result.lastInsertRowid,
-        meta: { name, platform: normalized.meta.platform, workflowStage, deliveryStatus, assigneeCount: assignees.length },
+        meta: { name, platform: normalized.meta.platform, workflowStage, deliveryStatus, assigneeCount: assignees.length, tagCount: tags.length },
       })
       const project = db.prepare("SELECT * FROM projects WHERE id = ?").get(result.lastInsertRowid)
       res.json({
@@ -867,7 +912,7 @@ export function registerProjectRoutes(app) {
     try {
       const projectId = readId(req.params.id, "Projekt")
       const project = db.prepare(
-        "SELECT id, html, url, pages_json, asset_library_json, platform, workflow_stage, workflow_status, delivery_status, client_name, due_at FROM projects WHERE id = ? AND user_id = ?"
+        "SELECT id, html, url, pages_json, asset_library_json, tags_json, platform, workflow_stage, workflow_status, delivery_status, client_name, due_at FROM projects WHERE id = ? AND user_id = ?"
       ).get(projectId, req.user.id)
       if (!project) return res.status(404).json({ ok: false, error: "Projekt nicht gefunden" })
 
@@ -890,6 +935,7 @@ export function registerProjectRoutes(app) {
         ? undefined
         : readOptionalEnum(req.body?.deliveryStatus ?? req.body?.delivery_status, DELIVERY_STATUSES, "Delivery status", undefined)
       const assignees = readProjectAssignees(req.body?.assignees)
+      const tags = readProjectTags(req.body?.tags)
       const pages = req.body?.pages === undefined ? undefined : parseProjectPages(JSON.stringify(req.body.pages), project.url || "")
       const assetLibrary = req.body?.assetLibrary === undefined ? undefined : parseProjectAssetLibrary(JSON.stringify(req.body.assetLibrary))
       const versionLabel = readOptionalString(req.body?.versionLabel, "Version label", { max: 160, empty: "" }) || ""
@@ -921,6 +967,7 @@ export function registerProjectRoutes(app) {
           html = COALESCE(?, html),
           pages_json = COALESCE(?, pages_json),
           asset_library_json = COALESCE(?, asset_library_json),
+          tags_json = COALESCE(?, tags_json),
           url = COALESCE(?, url),
           platform = COALESCE(?, platform),
           client_name = COALESCE(?, client_name),
@@ -946,6 +993,7 @@ export function registerProjectRoutes(app) {
         html !== undefined ? normalizedHtml : null,
         pages !== undefined ? serializeProjectPages(pages, project.url || normalizedUrl) : null,
         assetLibrary !== undefined ? serializeProjectAssetLibrary(assetLibrary) : null,
+        tags !== undefined ? serializeProjectTags(tags) : null,
         url !== undefined || html !== undefined ? normalizedUrl : null,
         nextPlatform || null,
         clientName ?? null,
@@ -968,7 +1016,13 @@ export function registerProjectRoutes(app) {
         action: "project.update",
         targetType: "project",
         targetId: projectId,
-        meta: { workflowStage: nextWorkflowStage, deliveryStatus: nextDeliveryStatus, platform: nextPlatform, assigneeCount: assignees?.length },
+        meta: {
+          workflowStage: nextWorkflowStage,
+          deliveryStatus: nextDeliveryStatus,
+          platform: nextPlatform,
+          assigneeCount: assignees?.length,
+          tagCount: updated ? parseProjectTags(updated.tags_json).length : undefined,
+        },
       })
       res.json({ ok: true, project: mapProjectRow(updated, getProjectAssignees(projectId)) })
     } catch (error) {
@@ -1013,8 +1067,8 @@ export function registerProjectRoutes(app) {
     const result = db.prepare(
       `INSERT INTO projects (
         user_id, name, client_name, url, html, pages_json, asset_library_json, platform, workflow_status, workflow_stage,
-        delivery_status, due_at, approval_status, brand_context, thumbnail, last_activity_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`
+        delivery_status, due_at, approval_status, brand_context, thumbnail, last_activity_at, tags_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)`
     ).run(
       req.user.id,
       (p.name || "Project") + " (Copy)",
@@ -1030,7 +1084,8 @@ export function registerProjectRoutes(app) {
       p.due_at || null,
       p.approval_status || "draft",
       p.brand_context || "{}",
-      p.thumbnail || null
+      p.thumbnail || null,
+      p.tags_json || "[]"
     )
     syncProjectAssignees(result.lastInsertRowid, assignees)
     db.prepare(

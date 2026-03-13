@@ -4,6 +4,7 @@ import {
   apiCreateProject,
   apiDeleteProject,
   apiPreviewProjectImport,
+  apiSaveProject,
   apiScanProjectPages,
   type Project,
   type ProjectAssignee,
@@ -857,29 +858,44 @@ function workflowClass(stage?: string) {
   return "draft"
 }
 
-function projectTagValues(project: Project) {
-  const tags = new Set<string>()
-  const platform = String(project.platform || "").trim().toLowerCase()
-  if (platform) tags.add(`platform:${platform}`)
-  const stage = String(project.workflowStage || "draft").trim().toLowerCase()
-  if (stage) tags.add(`stage:${stage}`)
-  const approval = String(project.approvalStatus || "draft").trim().toLowerCase()
-  if (approval) tags.add(`approval:${approval}`)
-  const readiness = exportReadiness(project)
-  tags.add(`export:${readiness}`)
+function normalizeProjectTag(value: string) {
+  return String(value || "")
+    .replace(/^#+/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 40)
+}
 
-  try {
-    const context = typeof project.brandContext === "string" ? JSON.parse(project.brandContext || "{}") : {}
-    const contextTags = Array.isArray(context?.tags) ? context.tags : []
-    for (const tag of contextTags) {
-      const normalized = String(tag || "").trim().toLowerCase()
-      if (normalized) tags.add(`tag:${normalized}`)
-    }
-  } catch {
-    // ignore malformed brand context
+function normalizeProjectTags(values: Array<string | undefined | null> = []) {
+  const seen = new Set<string>()
+  const tags: string[] = []
+  for (const value of values) {
+    const tag = normalizeProjectTag(String(value || ""))
+    const key = tag.toLowerCase()
+    if (!tag || seen.has(key)) continue
+    seen.add(key)
+    tags.push(tag)
+    if (tags.length >= 24) break
   }
+  return tags
+}
 
-  return Array.from(tags)
+function parseProjectTagsInput(value: string) {
+  return normalizeProjectTags(String(value || "").split(/[\r\n,]+/))
+}
+
+function formatProjectTagsInput(tags?: string[]) {
+  return normalizeProjectTags(tags || []).join(", ")
+}
+
+function projectTagValues(project: Project) {
+  return normalizeProjectTags(project.tags || [])
+}
+
+function projectHasTag(project: Project, tag: string) {
+  const needle = normalizeProjectTag(tag).toLowerCase()
+  if (!needle) return false
+  return projectTagValues(project).some((value) => value.toLowerCase() === needle)
 }
 
 function displayMemberName(member?: Pick<ProjectAssignee, "name" | "email"> | null) {
@@ -1252,6 +1268,7 @@ function ProjectCard({
   onOpen,
   onInspect,
   onRename,
+  onEditTags,
   onDelete,
   onShare,
   onReview,
@@ -1263,6 +1280,7 @@ function ProjectCard({
   onOpen: () => void
   onInspect: () => void
   onRename: () => void
+  onEditTags: () => void
   onDelete: () => void
   onShare: () => void
   onReview: () => void
@@ -1278,6 +1296,7 @@ function ProjectCard({
   const initials = displayName.slice(0, 2).toUpperCase()
   const seoScore = mockSeoScore(project)
   const seoClass = seoScore == null ? "" : seoScore > 85 ? "" : seoScore > 60 ? "mid" : "low"
+  const projectTags = projectTagValues(project)
   const assigneeSummary = project.assignees?.length
     ? `${displayMemberName(project.assignees[0])}${project.assignees.length > 1 ? ` +${project.assignees.length - 1}` : ""}`
     : ""
@@ -1357,6 +1376,10 @@ function ProjectCard({
         <div className="pd-card-url">{(project.url || "local-project").replace(/^https?:\/\//, "")}</div>
         <div className="pd-card-tags">
           <span className={`pd-tag ${workflowClass(project.workflowStage)}`}>{rt(titleCaseFallback(workflowLabel(project.workflowStage)))}</span>
+          {projectTags.slice(0, 2).map((tag) => (
+            <span key={tag} className="pd-tag pd-tag-project">{tag}</span>
+          ))}
+          {projectTags.length > 2 ? <span className="pd-tag pd-tag-project">+{projectTags.length - 2}</span> : null}
           {project.pages?.length ? <span className="pd-tag">{project.pages.length} {rt("pages")}</span> : null}
           {project.clientName ? <span className="pd-tag">{rt("Client")} · {project.clientName}</span> : null}
           {assigneeSummary ? <span className="pd-tag">{rt("Assigned")} · {assigneeSummary}</span> : null}
@@ -1388,6 +1411,17 @@ function ProjectCard({
             }}
           >
             {rt("Pages")}
+          </button>
+          <button
+            className="pd-card-btn"
+            type="button"
+            aria-label={rt("Edit project tags")}
+            onClick={(event) => {
+              event.stopPropagation()
+              onEditTags()
+            }}
+          >
+            {rt("Tags")}
           </button>
           <button
             className="pd-card-btn"
@@ -1484,6 +1518,7 @@ function ProjectExplorerModal({
   loadingActivity,
   onChangeView,
   onRescan,
+  onEditTags,
   onOpenPage,
   onOpenHome,
   onClose,
@@ -1496,6 +1531,7 @@ function ProjectExplorerModal({
   loadingActivity: boolean
   onChangeView: (view: "grid" | "tree") => void
   onRescan: () => void
+  onEditTags: () => void
   onOpenPage: (pageId: string) => void
   onOpenHome: () => void
   onClose: () => void
@@ -1503,6 +1539,7 @@ function ProjectExplorerModal({
   const pages = project.pages || []
   const tree = buildProjectPageTree(pages)
   const displayName = getProjectDisplayName(project)
+  const projectTags = projectTagValues(project)
 
   return (
     <div className="pd-modal-backdrop" onClick={onClose}>
@@ -1527,6 +1564,13 @@ function ProjectExplorerModal({
               <div className="pd-project-explorer__meta">
                 {pages.length ? `${pages.length} ${rt("pages found")}` : rt("No scanned pages yet")}
               </div>
+              {projectTags.length ? (
+                <div className="pd-project-explorer__tags">
+                  {projectTags.map((tag) => (
+                    <span key={tag} className="pd-tag pd-tag-project">{tag}</span>
+                  ))}
+                </div>
+              ) : null}
             </div>
             <div className="pd-project-explorer__actions">
               <button
@@ -1545,6 +1589,9 @@ function ProjectExplorerModal({
               </button>
               <button className="pd-btn" type="button" onClick={onRescan} disabled={scanning}>
                 {scanning ? rt("Scanning...") : pages.length ? rt("Rescan pages") : rt("Scan pages")}
+              </button>
+              <button className="pd-btn" type="button" onClick={onEditTags}>
+                {rt("Tags")}
               </button>
               <button className="pd-btn pd-btn-primary" type="button" onClick={onOpenHome}>
                 {rt("Open homepage")}
@@ -1968,6 +2015,7 @@ export default function ProjectDashboard({
   const [newUrl, setNewUrl] = useState("")
   const [newClientName, setNewClientName] = useState("")
   const [newDueAt, setNewDueAt] = useState("")
+  const [newTagInput, setNewTagInput] = useState("")
   const [newAssigneeEmails, setNewAssigneeEmails] = useState<string[]>([])
   const [newUploadHtml, setNewUploadHtml] = useState("")
   const [newUploadName, setNewUploadName] = useState("")
@@ -2181,6 +2229,7 @@ export default function ProjectDashboard({
   const studioSourceReady = studioNeedsLiveUrl
     ? /^https?:\/\//i.test(effectiveStudioUrl)
     : Boolean(selectedStudioProjectText || /^https?:\/\//i.test(effectiveStudioUrl))
+  const newProjectTags = parseProjectTagsInput(newTagInput)
   const projectAssigneeOptions = Array.from(
     new Set(
       normalizedProjects.flatMap((project) =>
@@ -2190,10 +2239,8 @@ export default function ProjectDashboard({
       ),
     ),
   )
-  const projectTagOptions = Array.from(
-    new Set(
-      normalizedProjects.flatMap((project) => projectTagValues(project)),
-    ),
+  const projectTagOptions = normalizeProjectTags(
+    normalizedProjects.flatMap((project) => projectTagValues(project)),
   ).sort((left, right) => left.localeCompare(right))
   const filteredProjects = normalizedProjects
     .filter(project => {
@@ -2219,7 +2266,7 @@ export default function ProjectDashboard({
         if (!included) return false
       }
 
-      if (tagFilter !== "all" && !projectTagValues(project).includes(tagFilter)) return false
+      if (tagFilter !== "all" && !projectHasTag(project, tagFilter)) return false
       return true
     })
     .sort((left, right) => {
@@ -2510,6 +2557,7 @@ export default function ProjectDashboard({
     setNewUrl("")
     setNewClientName("")
     setNewDueAt("")
+    setNewTagInput("")
     setNewAssigneeEmails([])
     setNewUploadHtml("")
     setNewUploadName("")
@@ -3027,6 +3075,33 @@ export default function ProjectDashboard({
     }
   }
 
+  const editProjectTags = async (project: Project) => {
+    const currentTags = projectTagValues(project)
+    const nextInput = window.prompt(rt("Project tags"), formatProjectTagsInput(currentTags))
+    if (nextInput === null) return
+    const nextTags = parseProjectTagsInput(nextInput)
+    if (
+      nextTags.length === currentTags.length &&
+      nextTags.every((tag, index) => tag.toLowerCase() === String(currentTags[index] || "").toLowerCase())
+    ) {
+      return
+    }
+    try {
+      const saved = await apiSaveProject(project.id, { tags: nextTags })
+      if (!saved) throw new Error(rt("Project tags could not be saved"))
+      const taggedProject = {
+        ...saved,
+        thumbnail: normalizeThumbnailUrl(saved.thumbnail),
+      }
+      setProjects((previous) =>
+        previous.map((entry) => (entry.id === project.id ? { ...entry, ...taggedProject } : entry)),
+      )
+      toast.success(rt("Project tags saved"))
+    } catch (error) {
+      toast.error(errMsg(error))
+    }
+  }
+
   const closeSearchResults = () => {
     setSearchResults([])
     setSearchLoading(false)
@@ -3114,6 +3189,7 @@ export default function ProjectDashboard({
       const project = await apiCreateProject(newName.trim(), newUrl.trim(), newUploadHtml, newUploadPlatform, {
         clientName: newClientName.trim() || "",
         dueAt: newDueAt || "",
+        tags: newProjectTags,
         assignees: selectedAssignees,
         pages: newUploadPages,
       })
@@ -4079,6 +4155,7 @@ export default function ProjectDashboard({
                     onOpen={() => handleOpenProject(project)}
                     onInspect={() => openProjectExplorer(project)}
                     onRename={() => void renameProject(project)}
+                    onEditTags={() => void editProjectTags(project)}
                     onShare={() => void copyClientShareLink(project)}
                     onReview={() => setReviewPanelProjectId(project.id)}
                     onDelete={() => deleteProject(project.id, project.name)}
@@ -4220,6 +4297,7 @@ export default function ProjectDashboard({
           loadingActivity={loadingProjectActivity}
           onChangeView={setProjectExplorerView}
           onRescan={() => void rescanProjectPages(explorerProject)}
+          onEditTags={() => void editProjectTags(explorerProject)}
           onOpenHome={() => {
             setProjectExplorerId(null)
             handleOpenProject(explorerProject)
@@ -4736,6 +4814,23 @@ export default function ProjectDashboard({
                 <label className="pd-field-label">
                   {rt("Due date")}
                   <input className="pd-field-input" value={newDueAt} onChange={event => setNewDueAt(event.target.value)} type="date" />
+                </label>
+                <label className="pd-field-label pd-field-label-full">
+                  {rt("Project tags")}
+                  <input
+                    className="pd-field-input"
+                    value={newTagInput}
+                    onChange={event => setNewTagInput(event.target.value)}
+                    placeholder="agency, retained, launch-week"
+                  />
+                  <span className="pd-field-hint">{rt("Comma-separated labels for filtering and organisation.")}</span>
+                  {newProjectTags.length ? (
+                    <div className="pd-tag-editor-preview">
+                      {newProjectTags.map((tag) => (
+                        <span key={tag} className="pd-tag pd-tag-project">{tag}</span>
+                      ))}
+                    </div>
+                  ) : null}
                 </label>
                 <div className="pd-field-label pd-field-label-full">
                   {rt("Import source")}

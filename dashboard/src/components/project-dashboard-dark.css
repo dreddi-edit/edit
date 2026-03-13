@@ -1291,6 +1291,13 @@ body[data-theme="light"] .pd-studio-result {
   background: var(--pd-bg);
 }
 
+.pd-tag-project {
+  text-transform: none;
+  border-color: var(--pd-blue-border);
+  color: var(--pd-blue);
+  background: var(--pd-blue-dim);
+}
+
 .pd-tag.shipped,
 .pd-tag.approved {
   border-color: var(--pd-green-border);
@@ -1538,6 +1545,13 @@ body[data-theme="light"] .pd-onboarding__card {
   margin-top: 5px;
   font-size: 10.5px;
   color: var(--pd-text-3);
+}
+
+.pd-project-explorer__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
 }
 
 .pd-project-explorer__actions {
@@ -2176,6 +2190,12 @@ body[data-theme="light"] .pd-onboarding__card {
   color: var(--pd-text-3);
   text-transform: none;
   letter-spacing: 0;
+}
+
+.pd-tag-editor-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .pd-upload-row {

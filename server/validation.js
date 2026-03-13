@@ -18,11 +18,14 @@ export function readEmail(value, field = "Email") {
   return email
 }
 
-export function readPassword(value, field = "Passwort", minLength = 6) {
+export function readPassword(value, field = "Passwort", minLength = 8) {
   if (typeof value !== "string") throw new ValidationError(`${field} ungültig`)
   const password = value
   if (!password.trim()) throw new ValidationError(`${field} erforderlich`)
   if (password.length < minLength) throw new ValidationError(`${field} min. ${minLength} Zeichen`)
+  if (!/[A-Z]/.test(password)) throw new ValidationError(`${field} benötigt einen Großbuchstaben`)
+  if (!/[a-z]/.test(password)) throw new ValidationError(`${field} benötigt einen Kleinbuchstaben`)
+  if (!/[0-9]/.test(password)) throw new ValidationError(`${field} benötigt eine Zahl`)
   if (password.length > 128) throw new ValidationError(`${field} zu lang`)
   return password
 }

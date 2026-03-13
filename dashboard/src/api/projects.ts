@@ -194,6 +194,7 @@ export type Project = {
   html?: string
   pages?: ProjectPage[]
   assetLibrary?: ProjectAsset[]
+  tags?: string[]
   platform?: SitePlatform
   thumbnail?: string
   pinned?: number
@@ -277,7 +278,7 @@ export async function apiCreateProject(
   url: string,
   html: string,
   platform?: SitePlatform,
-  extras: Partial<Pick<Project, "clientName" | "workflowStage" | "deliveryStatus" | "dueAt" | "assignees" | "pages">> = {}
+  extras: Partial<Pick<Project, "clientName" | "workflowStage" | "deliveryStatus" | "dueAt" | "assignees" | "pages" | "tags">> = {}
 ): Promise<Project> {
   const d = await apiFetch<CreateProjectRes>(`${BASE}/api/projects`, {
     method: "POST",
@@ -292,6 +293,7 @@ export async function apiCreateProject(
     name,
     url,
     html,
+    tags: extras.tags || [],
     platform,
     updated_at: new Date().toISOString(),
     created_at: new Date().toISOString(),

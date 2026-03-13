@@ -216,6 +216,20 @@ export function prepareHtmlForEditor(html, url) {
 }
 
 export function prepareEditorDocument(html, url) {
+
+  // Preserve Shopify Liquid tags
+  if (html && (html.includes('{{') || html.includes('{%'))) {
+    html = html.replace(/\{\{([\s\S]*?)\}\}|\{%([\s\S]*?)%\}/g, (match) => 
+      `<template data-shopify-liquid="${Buffer.from(match).toString('base64')}"></template>`
+    );
+  }
+
+
+  // Preserve PHP tags for WordPress semantic treatment
+  if (html && html.includes('<?php')) {
+    html = html.replace(/<\?php([\s\S]*?)\?>/g, (match, p1) => `<template data-wp-php="${Buffer.from(p1).toString('base64')}"></template>`);
+  }
+
   const meta = detectSiteMeta(url, html);
   return {
     html: prepareHtmlForEditor(html, meta.url || url),

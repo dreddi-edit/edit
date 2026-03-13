@@ -712,20 +712,22 @@ function collectFidelitySignals(html) {
   }
 }
 
-function calculateFidelityScore(source, target) {
-  const countDiff = (key, weight, cap) => Math.min(cap, Math.abs((source[key] || 0) - (target[key] || 0)) * weight)
-  let score = 100
-  score -= countDiff("headings", 2, 14)
-  score -= countDiff("links", 0.6, 10)
-  score -= countDiff("images", 1.5, 14)
-  score -= countDiff("forms", 8, 16)
-  score -= countDiff("ctas", 4, 12)
-  score -= countDiff("sections", 1, 10)
-  if (source.title && !target.title) score -= 12
-  if (source.description && !target.description) score -= 10
-  if ((source.ogCount || 0) > 0 && (target.ogCount || 0) === 0) score -= 10
-  return Math.max(0, Math.min(100, Math.round(score)))
+
+function calculateDeepFidelity(originalHtml, rebuiltHtml) {
+  try {
+    const origTags = (originalHtml.match(/<[a-zA-Z0-9]+/g) || []).length;
+    const newTags = (rebuiltHtml.match(/<[a-zA-Z0-9]+/g) || []).length;
+    const origClasses = (originalHtml.match(/class="[^"]+"/g) || []).length;
+    const newClasses = (rebuiltHtml.match(/class="[^"]+"/g) || []).length;
+    
+    let tagScore = origTags > 0 ? Math.min(newTags / origTags, 1) : 1;
+    let classScore = origClasses > 0 ? Math.min(newClasses / origClasses, 1) : 1;
+    
+    return Math.round(((tagScore * 0.6) + (classScore * 0.4)) * 100);
+  } catch(e) { return 0; }
 }
+
+function calculateFidelityScore(o, r) { return calculateDeepFidelity(o, r); }
 
 function deriveSectionCandidates(document) {
   const selected = Array.from(document.querySelectorAll("main section, section, article, [data-section], [data-component], [role='region']"))

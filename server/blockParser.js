@@ -1,69 +1,35 @@
-import { JSDOM } from "jsdom";
+import { JSDOM } from 'jsdom';
 
-function textOf(el) {
-  return (el.textContent || "").trim().replace(/\s+/g, " ");
-}
+export function extractIntelligentContent(html) {
+  const dom = new JSDOM(html);
+  const doc = dom.window.document;
+  
+  const noise = doc.querySelectorAll('script, style, noscript, iframe, .ads, #cookie-law');
+  noise.forEach(n => n.remove());
 
-function detectType(el) {
-  if (el.querySelector("img") && el.querySelector("h1,h2,h3")) return "hero";
-  if (el.querySelector("img") && el.querySelector("a")) return "product";
-  if (el.querySelector("nav")) return "header";
-  if (el.querySelector("footer")) return "footer";
-  return "section";
-}
-
-function extractButtons(el) {
-  const buttons = [];
-  el.querySelectorAll("a").forEach(a => {
-    const label = textOf(a);
-    const link = a.getAttribute("href") || "";
-    if (label) {
-      buttons.push({ label, link });
+  const blocks = [];
+  const walk = (node) => {
+    if (node.nodeType === 1) {
+      const tag = node.tagName.toLowerCase();
+      const hasText = node.textContent?.trim().length > 20;
+      
+      if (['h1', 'h2', 'h3', 'p', 'section', 'article'].includes(tag) && hasText) {
+        blocks.push({
+          tag,
+          content: node.innerHTML,
+          textOnly: node.textContent.trim(),
+          id: node.getAttribute('data-block-id') || Math.random().toString(36).substr(2, 9)
+        });
+      }
+      
+      Array.from(node.children).forEach(walk);
     }
-  });
-  return buttons;
-}
+  };
 
-function extractImage(el) {
-  const img = el.querySelector("img");
-  if (!img) return null;
-  return img.getAttribute("src");
-}
-
-function extractTitle(el) {
-  const h = el.querySelector("h1,h2,h3");
-  if (!h) return null;
-  return textOf(h);
+  walk(doc.body);
+  return blocks;
 }
 
 export function parseBlocks(html) {
-  const dom = new JSDOM(html);
-  const doc = dom.window.document;
-
-  const candidates = [
-    ...doc.querySelectorAll("section"),
-    ...doc.querySelectorAll("article"),
-    ...doc.querySelectorAll("main > div"),
-    ...doc.querySelectorAll("body > div")
-  ];
-
-  const blocks = [];
-
-  candidates.forEach(el => {
-    const textLength = textOf(el).length;
-    const imgCount = el.querySelectorAll("img").length;
-
-    if (textLength < 20 && imgCount === 0) return;
-
-    const block = {
-      type: detectType(el),
-      title: extractTitle(el),
-      image: extractImage(el),
-      buttons: extractButtons(el)
-    };
-
-    blocks.push(block);
-  });
-
-  return blocks;
+  return extractIntelligentContent(html);
 }

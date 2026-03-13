@@ -824,6 +824,12 @@ ${JSON.stringify(schema, null, 2)}
 }
 
 export function prepareWordPressThemeFiles({ html, project, alternates = [], canonicalUrl = "" }) {
+
+  // Restore WordPress PHP tags
+  if (html && html.includes('data-wp-php=')) {
+    html = html.replace(/<template data-wp-php="([^"]+)"><\/template>/g, (m, p1) => `<?php${Buffer.from(p1, 'base64').toString('utf8')}?>`);
+  }
+
   const themeName = project?.name || "Site Editor Exported Theme";
   const themeSlug = slugify(themeName, "site-editor-theme");
   const { bodyHtml, inlineCss, externalStylesheets, title } = extractPortableDocumentParts(html);
@@ -914,6 +920,12 @@ echo $site_editor_export_html; // phpcs:ignore WordPress.Security.EscapeOutput.O
 }
 
 export function prepareWordPressBlockFiles({ html, project }) {
+
+  // Restore WordPress PHP tags
+  if (html && html.includes('data-wp-php=')) {
+    html = html.replace(/<template data-wp-php="([^"]+)"><\/template>/g, (m, p1) => `<?php${Buffer.from(p1, 'base64').toString('utf8')}?>`);
+  }
+
   const projectName = project?.name || "Site Editor Project";
   const slug = slugify(projectName, "site-editor-block");
   const { bodyHtml, inlineCss, externalStylesheets } = extractPortableDocumentParts(html);
@@ -1341,6 +1353,14 @@ export function getModeSpecificHtml(html, mode) {
   if (mode === "shopify-section") {
     return generateShopifySection(html);
   }
+  
+  // Restore Shopify Liquid tags
+  if (html && html.includes('data-shopify-liquid=')) {
+    html = html.replace(/<template data-shopify-liquid="([^"]+)"><\/template>/g, (m, p1) => 
+      Buffer.from(p1, 'base64').toString('utf8')
+    );
+  }
+
   return html;
 }
 

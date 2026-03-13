@@ -355,6 +355,17 @@ app.get("/share/:token", (req, res, next) => {
   }
 })
 
+
+const aiPlanGuard = (req, res, next) => {
+  try {
+    const u = db.prepare("SELECT COALESCE(NULLIF(plan_id, ''), 'basis') as plan FROM users WHERE id = ?").get(req.user?.id);
+    if (!u || u.plan === 'basis') {
+      return res.status(403).json({ ok: false, error: "AI features require a paid plan (Starter, Pro, Scale)." });
+    }
+    next();
+  } catch(e) { next(); }
+};
+
 const aiRateLimit = createRateLimit({
   windowMs: 15 * 60 * 1000,
   max: 30,
@@ -634,7 +645,7 @@ async function appendExportBundle(archive, exportMode, artifact, linkedProject, 
   }
 }
 
-app.post("/api/ai/analyze-and-rebuild", authMiddleware, aiRateLimit, async (req, res) => {
+app.post("/api/ai/analyze-and-rebuild", authMiddleware, aiPlanGuard, aiRateLimit, async (req, res) => {
   try {
     const html = readRequiredHtml(req.body?.html)
 
@@ -723,6 +734,9 @@ app.post("/api/ai/analyze-and-rebuild", authMiddleware, aiRateLimit, async (req,
     try {
       const result = JSON.parse(stripJsonFences(extractJsonFromText(text)))
       console.log("AI rebuild successful, blocks:", result.blocks?.length || 0)
+      if (req.user?.id && data.usage) {
+        try { deductCredits(req.user.id, "claude-sonnet-4-6", data.usage.input_tokens || 0, data.usage.output_tokens || 0, "Analyze and rebuild") } catch(e) {}
+      }
       res.json({ ok: true, ...result, usage: data.usage || null })
     } catch (e) {
       console.error("Failed to parse AI response:", text)
@@ -744,7 +758,7 @@ app.get("/api/ai/ollama-health", authMiddleware, async (_req, res) => {
   }
 })
 
-app.post("/api/ai/demo-landing-copy", authMiddleware, aiRateLimit, async (req, res) => {
+app.post("/api/ai/demo-landing-copy", authMiddleware, aiPlanGuard, aiRateLimit, async (req, res) => {
   try {
     const name = readRequiredString(req.body?.name, "Product name", { max: 120 })
     const description = readOptionalString(req.body?.description, "Description", { max: 2000, empty: "" })
@@ -793,7 +807,7 @@ app.post("/api/ai/demo-landing-copy", authMiddleware, aiRateLimit, async (req, r
   }
 })
 
-app.post("/api/ai/rewrite-block", authMiddleware, aiRateLimit, async (req, res) => {
+app.post("/api/ai/rewrite-block", authMiddleware, aiPlanGuard, aiRateLimit, async (req, res) => {
   try {
     const html = readRequiredHtml(req.body?.html, "HTML", { max: 500_000 })
     const instruction = readRequiredString(req.body?.instruction, "Instruction", { max: 4000 })
@@ -893,7 +907,7 @@ app.post("/api/ai/rewrite-block", authMiddleware, aiRateLimit, async (req, res) 
 
 
 // Streaming Endpoint für BlockOverlay
-app.post("/api/ai/rewrite-block-stream", authMiddleware, aiRateLimit, async (req, res) => {
+app.post("/api/ai/rewrite-block-stream", authMiddleware, aiPlanGuard, aiRateLimit, async (req, res) => {
   try {
     const html = readRequiredHtml(req.body?.html, "HTML", { max: 500_000 })
     const instruction = readRequiredString(req.body?.instruction, "Instruction", { max: 4000 })

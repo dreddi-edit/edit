@@ -1,3 +1,4 @@
+import { ResetRateLimitUI } from './ResetRateLimitUI';
 import { useState } from "react"
 import { apiResetPassword } from "../api/auth"
 import { toast } from "./Toast"

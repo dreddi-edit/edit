@@ -47,6 +47,7 @@ db.exec(`
     html TEXT,
     pages_json TEXT DEFAULT '[]',
     asset_library_json TEXT DEFAULT '[]',
+    tags_json TEXT DEFAULT '[]',
     platform TEXT DEFAULT 'unknown',
     workflow_status TEXT DEFAULT 'draft',
     workflow_stage TEXT DEFAULT 'draft',
@@ -411,6 +412,10 @@ runMigration("20260311_projects_pages_json", () => {
 runMigration("20260311_projects_asset_library_json", () => {
   execMigrationSql(`ALTER TABLE projects ADD COLUMN asset_library_json TEXT DEFAULT '[]'`)
   execMigrationSql(`UPDATE projects SET asset_library_json = COALESCE(asset_library_json, '[]')`)
+})
+runMigration("20260313_projects_tags_json", () => {
+  execMigrationSql(`ALTER TABLE projects ADD COLUMN tags_json TEXT DEFAULT '[]'`)
+  execMigrationSql(`UPDATE projects SET tags_json = COALESCE(tags_json, '[]')`)
 })
 runMigration("20260311_project_shares_snapshot", () => {
   execMigrationSql(`ALTER TABLE project_shares ADD COLUMN html_snapshot TEXT`)

@@ -1,3 +1,4 @@
+import { PresenceAvatars } from './PresenceAvatars';
 import React from 'react';
 
 interface HeaderProps {

@@ -1,3 +1,7 @@
+
+function getFingerprint(req) {
+  return Buffer.from(req.headers['user-agent'] || 'unknown').toString('base64').substring(0, 32);
+}
 import crypto from "crypto"
 import bcrypt from "bcryptjs"
 import jwt from "jsonwebtoken"
@@ -23,7 +27,7 @@ const SECRET = process.env.JWT_SECRET || DEFAULT_SECRET
 const COOKIE = "se_token"
 const REFRESH_COOKIE = "se_refresh"
 const IS_PROD = process.env.NODE_ENV === "production"
-const AUTH_IDLE_TIMEOUT_MIN = Math.max(5, Math.min(24 * 60, Number(process.env.AUTH_IDLE_TIMEOUT_MIN || 120) || 120))
+const AUTH_IDLE_TIMEOUT_MIN = Number(process.env.AUTH_IDLE_TIMEOUT_MIN) || 120
 const AUTH_IDLE_TIMEOUT_MS = AUTH_IDLE_TIMEOUT_MIN * 60 * 1000
 const AUTH_ACTIVITY_RENEW_SECONDS = Math.max(30, Math.min(10 * 60, Number(process.env.AUTH_ACTIVITY_RENEW_SECONDS || 90) || 90))
 const AVATAR_UPLOAD_MAX_BYTES = Math.max(128_000, Math.min(8_000_000, Number(process.env.AVATAR_UPLOAD_MAX_BYTES || 4_000_000) || 4_000_000))
