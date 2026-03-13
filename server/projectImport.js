@@ -2438,31 +2438,48 @@ async function callGemini({ prompt, model = "gemini-2.5-pro", inlineData, userId
 }
 
 async function callImportAnalysisModel({ prompt, userId = null, model = IMPORT_ANALYSIS_MODEL, maxTokens = 1800, temperature = 0.2 }) {
-  const key = getProviderApiKey("anthropic", { userId })
-  if (!key) throw new Error("ANTHROPIC_API_KEY is not set")
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": key,
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      temperature,
-      system: "You analyze imported website material and return practical, accurate output.",
-      messages: [{ role: "user", content: prompt }],
-    }),
-  })
-  const data = await response.json()
-  if (!response.ok) {
-    throw new Error(data?.error?.message || `Anthropic error ${response.status}`)
+  const anthropicKey = getProviderApiKey("anthropic", { userId })
+  if (anthropicKey) {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": anthropicKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        temperature,
+        system: "You analyze imported website material and return practical, accurate output.",
+        messages: [{ role: "user", content: prompt }],
+      }),
+    })
+    const data = await response.json()
+    if (!response.ok) {
+      throw new Error(data?.error?.message || `Anthropic error ${response.status}`)
+    }
+    const text = (data?.content || [])
+      .map((chunk) => (chunk?.type === "text" ? chunk.text : ""))
+      .join("")
+      .trim()
+    if (text) return text
+    throw new Error("Anthropic did not return text")
   }
-  return (data?.content || [])
-    .map((chunk) => (chunk?.type === "text" ? chunk.text : ""))
-    .join("")
-    .trim()
+
+  const geminiKey = getProviderApiKey("gemini", { userId })
+  if (geminiKey) {
+    const text = await callGemini({
+      prompt,
+      model: "gemini-2.5-pro",
+      userId,
+      apiKey: geminiKey,
+    })
+    if (cleanText(text)) return text
+    throw new Error("Gemini did not return text")
+  }
+
+  throw new Error("No AI provider key configured for import analysis (Anthropic or Gemini required)")
 }
 
 function dedupeCleanList(values, max = 20) {

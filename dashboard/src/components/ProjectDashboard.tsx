@@ -1946,12 +1946,14 @@ function AIStudioCard({
 export default function ProjectDashboard({
   user,
   plan: currentPlan,
+  dashboardRefreshKey = 0,
   onPlanChange,
   onOpen,
   onLogout,
 }: {
   user: User
   plan?: Plan
+  dashboardRefreshKey?: number
   onPlanChange?: (plan: Plan) => void
   onOpen: (p: Project, pageId?: string | null) => void
   onLogout: () => void
