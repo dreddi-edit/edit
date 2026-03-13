@@ -1,4 +1,3 @@
-import React from 'react';
 import React, { useState } from 'react';
 
 export const ResponsiveGridControls: React.FC<{ selectedBlockId?: string }> = ({ selectedBlockId }) => {

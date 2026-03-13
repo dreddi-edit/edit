@@ -1,7 +1,6 @@
-import React from 'react';
-import { useTranslation } from "../i18n/useTranslation";
+import React, { useTranslation } from "../i18n/useTranslation";
 import React, { useCallback, useEffect, useRef,
-useState } from "react";
+useState } from 'react';
 import { fetchWithAuth } from "../api/client";
 import { toast } from "./Toast";
 import { getRequireApproval } from "../approval-settings";

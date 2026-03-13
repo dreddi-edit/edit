@@ -1,5 +1,4 @@
-import React from 'react';
-import { ImageEnhancer } from './ImageEnhancer';
+import React, { ImageEnhancer } from './ImageEnhancer';
 import { ImageOptimizer } from './ImageOptimizer';
 import React, { useState } from 'react';
 
