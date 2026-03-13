@@ -1373,6 +1373,8 @@ app.get("/api/admin/ssl-status", authMiddleware, ownerOnly, (req, res) => {
 registerCreditRoutes(app)
 registerSettingsRoutes(app)
 registerOrgRoutes(app)
+import { registerAdminExtraRoutes } from "./adminRoutes.js";
+registerAdminExtraRoutes(app);
 
 app.get("/api/admin/audit", authMiddleware, ownerOnly, (req, res) => {
   try {
@@ -1750,7 +1752,9 @@ app.delete("/api/admin/users/:id", authMiddleware, ownerOnly, (req, res) => {
         db.prepare("DELETE FROM user_api_keys WHERE user_id = ?").run(userId)
         db.prepare("DELETE FROM password_resets WHERE user_id = ?").run(userId)
         
-        const result = db.prepare("DELETE FROM users WHERE id = ?").run(userId)
+        const result = db.prepare("DELETE FROM project_exports WHERE user_id = ?").run(userId);
+        db.prepare("DELETE FROM credit_transactions WHERE user_id = ?").run(userId);
+        db.prepare("DELETE FROM users WHERE id = ?").run(userId);
         if (result.changes === 0) throw new Error("User not found during transaction");
       })();
       

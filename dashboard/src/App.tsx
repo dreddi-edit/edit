@@ -4,6 +4,7 @@ import { apiMe, type User } from "./api/auth"
 import { apiGetPlan } from "./api/credits"
 import { apiFetch, fetchWithAuth } from "./api/client"
 import { EditorSidebar } from "./components/EditorSidebar";
+const SettingsPanel = React.lazy(() => import("./components/SettingsPanel"));
 import { EditorModals } from "./components/EditorModals";
 import {
   apiCreateProjectShare,
