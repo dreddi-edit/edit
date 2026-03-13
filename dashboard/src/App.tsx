@@ -190,6 +190,7 @@ export default function App() {
   const [creatingPublishPreview, setCreatingPublishPreview] = useState(false)
   const [publishingTarget, setPublishingTarget] = useState<PublishTarget | null>(null)
   const [rollingBackDeploymentId, setRollingBackDeploymentId] = useState<number | null>(null)
+  const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0)
   const [activeVersionActionId, setActiveVersionActionId] = useState<number | null>(null)
   const [aiScanLoading, setAiScanLoading] = useState(false)
   const [versionPreview, setVersionPreview] = useState<ProjectVersionDetail | null>(null)
@@ -836,6 +837,7 @@ const autoSave = async (html: string) => {
       if (refreshedProject) {
         setCurrentProject(refreshedProject)
       }
+      setDashboardRefreshKey(previous => previous + 1)
       toast.success(result.deployUrl ? `Published to ${target}` : `Deployment queued for ${target}`)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Publish failed")
@@ -860,6 +862,7 @@ const autoSave = async (html: string) => {
       if (refreshedProject) {
         setCurrentProject(refreshedProject)
       }
+      setDashboardRefreshKey(previous => previous + 1)
       toast.success(result.deployUrl ? "Rollback deployed" : "Rollback completed")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Rollback failed")
@@ -3213,6 +3216,7 @@ useEffect(() => {
           updateCssVariableOverride={updateCssVariableOverride}
           applyGlobalStyleOverridesNow={applyGlobalStyleOverridesNow}
           selectedFontAsset={selectedFontAsset}
+          dashboardRefreshKey={dashboardRefreshKey}
         />
       ) : null}
 

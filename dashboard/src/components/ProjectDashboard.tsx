@@ -2091,7 +2091,7 @@ export default function ProjectDashboard({
 
   useEffect(() => {
     loadDashboard()
-  }, [])
+  }, [dashboardRefreshKey])
 
   useEffect(() => {
     if (!showNewProject || assignableMembers.length || loadingAssignableMembers) return
