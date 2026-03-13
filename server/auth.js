@@ -26,11 +26,13 @@ const DEFAULT_SECRET = "site-editor-secret-change-in-prod"
 const SECRET = process.env.JWT_SECRET || DEFAULT_SECRET
 const COOKIE = "se_token"
 const REFRESH_COOKIE = "se_refresh"
+const OAUTH_STATE_COOKIE = "se_oauth_state"
 const IS_PROD = process.env.NODE_ENV === "production"
 const AUTH_IDLE_TIMEOUT_MIN = Number(process.env.AUTH_IDLE_TIMEOUT_MIN) || 120
 const AUTH_IDLE_TIMEOUT_MS = AUTH_IDLE_TIMEOUT_MIN * 60 * 1000
 const AUTH_ACTIVITY_RENEW_SECONDS = Math.max(30, Math.min(10 * 60, Number(process.env.AUTH_ACTIVITY_RENEW_SECONDS || 90) || 90))
 const AVATAR_UPLOAD_MAX_BYTES = Math.max(128_000, Math.min(8_000_000, Number(process.env.AVATAR_UPLOAD_MAX_BYTES || 4_000_000) || 4_000_000))
+const OAUTH_STATE_MAX_AGE_MS = 10 * 60 * 1000
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const THUMBNAILS_DIR = path.join(__dirname, "thumbnails")
@@ -78,6 +80,17 @@ const resetPasswordRateLimit = createRateLimit({
   keyPrefix: "auth-reset-password",
   message: authRateMessage,
   keyFn: authIdentifier,
+})
+const login2faRateLimit = createRateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  keyPrefix: "auth-login-2fa",
+  message: authRateMessage,
+  keyFn: (req) => {
+    const ip = req.ip || req.socket?.remoteAddress || "unknown"
+    const sessionToken = String(req.body?.session_token || "").trim().slice(0, 64) || "missing"
+    return `${ip}:${sessionToken}`
+  },
 })
 
 function normalizeNotificationPrefs(raw) {
@@ -130,6 +143,29 @@ function setAuthCookies(res, userId, email) {
 function clearAuthCookies(res) {
   res.clearCookie(COOKIE)
   res.clearCookie(REFRESH_COOKIE, { path: "/api/auth" })
+}
+
+function createOAuthStateToken() {
+  return crypto.randomBytes(32).toString("hex")
+}
+
+function setOAuthStateCookie(res, stateToken) {
+  res.cookie(OAUTH_STATE_COOKIE, stateToken, {
+    ...AUTH_COOKIE_OPTIONS,
+    maxAge: OAUTH_STATE_MAX_AGE_MS,
+    path: "/api/auth",
+  })
+}
+
+function clearOAuthStateCookie(res) {
+  res.clearCookie(OAUTH_STATE_COOKIE, { path: "/api/auth" })
+}
+
+function tokensMatch(left, right) {
+  const a = Buffer.from(String(left || ""), "utf8")
+  const b = Buffer.from(String(right || ""), "utf8")
+  if (!a.length || !b.length || a.length !== b.length) return false
+  return crypto.timingSafeEqual(a, b)
 }
 
 function isHttpsRequest(req) {
@@ -416,7 +452,7 @@ export function registerAuthRoutes(app) {
     }
   })
 
-  app.post("/api/auth/login/2fa", (req, res) => {
+  app.post("/api/auth/login/2fa", login2faRateLimit, (req, res) => {
     try {
       const sessionToken = readRequiredString(req.body?.session_token, "session_token", { max: 128 })
       const code = readRequiredString(String(req.body?.code || ""), "code", { max: 10 })
@@ -580,6 +616,9 @@ export function registerAuthRoutes(app) {
       return res.redirect(`/?error=${message}`)
     }
 
+    const state = createOAuthStateToken()
+    setOAuthStateCookie(res, state)
+
     const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/google/callback`
     const params = new URLSearchParams({
       client_id: clientId,
@@ -588,6 +627,7 @@ export function registerAuthRoutes(app) {
       scope: "openid email profile",
       access_type: "offline",
       prompt: "select_account",
+      state,
     })
     res.redirect(`https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`)
   })
@@ -595,6 +635,13 @@ export function registerAuthRoutes(app) {
   app.get("/api/auth/google/callback", async (req, res) => {
     try {
       const code = readRequiredString(String(req.query.code || ""), "code", { max: 1024 })
+      const state = readRequiredString(String(req.query.state || ""), "state", { max: 256 })
+      const storedState = String(req.cookies?.[OAUTH_STATE_COOKIE] || "")
+      clearOAuthStateCookie(res)
+      if (!tokensMatch(state, storedState)) {
+        throw new Error("Invalid OAuth state")
+      }
+
       const clientId = readRequiredString(process.env.GOOGLE_CLIENT_ID || "", "GOOGLE_CLIENT_ID", { max: 512 })
       const clientSecret = readRequiredString(process.env.GOOGLE_CLIENT_SECRET || "", "GOOGLE_CLIENT_SECRET", { max: 512 })
       const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/google/callback`

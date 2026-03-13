@@ -64,8 +64,8 @@ import db from "./db.js"
 import path from "path"
 import fs from "node:fs"
 import dns from "node:dns"
-import dnsPromises from "node:dns/promises"
 import { fileURLToPath } from "url"
+import { fetchWithSsrfProtection, ProxySafetyError } from "./proxy.js"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -244,22 +244,6 @@ app.get("/", (_req, res) => {
   `)
 })
 
-// Helper to detect local/private IPs
-function isPrivateIP(ip) {
-  if (!ip) return false;
-  if (ip === '::1' || ip.toLowerCase() === '::ffff:127.0.0.1') return true;
-  const parts = ip.split('.').map(Number);
-  if (parts.length !== 4) return false;
-  return (
-    parts[0] === 10 || 
-    (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || 
-    (parts[0] === 192 && parts[1] === 168) || 
-    parts[0] === 127 || 
-    parts[0] === 169 || 
-    parts[0] === 0
-  );
-}
-
 app.get("/proxy", async (req, res) => {
   try {
     const url = normalizeSiteUrl(req.query.url);
@@ -267,21 +251,7 @@ app.get("/proxy", async (req, res) => {
       return res.status(400).send("Missing url");
     }
 
-    const urlObj = new URL(url);
-    if (!['http:', 'https:'].includes(urlObj.protocol)) {
-      return res.status(403).send("Only HTTP/HTTPS allowed.");
-    }
-
-    try {
-      const lookup = await dnsPromises.lookup(urlObj.hostname);
-      if (isPrivateIP(lookup.address)) {
-        return res.status(403).send("Proxying to this destination is forbidden.");
-      }
-    } catch (dnsErr) {
-      return res.status(400).send("Could not resolve hostname.");
-    }
-
-    const r = await fetch(url, {
+    const r = await fetchWithSsrfProtection(url, {
       headers: {
         "User-Agent": req.headers["user-agent"] || "Mozilla/5.0 (compatible; SiteEditor/1.0)",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
@@ -321,6 +291,9 @@ app.get("/proxy", async (req, res) => {
     if (prepared.meta.url) res.setHeader("X-Site-Url", prepared.meta.url);
     res.send(prepared.html);
   } catch (e) {
+    if (e instanceof ProxySafetyError) {
+      return res.status(e.status).send(e.message)
+    }
     sendError(res, 500, safeErrorMessage(e));
   }
 })

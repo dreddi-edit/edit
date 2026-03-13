@@ -82,7 +82,10 @@ export async function apiRegister(email: string, password: string, name: string)
 }
 
 export async function apiLogout() {
-  await fetch(`${BASE}/api/auth/logout`, { method: "POST", credentials: "include" })
+  const d = await apiFetch<{ ok?: boolean; error?: string }>(`${BASE}/api/auth/logout`, {
+    method: "POST",
+  })
+  if (d && d.ok === false) throw new Error(d.error || "Logout failed.")
 }
 
 export async function apiMe(): Promise<User | null> {

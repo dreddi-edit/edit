@@ -37,14 +37,26 @@ export function readOptionalString(value, label, { max = 255, empty = "" } = {})
   return s;
 }
 
-export function readRequiredHtml(value, label = "HTML") {
+function assertHtmlMaxLength(value, label, max) {
+  if (max === undefined || max === null) return;
+  const limit = Number(max);
+  if (!Number.isFinite(limit) || limit <= 0) return;
+  if (value.length > limit) {
+    throw new ValidationError(`${label} ist zu lang (max ${limit} Zeichen)`);
+  }
+}
+
+export function readRequiredHtml(value, label = "HTML", { max } = {}) {
   const s = String(value || "").trim();
   if (!s) throw new ValidationError(`${label} ist erforderlich`);
+  assertHtmlMaxLength(s, label, max);
   return s;
 }
 
-export function readOptionalHtml(value, label = "HTML") {
-  return String(value || "").trim();
+export function readOptionalHtml(value, label = "HTML", { max } = {}) {
+  const s = String(value || "").trim();
+  assertHtmlMaxLength(s, label, max);
+  return s;
 }
 
 export function readOptionalUrl(value) {

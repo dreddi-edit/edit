@@ -5,14 +5,18 @@ function buildKey(req) {
   return `ip:${ipKeyGenerator(req.ip)}`;
 }
 
-export const createRateLimit = ({ windowMs, max, message }) =>
+export const createRateLimit = ({ windowMs, max, message, keyFn, keyPrefix }) =>
   rateLimit({
     windowMs: windowMs || 15 * 60 * 1000,
     max: max || 100,
     message: { error: message || 'Zu viele Anfragen.' },
     standardHeaders: true,
     legacyHeaders: false,
-    keyGenerator: (req) => buildKey(req),
+    keyGenerator: (req) => {
+      const customKey = typeof keyFn === 'function' ? keyFn(req) : '';
+      const baseKey = String(customKey || buildKey(req));
+      return keyPrefix ? `${keyPrefix}:${baseKey}` : baseKey;
+    },
   });
 
 export const aiRateLimit = rateLimit({
