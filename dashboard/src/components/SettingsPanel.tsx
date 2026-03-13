@@ -1388,7 +1388,22 @@ export default function SettingsPanel({
                 {subscriptionPlans.length ? (
                   <div className="draft-settings-list" style={{ marginTop: 12 }}>
                     {subscriptionPlans.map((plan) => {
-                      const isCurrent = currentUser?.plan_id === plan.id && currentUser?.plan_status !== "canceled"
+                      const currentPlanId = String(currentUser?.plan_id || "").toLowerCase()
+                      const planId = String(plan.id || "").toLowerCase()
+                      const planLabel = String(plan.label || "").toLowerCase()
+                      const normalizedCurrent =
+                        currentPlanId === "basis" ? "" : currentPlanId
+                      const isCurrent =
+                        currentUser?.plan_status !== "canceled" &&
+                        Boolean(
+                          normalizedCurrent &&
+                          (
+                            planId === normalizedCurrent ||
+                            planId.endsWith(`_${normalizedCurrent}`) ||
+                            planId.endsWith(`-${normalizedCurrent}`) ||
+                            planLabel.includes(normalizedCurrent)
+                          )
+                        )
                       return (
                         <div key={plan.id} className="draft-settings-list-card">
                           <div className="draft-settings-list-main">
