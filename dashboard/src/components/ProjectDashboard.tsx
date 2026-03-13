@@ -46,6 +46,7 @@ const ONBOARDING_KEY_PREFIX = "pd_dashboard_onboarding_v2"
 
 type DashboardStage = "all" | "draft" | "review" | "approved" | "shipped"
 type WorkspaceView = "ai-studio" | "projects" | "templates" | "exports"
+type DashboardScope = "private" | "team"
 type TemplateFilter = "all" | "wordpress" | "shopify" | "webflow" | "other"
 type ExportFilter = "all" | "wp-placeholder" | "html-clean" | "ready" | "guarded"
 type AIStudioFilter = "all" | "creation" | "optimization" | "growth" | "autonomy"
@@ -903,6 +904,14 @@ function projectHasTag(project: Project, tag: string) {
 function displayMemberName(member?: Pick<ProjectAssignee, "name" | "email"> | null) {
   if (!member) return ""
   return member.name || member.email.split("@")[0] || member.email
+}
+
+function memberInitials(member?: Pick<ProjectAssignee, "name" | "email"> | null) {
+  const source = displayMemberName(member).trim()
+  if (!source) return "--"
+  const parts = source.split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase()
+  return source.slice(0, 2).toUpperCase()
 }
 
 function formatImportPathLabel(value: string) {
@@ -2007,6 +2016,7 @@ export default function ProjectDashboard({
   const [aiStudioFilter, setAIStudioFilter] = useState<AIStudioFilter>("all")
   const [spendRange, setSpendRange] = useState<SpendRange>("24h")
   const [usageMode, setUsageMode] = useState<UsageMode>("model")
+  const [dashboardScope, setDashboardScope] = useState<DashboardScope>("private")
   const [projectSearch, setProjectSearch] = useState("")
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceView>("projects")
   const [exportSectionOpen, setExportSectionOpen] = useState(false)
@@ -2079,7 +2089,10 @@ export default function ProjectDashboard({
   const [reviewPanelProjectId, setReviewPanelProjectId] = useState<number | null>(null)
   const [reviewComments, setReviewComments] = useState<ReviewComment[]>([])
   const [studioRuns, setStudioRuns] = useState<StudioRun[]>([])
+  const [planPopoverPinned, setPlanPopoverPinned] = useState(false)
+  const [planPopoverHover, setPlanPopoverHover] = useState(false)
   const requestedThumbnailIds = useRef<Set<number>>(new Set())
+  const planBadgeRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     saveChecklist(checklist)
@@ -2124,6 +2137,23 @@ export default function ProjectDashboard({
     if (!showNewProject || assignableMembers.length || loadingAssignableMembers) return
     void loadAssignableMembers()
   }, [showNewProject, assignableMembers.length, loadingAssignableMembers])
+
+  useEffect(() => {
+    if (assignableMembers.length) return
+    void loadAssignableMembers()
+  }, [assignableMembers.length])
+
+  useEffect(() => {
+    if (!planPopoverPinned) return
+    const onPointerDown = (event: MouseEvent) => {
+      if (!planBadgeRef.current) return
+      if (!planBadgeRef.current.contains(event.target as Node)) {
+        setPlanPopoverPinned(false)
+      }
+    }
+    document.addEventListener("mousedown", onPointerDown)
+    return () => document.removeEventListener("mousedown", onPointerDown)
+  }, [planPopoverPinned])
 
   useEffect(() => {
     const candidates = projects
@@ -2244,12 +2274,34 @@ export default function ProjectDashboard({
   }, [searchResults])
 
   const currentPlanMeta = PLAN_META[plan]
+  const normalizedProjects = projects
+  const currentUserEmail = String(user.email || "").toLowerCase()
+  const acceptedTeamMembers = assignableMembers.filter(
+    member =>
+      String(member.email || "").toLowerCase() !== currentUserEmail &&
+      String(member.status || "accepted").toLowerCase() === "accepted"
+  )
+  const hasTeamMembers = acceptedTeamMembers.length > 0
+  const teamScopeRequiresJoin = dashboardScope === "team" && !hasTeamMembers
+  const scopedProjects = teamScopeRequiresJoin
+    ? []
+    : normalizedProjects.filter(project => {
+        const assignees = project.assignees || []
+        const hasOtherAssignee = assignees.some(
+          assignee => String(assignee.email || "").toLowerCase() !== currentUserEmail
+        )
+        const ownerIsCurrentUser = Number(project.ownerUserId || 0) === user.id
+        if (dashboardScope === "private") {
+          return ownerIsCurrentUser && !hasOtherAssignee
+        }
+        return hasOtherAssignee || !ownerIsCurrentUser
+      })
   const unlockedStudioServices = AI_STUDIO_SERVICES.filter(service => hasStudioAccess(plan, service.id))
   const featuredStudioService = unlockedStudioServices[0] || AI_STUDIO_SERVICES[0]
-  const normalizedProjects = projects
+  const effectiveProjects = scopedProjects
   const selectedStudioProject =
-    typeof studioProjectId === "number" ? normalizedProjects.find(project => project.id === studioProjectId) : undefined
-  const quickStudioProject = selectedStudioProject || normalizedProjects.find(project => Boolean(project.html || project.url))
+    typeof studioProjectId === "number" ? effectiveProjects.find(project => project.id === studioProjectId) : undefined
+  const quickStudioProject = selectedStudioProject || effectiveProjects.find(project => Boolean(project.html || project.url))
   const studioToolMeta = activeStudioTool ? STUDIO_TOOL_META[activeStudioTool] : null
   const selectedStudioProjectText = plainTextFromHtml(selectedStudioProject?.html)
   const effectiveStudioUrl = (studioUrl.trim() || selectedStudioProject?.url || "").trim()
@@ -2265,7 +2317,7 @@ export default function ProjectDashboard({
   const newProjectTags = parseProjectTagsInput(newTagInput)
   const projectAssigneeOptions = Array.from(
     new Set(
-      normalizedProjects.flatMap((project) =>
+      effectiveProjects.flatMap((project) =>
         (project.assignees || [])
           .map((assignee) => String(assignee.email || "").trim().toLowerCase())
           .filter(Boolean),
@@ -2273,9 +2325,9 @@ export default function ProjectDashboard({
     ),
   )
   const projectTagOptions = normalizeProjectTags(
-    normalizedProjects.flatMap((project) => projectTagValues(project)),
+    effectiveProjects.flatMap((project) => projectTagValues(project)),
   ).sort((left, right) => left.localeCompare(right))
-  const filteredProjects = normalizedProjects
+  const filteredProjects = effectiveProjects
     .filter(project => {
       const query = projectSearch.trim().toLowerCase()
       const matchesQuery =
@@ -2340,15 +2392,15 @@ export default function ProjectDashboard({
   })
 
   const counts = {
-    all: normalizedProjects.length,
-    draft: normalizedProjects.filter(project => matchesStage("draft", project.workflowStage)).length,
-    review: normalizedProjects.filter(project => matchesStage("review", project.workflowStage)).length,
-    approved: normalizedProjects.filter(project => matchesStage("approved", project.workflowStage)).length,
-    shipped: normalizedProjects.filter(project => matchesStage("shipped", project.workflowStage)).length,
+    all: effectiveProjects.length,
+    draft: effectiveProjects.filter(project => matchesStage("draft", project.workflowStage)).length,
+    review: effectiveProjects.filter(project => matchesStage("review", project.workflowStage)).length,
+    approved: effectiveProjects.filter(project => matchesStage("approved", project.workflowStage)).length,
+    shipped: effectiveProjects.filter(project => matchesStage("shipped", project.workflowStage)).length,
   }
 
   const recentExports = exportedProjects.slice(0, 5)
-  const explorerProject = normalizedProjects.find(project => project.id === projectExplorerId) || null
+  const explorerProject = effectiveProjects.find(project => project.id === projectExplorerId) || null
   const templateCounts = {
     all: templates.length,
     wordpress: templates.filter(template => matchesTemplateFilter("wordpress", template)).length,
@@ -2390,7 +2442,7 @@ export default function ProjectDashboard({
     activeWorkspace === "ai-studio"
       ? AI_STUDIO_SERVICES.length
       : activeWorkspace === "projects"
-      ? normalizedProjects.length
+      ? effectiveProjects.length
       : activeWorkspace === "templates"
       ? templates.length
       : exportedProjects.length
@@ -2398,7 +2450,7 @@ export default function ProjectDashboard({
     activeWorkspace === "ai-studio"
       ? aiStudioDistribution(AI_STUDIO_SERVICES)
       : activeWorkspace === "projects"
-      ? platformDistribution(normalizedProjects)
+      ? platformDistribution(effectiveProjects)
       : activeWorkspace === "templates"
       ? templateDistribution(templates)
       : exportDistribution(exportedProjects)
@@ -2406,8 +2458,19 @@ export default function ProjectDashboard({
     transaction => Number(transaction.amount_eur || 0) < 0 && isSpendInRange(transaction, spendRange)
   )
   const totalSpend = spendTransactions.reduce((sum, transaction) => sum + Math.abs(Number(transaction.amount_eur || 0)), 0)
+  const spendTransactionsCount = spendTransactions.length
+  const spendDays = spendRange === "1h" ? 1 / 24 : spendRange === "24h" ? 1 : spendRange === "7d" ? 7 : 30
+  const avgSpendPerDay = spendDays > 0 ? totalSpend / spendDays : 0
   const spendBuckets = buildSpendBuckets(spendTransactions, spendRange)
   const usageBreakdown = buildSpendBreakdown(spendTransactions, usageMode).slice(0, 4)
+  const topUsageLabel = usageBreakdown[0]?.label || "-"
+  const topUsagePercent = usageBreakdown[0]?.percent || 0
+  const planFeatureItems = [
+    currentPlanMeta.projects,
+    `${currentPlanMeta.assistantModels.length} AI models`,
+    `${currentPlanMeta.studioTools.length} Studio tools`,
+  ]
+  const showPlanPopover = planPopoverPinned || planPopoverHover
   const workspacePipeline =
     activeWorkspace === "ai-studio"
       ? ([
@@ -3547,26 +3610,71 @@ export default function ProjectDashboard({
 
         <div className="pd-header-right">
           <div className="pd-team-stack" title={rt("Team members")}>
-            <div className="pd-team-avatar" style={{ background: "#1a2332" }}>EB</div>
-            <div className="pd-team-avatar" style={{ background: "#2a1a20" }}>LK</div>
-            <div className="pd-team-avatar" style={{ background: "#1a2a1a" }}>MR</div>
-            <div className="pd-team-more">+2</div>
+            {dashboardScope === "team" && hasTeamMembers ? (
+              <>
+                {acceptedTeamMembers.slice(0, 3).map((member) => (
+                  <div key={member.email} className="pd-team-avatar" style={{ background: gradientFromName(displayMemberName(member) || member.email) }}>
+                    {memberInitials(member)}
+                  </div>
+                ))}
+                {acceptedTeamMembers.length > 3 ? (
+                  <div className="pd-team-more">+{acceptedTeamMembers.length - 3}</div>
+                ) : null}
+              </>
+            ) : (
+              <div className="pd-team-avatar" style={{ background: gradientFromName(user.name || user.email || "ME") }}>
+                {memberInitials({ name: user.name, email: user.email })}
+              </div>
+            )}
           </div>
           <div className="pd-divider" />
 
-          <div className="pd-studio-split" title={rt("Switch workspace")}>
-            <button className="pd-studio-half" type="button">
-              <span className="pd-studio-dot" />
-              {rt("Studio")}
+          <div className="pd-studio-split" title={rt("Switch workspace")}
+          >
+            <button
+              className={`pd-studio-half ${dashboardScope === "private" ? "is-active" : ""}`}
+              type="button"
+              onClick={() => setDashboardScope("private")}
+            >
+              {rt("Private")}
             </button>
-            <button className="pd-studio-half" type="button">{rt("Private")}</button>
+            <button
+              className={`pd-studio-half ${dashboardScope === "team" ? "is-active" : ""}`}
+              type="button"
+              onClick={() => setDashboardScope("team")}
+            >
+              {rt("Team")}
+            </button>
           </div>
 
           <div className="pd-divider" />
 
-          <div className="pd-badge pd-badge-pro">
-            <span className="pd-badge-dot" />
-            {currentPlanMeta.label}
+          <div
+            className="pd-plan-badge-wrap"
+            ref={planBadgeRef}
+            onMouseEnter={() => setPlanPopoverHover(true)}
+            onMouseLeave={() => setPlanPopoverHover(false)}
+          >
+            <button
+              type="button"
+              className="pd-badge pd-badge-pro pd-plan-badge-btn"
+              onClick={() => setPlanPopoverPinned((prev) => !prev)}
+              aria-expanded={showPlanPopover}
+              aria-label={`${currentPlanMeta.label} plan features`}
+            >
+              <span className="pd-badge-dot" />
+              {currentPlanMeta.label}
+            </button>
+            {showPlanPopover ? (
+              <div className="pd-plan-popover" role="tooltip">
+                <strong>{currentPlanMeta.label}</strong>
+                <ul>
+                  {planFeatureItems.map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
 
           <button className="pd-btn" type="button" onClick={() => setShowCredits(true)} title={rt("Credits remaining")}>
@@ -3920,6 +4028,7 @@ export default function ProjectDashboard({
             <section className="pd-stat">
               <span className="pd-stat-label">{rt("Spending")}</span>
               <span className="pd-stat-value">EUR{totalSpend.toFixed(2)}</span>
+              <div className="pd-stat-sub">Avg/day EUR{avgSpendPerDay.toFixed(2)} · {spendTransactionsCount} tx</div>
               <div className="pd-spend-tabs">
                 {(["1h", "24h", "7d", "30d"] as SpendRange[]).map(range => (
                   <button
@@ -3945,6 +4054,7 @@ export default function ProjectDashboard({
 
             <section className="pd-stat">
               <span className="pd-stat-label">{rt("Usage")}</span>
+              <div className="pd-stat-sub">Top: {topUsageLabel} ({topUsagePercent}%)</div>
               <div className="pd-usage-toggle-row">
                 <button
                   className={`pd-usage-toggle ${usageMode === "model" ? "is-active" : ""}`}
@@ -4024,6 +4134,15 @@ export default function ProjectDashboard({
           </div>
 
           <div className="pd-projects-area">
+            {teamScopeRequiresJoin ? (
+              <div className="pd-team-empty-banner">
+                <strong>{rt("No team yet")}</strong>
+                <span>{rt("Join a team or create one in Settings > Organisation.")}</span>
+                <div className="pd-team-empty-actions">
+                  <button className="pd-btn pd-btn-primary" type="button" onClick={() => setShowSettings(true)}>{rt("Open Settings")}</button>
+                </div>
+              </div>
+            ) : null}
             {loading ? (
               <div className="pd-projects-grid">
                 {[1, 2, 3, 4, 5, 6].map(index => (
