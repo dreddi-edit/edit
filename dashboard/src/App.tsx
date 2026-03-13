@@ -214,6 +214,7 @@ export default function App() {
 
   // Auth check beim Start
   useEffect(() => {
+    apiFetch("/api/orgs/accept-invite", { method: "POST" }).catch(() => null)
     apiMe().then(user => {
       if (user) { setAuthUser(user); setView("dashboard") }
       else { setAuthUser(null); setView("landing") }
@@ -831,6 +832,10 @@ const autoSave = async (html: string) => {
         html: currentHtmlRef.current,
       })
       await loadPublishHistory(projectId)
+      const refreshedProject = await apiGetProject(projectId).catch(() => null)
+      if (refreshedProject) {
+        setCurrentProject(refreshedProject)
+      }
       toast.success(result.deployUrl ? `Published to ${target}` : `Deployment queued for ${target}`)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Publish failed")
@@ -851,6 +856,10 @@ const autoSave = async (html: string) => {
         getPublishOptions(deployment.target, "rollback"),
       )
       await loadPublishHistory(currentProject.id)
+      const refreshedProject = await apiGetProject(currentProject.id).catch(() => null)
+      if (refreshedProject) {
+        setCurrentProject(refreshedProject)
+      }
       toast.success(result.deployUrl ? "Rollback deployed" : "Rollback completed")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Rollback failed")
