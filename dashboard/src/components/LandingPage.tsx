@@ -149,14 +149,79 @@ function FeatureCard({
   )
 }
 
-const COMPARE_ROWS = [
-  { label: "Import existing site", rf: true, wf: false, ai: false, manual: false },
-  { label: "AI with project context", rf: true, wf: false, ai: true, manual: false },
-  { label: "11 export formats", rf: true, wf: false, ai: false, manual: true },
-  { label: "Native translation", rf: true, wf: "±", ai: false, manual: false },
-  { label: "One-click deploy", rf: true, wf: true, ai: false, manual: false },
-  { label: "Approval + version history", rf: true, wf: false, ai: false, manual: false },
-  { label: "Agency pricing", rf: true, wf: false, ai: "±", manual: true },
+const COMPETITOR_PROFILES = [
+  {
+    name: "Webflow",
+    tagline: "Great for building from scratch. Helpless with existing sites.",
+    points: [
+      "Can't import a client's existing WordPress or Shopify site",
+      "No context-aware AI — doesn't know your project, blocks, or brand",
+      "Exports only to Webflow hosting. Reframe exports to 11 formats.",
+      "No approval queue, audit log, or agency RBAC",
+    ],
+    verdict: "Reframe wins every task that starts with an existing site.",
+  },
+  {
+    name: "Framer",
+    tagline: "Beautiful for portfolios. Zero operations layer.",
+    points: [
+      "No import from live URLs, ZIPs, or existing HTML files",
+      "AI generates template sections — not context-aware rewrites of your content",
+      "Output: Framer hosting only. No WordPress, Shopify, React, or Email.",
+      "No client workflows: no share links, no approvals, no audit log",
+    ],
+    verdict: "Reframe covers everything Framer offers, plus the full ops layer.",
+  },
+  {
+    name: "WordPress + Elementor",
+    tagline: "Most-used CMS. A maze for multi-format delivery.",
+    points: [
+      "Importing a non-WP site means manual rebuild or fragile plugins",
+      "AI completions are generic template fills — no project context",
+      "Export to Shopify, React, Email, Webflow requires custom dev work",
+      "Version control is basic; no approval queue or structured audit trail",
+    ],
+    verdict: "Build in Reframe. Output to WordPress — it's one of 11 formats.",
+  },
+  {
+    name: "ChatGPT / AI tools",
+    tagline: "Powerful brain. No hands. No memory of your actual site.",
+    points: [
+      "Paste-based workflow: AI has zero knowledge of your real page structure",
+      "No export, no deploy, no version control — copy-paste is the pipeline",
+      "Brand context, block tree, project state: all missing",
+      "Token cost is invisible; no approval gates, no rollback",
+    ],
+    verdict: "Reframe wraps the same AI models — with your actual site loaded.",
+  },
+]
+
+const COMPARE_ROWS_EXT = [
+  { cat: "Import", label: "Import site from live URL",                              rf: true, wf: false, fr: false,  wp: "±",  ai: false },
+  { cat: "Import", label: "Import ZIP / HTML / PDF / screenshot",                   rf: true, wf: false, fr: false,  wp: false, ai: false },
+  { cat: "Import", label: "Multi-page crawl + asset extraction",                    rf: true, wf: false, fr: false,  wp: "±",  ai: false },
+  { cat: "Import", label: "WordPress-aware parsing",                                rf: true, wf: false, fr: false,  wp: "±",  ai: false },
+  { cat: "AI",     label: "Visual block editor",                                    rf: true, wf: true,  fr: true,   wp: true,  ai: false },
+  { cat: "AI",     label: "AI rewrites with full project context",                  rf: true, wf: false, fr: "±",    wp: "±",  ai: false },
+  { cat: "AI",     label: "Multiple AI models (Claude · Gemini · Groq · Ollama)",   rf: true, wf: false, fr: false,  wp: false, ai: "±"  },
+  { cat: "AI",     label: "Cost per AI action shown before commit",                 rf: true, wf: false, fr: false,  wp: false, ai: false },
+  { cat: "AI",     label: "Approval gate + auto-snapshot before every edit",        rf: true, wf: false, fr: false,  wp: false, ai: false },
+  { cat: "AI",     label: "Self-hosted AI (Ollama) — zero marginal AI cost",        rf: true, wf: false, fr: false,  wp: false, ai: false },
+  { cat: "Export", label: "11 export formats",                                      rf: true, wf: false, fr: false,  wp: false, ai: false },
+  { cat: "Export", label: "WordPress theme (.zip, installable)",                    rf: true, wf: false, fr: false,  wp: "±",  ai: false },
+  { cat: "Export", label: "Shopify Liquid sections",                                rf: true, wf: false, fr: false,  wp: false, ai: false },
+  { cat: "Export", label: "Webflow JSON export",                                    rf: true, wf: true,  fr: false,  wp: false, ai: false },
+  { cat: "Export", label: "React / JSX export",                                     rf: true, wf: false, fr: "±",    wp: false, ai: false },
+  { cat: "Export", label: "Email HTML export",                                      rf: true, wf: false, fr: false,  wp: "±",  ai: false },
+  { cat: "Global", label: "Translation — all languages, DOM-preserving",            rf: true, wf: "±",   fr: "±",    wp: "±",  ai: "±"  },
+  { cat: "Global", label: "One-click deploy (Firebase / Netlify / Vercel / WP / Shopify)", rf: true, wf: "±", fr: "±", wp: "±", ai: false },
+  { cat: "Global", label: "Deploy history + one-click rollback",                    rf: true, wf: false, fr: false,  wp: "±",  ai: false },
+  { cat: "Agency", label: "RBAC roles (Owner · Admin · Editor · Viewer)",           rf: true, wf: "±",   fr: false,  wp: "±",  ai: false },
+  { cat: "Agency", label: "Client share links (no account needed)",                 rf: true, wf: false, fr: false,  wp: false, ai: false },
+  { cat: "Agency", label: "Approval queue",                                         rf: true, wf: false, fr: false,  wp: false, ai: false },
+  { cat: "Agency", label: "Full audit + version history",                           rf: true, wf: false, fr: false,  wp: "±",  ai: false },
+  { cat: "Pricing", label: "Pay per AI usage, not per project or seat",             rf: true, wf: false, fr: false,  wp: "±",  ai: "±"  },
+  { cat: "Pricing", label: "Self-hosted AI option (zero marginal AI cost)",         rf: true, wf: false, fr: false,  wp: false, ai: false },
 ]
 
 type CellVal = boolean | "±"
@@ -165,6 +230,64 @@ function Cell({ v }: { v: CellVal }) {
   if (v === true) return <span className="lp-cell lp-cell--yes">✓</span>
   if (v === "±") return <span className="lp-cell lp-cell--partial">~</span>
   return <span className="lp-cell lp-cell--no">-</span>
+}
+
+function CompetitorCard({ profile, rt }: { profile: typeof COMPETITOR_PROFILES[0]; rt: (s: string) => string }) {
+  return (
+    <div className="lp-compare__vs-card">
+      <div className="lp-compare__vs-name">vs {profile.name}</div>
+      <div className="lp-compare__vs-tagline">{rt(profile.tagline)}</div>
+      <ul className="lp-compare__vs-points">
+        {profile.points.map((p, i) => <li key={i}>{rt(p)}</li>)}
+      </ul>
+      <div className="lp-compare__vs-verdict">{rt(profile.verdict)}</div>
+    </div>
+  )
+}
+
+type CurrencyData = {
+  sym: string
+  starter: string
+  pro: string
+  scale: string
+  starterCredits: string
+  proCredits: string
+  scaleCredits: string
+  rateDefault: number
+  rateMin: number
+  rateMax: number
+  rateStep: number
+  proAnnualNum: number
+  roiProAnnualLabel: string
+}
+const CURRENCY_MAP: Record<string, CurrencyData> = {
+  _default: { sym: "€",   starter: "€15",       pro: "€30",       scale: "€100",        starterCredits: "€16.50",    proCredits: "€34.50",    scaleCredits: "€120",       rateDefault: 95,     rateMin: 30,     rateMax: 250,     rateStep: 5,     proAnnualNum: 360,      roiProAnnualLabel: "€360/year" },
+  en:       { sym: "$",   starter: "$17",       pro: "$34",       scale: "$109",        starterCredits: "$19",       proCredits: "$39",       scaleCredits: "$129",       rateDefault: 115,    rateMin: 40,     rateMax: 300,     rateStep: 5,     proAnnualNum: 408,      roiProAnnualLabel: "$408/year" },
+  ja:       { sym: "¥",   starter: "¥2,490",    pro: "¥4,980",    scale: "¥16,500",     starterCredits: "¥2,740",    proCredits: "¥5,480",    scaleCredits: "¥18,200",    rateDefault: 8000,   rateMin: 3000,   rateMax: 25000,   rateStep: 500,   proAnnualNum: 59760,    roiProAnnualLabel: "¥59,760/year" },
+  "zh-CN":  { sym: "¥",   starter: "¥120",      pro: "¥240",      scale: "¥790",        starterCredits: "¥132",      proCredits: "¥264",      scaleCredits: "¥870",       rateDefault: 400,    rateMin: 150,    rateMax: 1500,    rateStep: 50,    proAnnualNum: 2880,     roiProAnnualLabel: "¥2,880/year" },
+  "zh-TW":  { sym: "NT$", starter: "NT$550",    pro: "NT$1,090",  scale: "NT$3,590",    starterCredits: "NT$605",    proCredits: "NT$1,200",  scaleCredits: "NT$3,950",   rateDefault: 2500,   rateMin: 800,    rateMax: 8000,    rateStep: 200,   proAnnualNum: 13080,    roiProAnnualLabel: "NT$13,080/year" },
+  ko:       { sym: "₩",   starter: "₩22,000",   pro: "₩44,000",   scale: "₩145,000",    starterCredits: "₩24,200",   proCredits: "₩48,800",   scaleCredits: "₩160,000",   rateDefault: 50000,  rateMin: 20000,  rateMax: 200000,  rateStep: 5000,  proAnnualNum: 528000,   roiProAnnualLabel: "₩528,000/year" },
+  pt:       { sym: "R$",  starter: "R$89",      pro: "R$179",     scale: "R$599",       starterCredits: "R$98",      proCredits: "R$197",     scaleCredits: "R$659",      rateDefault: 180,    rateMin: 60,     rateMax: 500,     rateStep: 10,    proAnnualNum: 2148,     roiProAnnualLabel: "R$2.148/year" },
+  hi:       { sym: "₹",   starter: "₹1,299",    pro: "₹2,599",    scale: "₹8,499",      starterCredits: "₹1,430",    proCredits: "₹2,860",    scaleCredits: "₹9,350",     rateDefault: 2000,   rateMin: 500,    rateMax: 8000,    rateStep: 500,   proAnnualNum: 31188,    roiProAnnualLabel: "₹31,188/year" },
+  tr:       { sym: "₺",   starter: "₺499",      pro: "₺999",      scale: "₺3,299",      starterCredits: "₺549",      proCredits: "₺1,099",    scaleCredits: "₺3,630",     rateDefault: 500,    rateMin: 200,    rateMax: 2000,    rateStep: 50,    proAnnualNum: 11988,    roiProAnnualLabel: "₺11.988/year" },
+  id:       { sym: "Rp",  starter: "Rp250.000", pro: "Rp499.000", scale: "Rp1.650.000", starterCredits: "Rp275.000", proCredits: "Rp549.000", scaleCredits: "Rp1.815.000", rateDefault: 250000, rateMin: 80000,  rateMax: 800000,  rateStep: 20000, proAnnualNum: 5988000,  roiProAnnualLabel: "Rp5.988.000/year" },
+  vi:       { sym: "₫",   starter: "₫399.000",  pro: "₫799.000",  scale: "₫2.650.000",  starterCredits: "₫439.000",  proCredits: "₫879.000",  scaleCredits: "₫2.915.000", rateDefault: 200000, rateMin: 100000, rateMax: 1000000, rateStep: 50000, proAnnualNum: 9588000,  roiProAnnualLabel: "₫9.588.000/year" },
+  th:       { sym: "฿",   starter: "฿590",      pro: "฿1,190",    scale: "฿3,890",      starterCredits: "฿649",      proCredits: "฿1,309",    scaleCredits: "฿4,279",     rateDefault: 600,    rateMin: 200,    rateMax: 2500,    rateStep: 50,    proAnnualNum: 14280,    roiProAnnualLabel: "฿14,280/year" },
+  sv:       { sym: "kr",  starter: "179 kr",    pro: "359 kr",    scale: "1 190 kr",    starterCredits: "197 kr",    proCredits: "396 kr",    scaleCredits: "1 310 kr",   rateDefault: 950,    rateMin: 300,    rateMax: 2500,    rateStep: 50,    proAnnualNum: 4308,     roiProAnnualLabel: "4 308 kr/year" },
+  no:       { sym: "kr",  starter: "189 kr",    pro: "379 kr",    scale: "1 250 kr",    starterCredits: "208 kr",    proCredits: "417 kr",    scaleCredits: "1 375 kr",   rateDefault: 1000,   rateMin: 300,    rateMax: 2500,    rateStep: 50,    proAnnualNum: 4548,     roiProAnnualLabel: "4 548 kr/year" },
+  da:       { sym: "kr",  starter: "119 kr",    pro: "239 kr",    scale: "790 kr",      starterCredits: "131 kr",    proCredits: "263 kr",    scaleCredits: "869 kr",     rateDefault: 700,    rateMin: 200,    rateMax: 2000,    rateStep: 50,    proAnnualNum: 2868,     roiProAnnualLabel: "2 868 kr/year" },
+}
+function getCurrencyData(lang: string): CurrencyData {
+  return CURRENCY_MAP[lang] ?? CURRENCY_MAP._default
+}
+function getPlansDisplay(lang: string) {
+  const c = getCurrencyData(lang)
+  return [
+    { ...PLANS[0] },
+    { ...PLANS[1], price: c.starter, sub: `5 projects · ${c.starterCredits} credits` },
+    { ...PLANS[2], price: c.pro,     sub: `20 projects · ${c.proCredits} credits` },
+    { ...PLANS[3], price: c.scale,   sub: `Unlimited · ${c.scaleCredits} credits` },
+  ]
 }
 
 const PLANS = [
@@ -205,14 +328,15 @@ const PLANS = [
   },
 ]
 
-function ROICalc() {
+function ROICalc({ c }: { c: CurrencyData }) {
   const [projects, setProjects] = useState(4)
   const [hours, setHours] = useState(35)
-  const [rate, setRate] = useState(95)
-  const saved = Math.round(projects * hours * rate * 0.85 * 12)
+  const [rate, setRate] = useState(c.rateDefault)
   const { ref, visible } = useVisible()
   const { t, lang } = useTranslation()
   const rt = useRuntimeTranslations(lang, LANDING_RUNTIME_STRINGS, t)
+  const saved = Math.round(projects * hours * rate * 0.85 * 12)
+  const roiX = Math.max(1, Math.round(saved / c.proAnnualNum))
 
   return (
     <div ref={ref} className={`lp-roi ${visible ? "lp-roi--visible" : ""}`}>
@@ -228,18 +352,18 @@ function ROICalc() {
           <strong>{hours}h</strong>
         </label>
         <label>
-          <span>{rt("Hourly rate (€)")}</span>
-          <input type="range" min={30} max={250} step={5} value={rate} onChange={(e) => setRate(Number(e.target.value))} />
-          <strong>€{rate}</strong>
+          <span>{rt("Hourly rate")} ({c.sym})</span>
+          <input type="range" min={c.rateMin} max={c.rateMax} step={c.rateStep} value={rate} onChange={(e) => setRate(Number(e.target.value))} />
+          <strong>{c.sym}{rate.toLocaleString()}</strong>
         </label>
       </div>
       <div className="lp-roi__result">
-        <div className="lp-roi__num">€{saved.toLocaleString()}</div>
+        <div className="lp-roi__num">{c.sym}{saved.toLocaleString()}</div>
         <div className="lp-roi__label">{rt("recovered annually")}</div>
         <div className="lp-roi__sub">
-          {rt("Reframe Pro costs €360/year.")}
+          {rt("Reframe Pro costs")} {c.roiProAnnualLabel}.
           <br />
-          {rt("ROI")} : <strong>{Math.round(saved / 360)}x</strong>
+          {rt("ROI")} : <strong>{roiX}x</strong>
         </div>
       </div>
     </div>
@@ -359,7 +483,9 @@ function FAQItem({ q, a }: { q: string; a: string }) {
 
 const LANDING_RUNTIME_STRINGS = Array.from(new Set([
   ...FEATURES.flatMap((feature) => [feature.tag, feature.title, feature.body, ...feature.items]),
-  ...COMPARE_ROWS.map((row) => row.label),
+  ...COMPARE_ROWS_EXT.map((row) => row.label),
+  ...COMPARE_ROWS_EXT.map((row) => row.cat),
+  ...COMPETITOR_PROFILES.flatMap((p) => [p.tagline, ...p.points, p.verdict]),
   ...PLANS.flatMap((plan) => [plan.name, plan.sub, ...(plan.per ? [plan.per] : []), ...plan.items, ...plan.missing]),
   ...FAQS.flatMap((faq) => [faq.q, faq.a]),
   "Features",
@@ -391,11 +517,14 @@ const LANDING_RUNTIME_STRINGS = Array.from(new Set([
   "Nothing they don't.",
   "How Reframe fits in.",
   "Honest comparison for agencies that start with existing sites, not agencies building from scratch.",
+  "site operations capabilities",
+  "No other tool covers the full stack.",
   "Capability",
   "Reframe",
   "Webflow",
-  "AI generators",
-  "Manual",
+  "Framer",
+  "WP + Elementor",
+  "ChatGPT",
   "ROI Calculator",
   "Calculate your margin recovery.",
   "Drag the sliders to match your workload.",
@@ -423,9 +552,9 @@ const LANDING_RUNTIME_STRINGS = Array.from(new Set([
   "Anything specific you want to see? (optional)",
   "Migrations / month",
   "Manual hours / project",
-  "Hourly rate (€)",
+  "Hourly rate",
   "recovered annually",
-  "Reframe Pro costs €360/year.",
+  "Reframe Pro costs",
   "ROI",
   "Comparison",
   "60s demo",
@@ -442,6 +571,8 @@ export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggle
   const [menuOpen, setMenuOpen] = useState(false)
   const { t, lang } = useTranslation()
   const rt = useRuntimeTranslations(lang, LANDING_RUNTIME_STRINGS, t)
+
+  const currencyData = useMemo(() => getCurrencyData(lang), [lang])
 
   const toggleTheme = () => {
     const next = theme === "dark" ? "light" : "dark"
@@ -597,6 +728,20 @@ export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggle
           <div className="lp-eyebrow">{rt("Comparison")}</div>
           <h2 className="lp-h2">{rt("How Reframe fits in.")}</h2>
           <p className="lp-compare__sub">{rt("Honest comparison for agencies that start with existing sites, not agencies building from scratch.")}</p>
+
+          <div className="lp-compare__score-banner">
+            <span className="lp-compare__score-num">25 / 25</span>
+            <span className="lp-compare__score-label">{rt("site operations capabilities")}</span>
+            <span className="lp-compare__score-sep">·</span>
+            <span className="lp-compare__score-note">{rt("No other tool covers the full stack.")}</span>
+          </div>
+
+          <div className="lp-compare__vs-grid">
+            {COMPETITOR_PROFILES.map((profile, i) => (
+              <CompetitorCard key={i} profile={profile} rt={rt} />
+            ))}
+          </div>
+
           <div className="lp-compare__wrap">
             <table className="lp-compare__table">
               <thead>
@@ -604,20 +749,32 @@ export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggle
                   <th>{rt("Capability")}</th>
                   <th className="lp-compare__th--rf">{rt("Reframe")}</th>
                   <th>{rt("Webflow")}</th>
-                  <th>{rt("AI generators")}</th>
-                  <th>{rt("Manual")}</th>
+                  <th>{rt("Framer")}</th>
+                  <th>{rt("WP + Elementor")}</th>
+                  <th>{rt("ChatGPT")}</th>
                 </tr>
               </thead>
               <tbody>
-                {COMPARE_ROWS.map((row, i) => (
-                  <tr key={i}>
-                    <td>{rt(row.label)}</td>
-                    <td className="lp-compare__td--rf"><Cell v={row.rf as CellVal} /></td>
-                    <td><Cell v={row.wf as CellVal} /></td>
-                    <td><Cell v={row.ai as CellVal} /></td>
-                    <td><Cell v={row.manual as CellVal} /></td>
-                  </tr>
-                ))}
+                {COMPARE_ROWS_EXT.map((row, i) => {
+                  const prevCat = i > 0 ? COMPARE_ROWS_EXT[i - 1].cat : null
+                  return (
+                    <React.Fragment key={i}>
+                      {row.cat !== prevCat && (
+                        <tr className="lp-compare__cat-row">
+                          <td colSpan={6}>{rt(row.cat)}</td>
+                        </tr>
+                      )}
+                      <tr>
+                        <td>{rt(row.label)}</td>
+                        <td className="lp-compare__td--rf"><Cell v={row.rf as CellVal} /></td>
+                        <td><Cell v={row.wf as CellVal} /></td>
+                        <td><Cell v={row.fr as CellVal} /></td>
+                        <td><Cell v={row.wp as CellVal} /></td>
+                        <td><Cell v={row.ai as CellVal} /></td>
+                      </tr>
+                    </React.Fragment>
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -629,7 +786,7 @@ export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggle
           <div className="lp-eyebrow">{rt("ROI Calculator")}</div>
           <h2 className="lp-h2">{rt("Calculate your margin recovery.")}</h2>
           <p className="lp-compare__sub">{rt("Drag the sliders to match your workload.")}</p>
-          <ROICalc />
+          <ROICalc c={currencyData} />
         </div>
       </section>
 
@@ -639,7 +796,7 @@ export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggle
           <h2 className="lp-h2">{rt("Pay for AI. Not for projects.")}</h2>
           <p className="lp-compare__sub">{rt("Credits deduct only when you run AI, not for editing, exporting, or storing.")}</p>
           <div className="lp-pricing__grid">
-            {PLANS.map((plan, i) => (
+            {getPlansDisplay(lang).map((plan, i) => (
               <div key={i} className={`lp-plan ${plan.featured ? "lp-plan--featured" : ""}`}>
                 {plan.featured && <div className="lp-plan__badge">{rt("Most popular")}</div>}
                 <div className="lp-plan__name">{rt(plan.name)}</div>
