@@ -44,8 +44,8 @@ import {
   type WorkflowStage,
 } from "./api/projects"
 import AuthScreen from "./components/AuthScreen"
-import LandingPage from "./components/landing/LandingPage"
-import LearnPage from "./components/learn/LearnPage"
+import LandingPage from "./components/landing/NewLandingPage"
+import LearnPage from "./components/learn/NewLearnPage"
 import ResetPasswordScreen from "./components/ResetPasswordScreen"
 import ProjectDashboard from "./components/ProjectDashboard"
 import AssistantWidget from "./components/AssistantWidget"
