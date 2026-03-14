@@ -33,10 +33,52 @@ function clean(value) {
   return String(value || "").trim()
 }
 
+function tryParseCredentialJson(candidate) {
+  try {
+    return JSON.parse(candidate)
+  } catch {
+    return null
+  }
+}
+
 function parseCredentials(raw) {
   const text = clean(raw)
-  if (!text) return null
-  return JSON.parse(text)
+  if (!text) return { value: null, error: null }
+
+  const candidates = [text]
+  if (!text.startsWith("{") && text.includes('"type"') && text.includes('"private_key"')) {
+    candidates.push(`{${text}}`)
+  }
+
+  if (
+    text.length >= 32 &&
+    /^[A-Za-z0-9+/=\s]+$/.test(text) &&
+    text.length % 4 === 0
+  ) {
+    try {
+      const decoded = Buffer.from(text, "base64").toString("utf8").trim()
+      if (decoded) {
+        candidates.push(decoded)
+        if (!decoded.startsWith("{") && decoded.includes('"type"') && decoded.includes('"private_key"')) {
+          candidates.push(`{${decoded}}`)
+        }
+      }
+    } catch {
+      // ignore invalid base64 candidate
+    }
+  }
+
+  for (const candidate of candidates) {
+    const parsed = tryParseCredentialJson(candidate)
+    if (parsed && typeof parsed === "object") {
+      return { value: parsed, error: null }
+    }
+  }
+
+  return {
+    value: null,
+    error: "Vertex service account JSON is invalid. Check VERTEX_SERVICE_ACCOUNT_JSON / GOOGLE_SERVICE_ACCOUNT_JSON.",
+  }
 }
 
 function getUserVertexSettings(userId) {
@@ -52,7 +94,8 @@ function getUserVertexSettings(userId) {
 export function getVertexRuntimeConfig({ userId = null } = {}) {
   const row = getUserVertexSettings(userId)
   const credentialsText = clean(process.env.VERTEX_SERVICE_ACCOUNT_JSON || process.env.GOOGLE_SERVICE_ACCOUNT_JSON)
-  const credentials = credentialsText ? parseCredentials(credentialsText) : null
+  const parsedCredentials = credentialsText ? parseCredentials(credentialsText) : { value: null, error: null }
+  const credentials = parsedCredentials.value
   const projectId =
     clean(row?.vertex_project_id) ||
     clean(process.env.VERTEX_PROJECT_ID) ||
@@ -65,9 +108,16 @@ export function getVertexRuntimeConfig({ userId = null } = {}) {
     projectId,
     location,
     credentials,
+    credentialsError: parsedCredentials.error,
     configured: Boolean(projectId),
-    hasCredentials: Boolean(credentials || adcPath),
-    authMode: credentials ? "service-account-json" : adcPath ? "adc-file" : "application-default-credentials",
+    hasCredentials: Boolean(credentialsText || adcPath),
+    authMode: credentials
+      ? "service-account-json"
+      : adcPath
+      ? "adc-file"
+      : parsedCredentials.error
+      ? "invalid-service-account-json"
+      : "application-default-credentials",
   }
 }
 
@@ -116,42 +166,50 @@ function buildResolvedModelMap() {
 
 export function registerVertexRoutes(app) {
   app.get("/api/vertex/status", authMiddleware, async (req, res) => {
-    const config = getVertexRuntimeConfig({ userId: req.user?.id })
-    let authOk = false
-    let authError = ""
+    try {
+      const config = getVertexRuntimeConfig({ userId: req.user?.id })
+      let authOk = false
+      let authError = config.credentialsError || ""
 
-    if (config.configured) {
-      try {
-        await getAccessToken(config)
-        authOk = true
-      } catch (error) {
-        authError = error?.message || "Vertex authentication failed"
+      if (config.configured && !config.credentialsError) {
+        try {
+          await getAccessToken(config)
+          authOk = true
+        } catch (error) {
+          authError = error?.message || "Vertex authentication failed"
+        }
       }
-    }
 
-    res.json({
-      ok: true,
-      status: {
-        configured: config.configured,
-        auth_ok: authOk,
-        auth_error: authError || null,
-        project_id: config.projectId || "",
-        location: config.location,
-        has_credentials: config.hasCredentials,
-        auth_mode: config.authMode,
-        models: summarizeModels(),
-      },
-    })
+      res.json({
+        ok: true,
+        status: {
+          configured: config.configured,
+          auth_ok: authOk,
+          auth_error: authError || null,
+          project_id: config.projectId || "",
+          location: config.location,
+          has_credentials: config.hasCredentials,
+          auth_mode: config.authMode,
+          models: summarizeModels(),
+        },
+      })
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error?.message || "Vertex status failed" })
+    }
   })
 
   app.get("/api/vertex/models", authMiddleware, (req, res) => {
-    const config = getVertexRuntimeConfig({ userId: req.user?.id })
-    res.json({
-      ok: true,
-      project_id: config.projectId || "",
-      location: config.location,
-      models: VERTEX_MODELS,
-    })
+    try {
+      const config = getVertexRuntimeConfig({ userId: req.user?.id })
+      res.json({
+        ok: true,
+        project_id: config.projectId || "",
+        location: config.location,
+        models: VERTEX_MODELS,
+      })
+    } catch (error) {
+      res.status(500).json({ ok: false, error: error?.message || "Vertex models failed" })
+    }
   })
 
   app.get("/api/vertex/models/resolved", authMiddleware, (_req, res) => {
@@ -187,6 +245,9 @@ export function registerVertexRoutes(app) {
   app.post("/api/vertex/test-auth", authMiddleware, async (req, res) => {
     try {
       const config = getVertexRuntimeConfig({ userId: req.user?.id })
+      if (config.credentialsError) {
+        return res.status(400).json({ ok: false, error: config.credentialsError })
+      }
       if (!config.configured) {
         return res.status(400).json({ ok: false, error: "Vertex project is not configured" })
       }
