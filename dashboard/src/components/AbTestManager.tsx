@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 
 export const AbTestManager: React.FC = () => {
-  const [variants, setVariants] = useState([
+  const [variants] = useState([
     { id: 'A', name: 'Original', traffic: 50 },
     { id: 'B', name: 'AI Variation (Focus: Urgency)', traffic: 50 }
   ]);

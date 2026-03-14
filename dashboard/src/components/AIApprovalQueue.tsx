@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
 export const AIApprovalQueue: React.FC = () => {
-  const [items, setItems] = useState<any[]>([]);
+  const [items, setItems] = useState<Array<{ id: number; action: string; status: string; created_at: string }>>([]);
 
   const getHeaders = () => {
     const token = document.cookie.split('; ').find(row => row.startsWith('se_token='))?.split('=')[1] || localStorage.getItem('token') || '';
@@ -15,7 +15,7 @@ export const AIApprovalQueue: React.FC = () => {
       .catch(() => {});
   };
 
-  useEffect(() => { loadQueue(); }, []);
+  useEffect(() => { loadQueue(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleAction = async (id: number, approved: boolean) => {
     await fetch(`/api/admin/ai-queue/${id}`, {

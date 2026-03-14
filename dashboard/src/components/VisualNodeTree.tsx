@@ -1,10 +1,16 @@
 import React from 'react';
 
+interface TreeNode {
+  tag: string;
+  id: string | null;
+  children: TreeNode[];
+}
+
 export const VisualNodeTree: React.FC<{ html: string }> = ({ html }) => {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, 'text/html');
   
-  const getTree = (node: Element, depth = 0): any[] => {
+  const getTree = (node: Element, depth = 0): TreeNode[] => {
     return Array.from(node.children).map(child => ({
       tag: child.tagName.toLowerCase(),
       id: child.getAttribute('data-block-id') || child.id || null,
@@ -14,14 +20,14 @@ export const VisualNodeTree: React.FC<{ html: string }> = ({ html }) => {
 
   const treeData = getTree(doc.body);
 
-  const renderNode = (node: any, idx: number) => (
+  const renderNode = (node: TreeNode, idx: number): React.ReactNode => (
     <div key={idx} className="ml-4 border-l border-gray-800 pl-3 my-1">
       <div className="flex items-center gap-2">
         <span className="text-[10px] bg-gray-800 text-blue-400 px-1.5 py-0.5 rounded font-mono uppercase font-bold">{node.tag}</span>
         {node.id && <span className="text-[9px] text-gray-600 font-mono truncate max-w-[100px]">#{node.id}</span>}
       </div>
       {node.children.length > 0 && (
-        <div className="mt-1">{node.children.map((child: any, i: number) => renderNode(child, i))}</div>
+        <div className="mt-1">{node.children.map((child: TreeNode, i: number) => renderNode(child, i))}</div>
       )}
     </div>
   );

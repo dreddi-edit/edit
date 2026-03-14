@@ -1,6 +1,6 @@
 import React from 'react';
 
-export const ImportFidelityPanel: React.FC<{ score: number, details?: any }> = ({ score, details }) => {
+export const ImportFidelityPanel: React.FC<{ score: number, details?: Record<string, unknown> }> = ({ score }) => {
   const getStatusColor = (val: number) => {
     if (val > 90) return 'text-green-400';
     if (val > 70) return 'text-yellow-400';

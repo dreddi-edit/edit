@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 
 export const StyleMirrorUI: React.FC = () => {
   const [analyzing, setAnalyzing] = useState(false);
-  const [persona, setPersona] = useState<any>(null);
+  const [persona, setPersona] = useState<{ tone: string; formality: string; personality: string } | null>(null);
 
   const analyzeTone = () => {
     setAnalyzing(true);

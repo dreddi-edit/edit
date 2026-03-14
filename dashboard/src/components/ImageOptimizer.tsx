@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 
 export const ImageOptimizer: React.FC = () => {
   const [optimizing, setOptimizing] = useState(false);
-  const [stats, setStats] = useState<any>(null);
+  const [stats, setStats] = useState<{ saved: string; count: number; quality: string } | null>(null);
 
   const optimize = () => {
     setOptimizing(true);

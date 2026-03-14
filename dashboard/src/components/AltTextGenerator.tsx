@@ -5,7 +5,6 @@ export const AltTextGenerator: React.FC = () => {
     { id: 1, src: 'https://example.com/hero.jpg', currentAlt: '', suggested: 'A modern laptop on a wooden desk' },
     { id: 2, src: 'https://example.com/logo.png', currentAlt: 'Logo', suggested: 'Company Logo in blue and white' }
   ]);
-  const [processing, setProcessing] = useState(false);
 
   const applyAlt = (id: number, text: string) => {
     setImages(images.map(img => img.id === id ? { ...img, currentAlt: text } : img));

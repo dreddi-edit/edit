@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
 export const ActivityAuditLog: React.FC = () => {
-  const [logs, setLogs] = useState<any[]>([]);
+  const [logs, setLogs] = useState<Array<{ id: number; action: string; timestamp: string; user?: string }>>([]);
 
   useEffect(() => {
     const token = document.cookie.split('; ').find(row => row.startsWith('se_token='))?.split('=')[1] || localStorage.getItem('token') || '';

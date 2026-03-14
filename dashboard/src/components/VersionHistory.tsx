@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 
 export const VersionHistory: React.FC<{ projectId: number }> = ({ projectId }) => {
-  const [versions, setVersions] = useState<any[]>([]);
+  const [versions, setVersions] = useState<Array<{ id: number; created_at: string; label?: string }>>([]);
   const [loading, setLoading] = useState(false);
 
   const getHeaders = () => {
@@ -15,7 +15,7 @@ export const VersionHistory: React.FC<{ projectId: number }> = ({ projectId }) =
       .then(data => { if (data.ok) setVersions(data.versions || []); });
   };
 
-  useEffect(() => { if (projectId) loadVersions(); }, [projectId]);
+  useEffect(() => { if (projectId) loadVersions(); }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const restore = async (versionId: number) => {
     if (!confirm("Are you sure? This will overwrite the current draft.")) return;

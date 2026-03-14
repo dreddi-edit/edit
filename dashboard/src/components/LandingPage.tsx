@@ -39,6 +39,7 @@ const TERMINAL_LINES = [
   { delay: 6300, text: "  + Live at  https://newclient.netlify.app", type: "ok" },
 ]
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function Terminal() {
   const [shown, setShown] = useState<number[]>([])
   const bottomRef = useRef<HTMLDivElement>(null)
