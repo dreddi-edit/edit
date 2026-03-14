@@ -5538,70 +5538,39 @@ export default function ProjectDashboard({
                     {rt("Easy imports now support live URL crawl, sitemap.xml, basic-auth/cookie/header injection, ZIP websites, folders, Figma frame exports, HTML, SVG, Markdown, DOCX, PDF briefs, screenshots, and asset libraries.")}
                   </span>
                 </div>
-                <div className="pd-field-label pd-field-label-full">
-                  {rt("Assign team members")}
-                  {loadingAssignableMembers ? null : assignableMembers.filter(m => m.email.toLowerCase() !== user.email.toLowerCase()).length ? (
+                {!loadingAssignableMembers && assignableMembers.filter((member) => member.email.toLowerCase() !== user.email.toLowerCase()).length > 0 ? (
+                  <div className="pd-field-label pd-field-label-full">
+                    {rt("Assign team members")}
                     <div className="pd-assignee-list">
-                      {assignableMembers.filter(m => m.email.toLowerCase() !== user.email.toLowerCase()).map(member => {
-                        const selected = newAssigneeEmails.includes(member.email)
-                        const label = displayMemberName(member)
-                        const meta = [
-                          member.role ? rt(String(member.role).toLowerCase()) : "",
-                          member.status === "pending" ? rt("pending") : "",
-                        ]
-                          .filter(Boolean)
-                          .join(" · ")
-                        return (
-                          <button
-                            key={member.email}
-                            type="button"
-                            className={`pd-assignee-chip${selected ? " is-selected" : ""}`}
-                            onClick={() => toggleAssignee(member.email)}
-                          >
-                            <span className="pd-assignee-avatar">{label.slice(0, 2).toUpperCase()}</span>
-                            <span className="pd-assignee-copy">
-                              <span className="pd-assignee-name">{label}</span>
-                              <span className="pd-assignee-meta">{meta || member.email}</span>
-                            </span>
-                          </button>
-                        )
-                      })}
+                      {assignableMembers
+                        .filter((member) => member.email.toLowerCase() !== user.email.toLowerCase())
+                        .map((member) => {
+                          const selected = newAssigneeEmails.includes(member.email)
+                          const label = displayMemberName(member)
+                          const meta = [
+                            member.role ? rt(String(member.role).toLowerCase()) : "",
+                            member.status === "pending" ? rt("pending") : "",
+                          ]
+                            .filter(Boolean)
+                            .join(" · ")
+                          return (
+                            <button
+                              key={member.email}
+                              type="button"
+                              className={`pd-assignee-chip${selected ? " is-selected" : ""}`}
+                              onClick={() => toggleAssignee(member.email)}
+                            >
+                              <span className="pd-assignee-avatar">{label.slice(0, 2).toUpperCase()}</span>
+                              <span className="pd-assignee-copy">
+                                <span className="pd-assignee-name">{label}</span>
+                                <span className="pd-assignee-meta">{meta || member.email}</span>
+                              </span>
+                            </button>
+                          )
+                        })}
                     </div>
-                  ) : (
-                    <span className="pd-field-hint">{rt("No team members yet. Invite them in Settings first.")}</span>
-                                  {!loadingAssignableMembers && assignableMembers.filter(m => m.email.toLowerCase() !== user.email.toLowerCase()).length > 0 ? (
-                                    <div className="pd-field-label pd-field-label-full">
-                                      {rt("Assign team members")}
-                                      <div className="pd-assignee-list">
-                                        {assignableMembers.filter(m => m.email.toLowerCase() !== user.email.toLowerCase()).map(member => {
-                                          const selected = newAssigneeEmails.includes(member.email)
-                                          const label = displayMemberName(member)
-                                          const meta = [
-                                            member.role ? rt(String(member.role).toLowerCase()) : "",
-                                            member.status === "pending" ? rt("pending") : "",
-                                          ]
-                                            .filter(Boolean)
-                                            .join(" · ")
-                                          return (
-                                            <button
-                                              key={member.email}
-                                              type="button"
-                                              className={`pd-assignee-chip${selected ? " is-selected" : ""}`}
-                                              onClick={() => toggleAssignee(member.email)}
-                                            >
-                                              <span className="pd-assignee-avatar">{label.slice(0, 2).toUpperCase()}</span>
-                                              <span className="pd-assignee-copy">
-                                                <span className="pd-assignee-name">{label}</span>
-                                                <span className="pd-assignee-meta">{meta || member.email}</span>
-                                              </span>
-                                            </button>
-                                          )
-                                        })}
-                                      </div>
-                                    </div>
-                                  ) : null}
-                  )}
-                </div>
+                  </div>
+                ) : null}
               </div>
             </div>
             <div className="pd-modal-actions">
