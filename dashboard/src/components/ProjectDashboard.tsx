@@ -5205,6 +5205,10 @@ export default function ProjectDashboard({
                       {rt("File upload")}
                     </button>
                   </div>
+                  <div className="pd-import-active-mode" aria-live="polite">
+                    <strong>{rt("Import source")}:</strong>
+                    <span>{newImportSource === "url" ? rt("URL import") : rt("File upload")}</span>
+                  </div>
                   <div className="pd-import-source-grid">
                     {newImportSource === "url" ? (
                       <section className="pd-import-source-card is-active">

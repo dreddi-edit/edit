@@ -7,7 +7,7 @@ export type Language = string
 
 const BUILTIN_LANGUAGES = new Set(["en", "de", "es"])
 const CACHE_PREFIX = "ui-language-pack:"
-const RUNTIME_CACHE_PREFIX = "ui-runtime-pack:"
+const RUNTIME_CACHE_PREFIX = "ui-runtime-pack-v2:"
 
 function getCachedPack(lang: Language): Record<string, string> | null {
   try {
@@ -170,7 +170,7 @@ export function useRuntimeTranslations(
   }, [lang])
 
   useEffect(() => {
-    if (lang === "en" || !normalizedTexts.length) return
+    if (BUILTIN_LANGUAGES.has(lang) || !normalizedTexts.length) return
     const cached = getCachedRuntimePack(lang)
     const missing = normalizedTexts.filter(text => !cached[text] && fallbackRef.current(text) === text)
     if (!missing.length) return
@@ -200,7 +200,7 @@ export function useRuntimeTranslations(
   return (text: string) => {
     const normalized = String(text || "")
     if (!normalized) return normalized
-    if (lang === "en") return fallback(normalized)
+    if (BUILTIN_LANGUAGES.has(lang)) return fallback(normalized)
     return runtimePack[normalized] || fallback(normalized)
   }
 }

@@ -2469,6 +2469,27 @@ body[data-theme="light"] .pd-section-loading-mask {
   margin-bottom: 10px;
 }
 
+.pd-import-active-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--pd-blue-border);
+  background: color-mix(in srgb, var(--pd-blue-border), transparent 88%);
+  font-size: 11px;
+}
+
+.pd-import-active-mode strong {
+  color: var(--pd-text);
+}
+
+.pd-import-active-mode span {
+  color: var(--pd-blue);
+  font-weight: 700;
+}
+
 .pd-import-source-card {
   padding: 14px;
   border-radius: 16px;
