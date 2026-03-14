@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { translations } from "./translations"
 import { translateTexts } from "../utils/googleApis"
 import { TOP_TRANSLATION_LANGUAGES } from "../utils/htmlTranslation"
@@ -43,7 +43,7 @@ function setCachedRuntimePack(lang: Language, value: Record<string, string>) {
 }
 
 async function ensureLanguagePack(lang: Language) {
-  if (BUILTIN_LANGUAGES.has(lang) || getCachedPack(lang)) return
+  if (lang === "en" || getCachedPack(lang)) return
 
   const englishPack = translations.en as Record<string, string>
   const keys = Object.keys(englishPack)
@@ -64,16 +64,72 @@ export function useTranslation() {
   const [lang, setLangState] = useState<Language>(
     () => (localStorage.getItem("ui-language") as Language) || "en"
   )
+  const [dynamicPack, setDynamicPack] = useState<Record<string, string>>(() => getCachedPack(lang) || {})
+  const pendingRef = useRef<Set<string>>(new Set())
+  const translatingRef = useRef(false)
 
   const t = (key: string): string => {
-    const pack = BUILTIN_LANGUAGES.has(lang)
+    const builtInPack = BUILTIN_LANGUAGES.has(lang)
       ? (translations[lang as keyof typeof translations] as Record<string, string>)
-      : getCachedPack(lang)
+      : null
+    const englishPack = translations.en as Record<string, string>
 
-    return pack?.[key] ??
-      (translations.en as Record<string, string>)[key] ??
-      key
+    const resolved = builtInPack?.[key] ?? dynamicPack[key] ?? englishPack[key] ?? key
+
+    // Auto-backfill missing keys for non-English languages so partial packs
+    // (or new UI strings) are translated without manual dictionary updates.
+    if (lang !== "en" && resolved === key) {
+      pendingRef.current.add(key)
+    }
+
+    return resolved
   }
+
+  useEffect(() => {
+    setDynamicPack(getCachedPack(lang) || {})
+    pendingRef.current.clear()
+  }, [lang])
+
+  useEffect(() => {
+    if (lang === "en") return
+
+    let cancelled = false
+    const timer = window.setInterval(() => {
+      if (cancelled || translatingRef.current) return
+      const queued = Array.from(pendingRef.current)
+      if (!queued.length) return
+
+      const cached = getCachedPack(lang) || {}
+      const missing = queued.filter((key) => !cached[key]).slice(0, 28)
+      if (!missing.length) return
+
+      missing.forEach((key) => pendingRef.current.delete(key))
+      translatingRef.current = true
+
+      void translateTexts(missing, lang)
+        .then((translated) => {
+          if (cancelled) return
+          const nextEntries = missing.reduce<Record<string, string>>((acc, key, index) => {
+            acc[key] = decodeEntities(translated[index]?.translatedText || key)
+            return acc
+          }, {})
+          const merged = { ...cached, ...nextEntries }
+          localStorage.setItem(`${CACHE_PREFIX}${lang}`, JSON.stringify(merged))
+          setDynamicPack(merged)
+        })
+        .catch(() => {
+          // Keep fallback English text if translation fails.
+        })
+        .finally(() => {
+          translatingRef.current = false
+        })
+    }, 450)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [lang])
 
   const setLang = async (l: Language) => {
     await ensureLanguagePack(l)
@@ -102,9 +158,9 @@ export function useRuntimeTranslations(
   }, [lang])
 
   useEffect(() => {
-    if (BUILTIN_LANGUAGES.has(lang) || !normalizedTexts.length) return
+    if (lang === "en" || !normalizedTexts.length) return
     const cached = getCachedRuntimePack(lang)
-    const missing = normalizedTexts.filter(text => !cached[text])
+    const missing = normalizedTexts.filter(text => !cached[text] && fallback(text) === text)
     if (!missing.length) return
 
     let cancelled = false
@@ -132,7 +188,7 @@ export function useRuntimeTranslations(
   return (text: string) => {
     const normalized = String(text || "")
     if (!normalized) return normalized
-    if (BUILTIN_LANGUAGES.has(lang)) return fallback(normalized)
+    if (lang === "en") return fallback(normalized)
     return runtimePack[normalized] || fallback(normalized)
   }
 }
