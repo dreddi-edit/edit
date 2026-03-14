@@ -5207,169 +5207,168 @@ export default function ProjectDashboard({
                   </div>
                   <div className="pd-import-source-grid">
                     {newImportSource === "url" ? (
-                    <section className="pd-import-source-card is-active">
-                      <div className="pd-import-source-head">
-                        <span className="pd-import-source-step">01</span>
-                        <div>
-                          <strong>{rt("Import from URL")}</strong>
-                          <span>{rt("Use this when the site is already live and reachable.")}</span>
+                      <section className="pd-import-source-card is-active">
+                        <div className="pd-import-source-head">
+                          <span className="pd-import-source-step">01</span>
+                          <div>
+                            <strong>{rt("Import from URL")}</strong>
+                            <span>{rt("Use this when the site is already live and reachable.")}</span>
+                          </div>
                         </div>
-                      </div>
-                  <div className="pd-import-toolbar">
-                    <div className="pd-import-mode">
-                      {([
-                        ["single", rt("Homepage")],
-                        ["crawl", rt("Crawl links")],
-                        ["sitemap", rt("Sitemap.xml")],
-                      ] as const).map(([value, label]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          className={`pd-segment-btn${newImportMode === value ? " is-active" : ""}`}
-                          onClick={() => {
-                            setNewImportSource("url")
-                            setNewImportMode(value)
-                          }}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                    <button className="pd-btn pd-btn-primary" type="button" onClick={() => void importFromUrl()} disabled={newImporting || !newUrl.trim()}>
-                      {newImporting ? rt("Importing...") : rt("Import website")}
-                    </button>
-                  </div>
-                  <span className="pd-field-hint">{rt("Paste a live URL and choose how deep the importer should go. URL import is separate from file upload.")}</span>
-                  <div className="pd-import-auth-toggle">
-                    <button
-                      className="pd-btn"
-                      type="button"
-                      onClick={() => {
-                        setNewImportSource("url")
-                        setNewImportShowAuth((value) => !value)
-                      }}
-                    >
-                      {newImportShowAuth ? rt("Hide auth/headers") : rt("Use auth, cookie, or headers")}
-                    </button>
-                  </div>
-                  {newImportShowAuth ? (
-                    <div className="pd-import-auth-grid">
-                      <label className="pd-field-label">
-                        {rt("Basic auth username")}
-                        <input
-                          className="pd-field-input"
-                          value={newImportBasicUser}
-                          onChange={event => setNewImportBasicUser(event.target.value)}
-                          placeholder={rt("Optional")}
-                          autoComplete="off"
-                        />
-                      </label>
-                      <label className="pd-field-label">
-                        {rt("Basic auth password")}
-                        <input
-                          className="pd-field-input"
-                          type="password"
-                          value={newImportBasicPass}
-                          onChange={event => setNewImportBasicPass(event.target.value)}
-                          placeholder={rt("Optional")}
-                          autoComplete="new-password"
-                        />
-                      </label>
-                      <label className="pd-field-label pd-field-label-full">
-                        {rt("Cookie header")}
-                        <textarea
-                          className="pd-field-textarea"
-                          rows={2}
-                          value={newImportCookie}
-                          onChange={event => setNewImportCookie(event.target.value)}
-                          placeholder="session=...; csrftoken=..."
-                        />
-                      </label>
-                      <label className="pd-field-label pd-field-label-full">
-                        {rt("Custom headers (one per line)")}
-                        <textarea
-                          className="pd-field-textarea"
-                          rows={3}
-                          value={newImportHeaders}
-                          onChange={event => setNewImportHeaders(event.target.value)}
-                          placeholder={"X-Env: staging\nX-API-Key: ..."}
-                        />
-                      </label>
-                    </div>
-                  ) : null}
-                    </section>
-                    <section className={`pd-import-source-card${newImportSource === "upload" ? " is-active" : ""}`}>
-                      <div className="pd-import-source-head">
-                        <span className="pd-import-source-step">02</span>
-                        <div>
-                          <strong>{rt("Upload files")}</strong>
-                          <span>{rt("Use this for HTML, ZIPs, briefs, screenshots, or whole folders.")}</span>
+                        <div className="pd-import-toolbar">
+                          <div className="pd-import-mode">
+                            {([
+                              ["single", rt("Homepage")],
+                              ["crawl", rt("Crawl links")],
+                              ["sitemap", rt("Sitemap.xml")],
+                            ] as const).map(([value, label]) => (
+                              <button
+                                key={value}
+                                type="button"
+                                className={`pd-segment-btn${newImportMode === value ? " is-active" : ""}`}
+                                onClick={() => {
+                                  setNewImportSource("url")
+                                  setNewImportMode(value)
+                                }}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                          <button className="pd-btn pd-btn-primary" type="button" onClick={() => void importFromUrl()} disabled={newImporting || !newUrl.trim()}>
+                            {newImporting ? rt("Importing...") : rt("Import website")}
+                          </button>
                         </div>
-                      </div>
-                  <div
-                    className={`pd-import-dropzone-wrap${newImporting ? " is-loading" : ""}`}
+                        <span className="pd-field-hint">{rt("Paste a live URL and choose how deep the importer should go. URL import is separate from file upload.")}</span>
+                        <div className="pd-import-auth-toggle">
+                          <button
+                            className="pd-btn"
+                            type="button"
+                            onClick={() => {
+                              setNewImportSource("url")
+                              setNewImportShowAuth((value) => !value)
+                            }}
+                          >
+                            {newImportShowAuth ? rt("Hide auth/headers") : rt("Use auth, cookie, or headers")}
+                          </button>
+                        </div>
+                        {newImportShowAuth ? (
+                          <div className="pd-import-auth-grid">
+                            <label className="pd-field-label">
+                              {rt("Basic auth username")}
+                              <input
+                                className="pd-field-input"
+                                value={newImportBasicUser}
+                                onChange={event => setNewImportBasicUser(event.target.value)}
+                                placeholder={rt("Optional")}
+                                autoComplete="off"
+                              />
+                            </label>
+                            <label className="pd-field-label">
+                              {rt("Basic auth password")}
+                              <input
+                                className="pd-field-input"
+                                type="password"
+                                value={newImportBasicPass}
+                                onChange={event => setNewImportBasicPass(event.target.value)}
+                                placeholder={rt("Optional")}
+                                autoComplete="new-password"
+                              />
+                            </label>
+                            <label className="pd-field-label pd-field-label-full">
+                              {rt("Cookie header")}
+                              <textarea
+                                className="pd-field-textarea"
+                                rows={2}
+                                value={newImportCookie}
+                                onChange={event => setNewImportCookie(event.target.value)}
+                                placeholder="session=...; csrftoken=..."
+                              />
+                            </label>
+                            <label className="pd-field-label pd-field-label-full">
+                              {rt("Custom headers (one per line)")}
+                              <textarea
+                                className="pd-field-textarea"
+                                rows={3}
+                                value={newImportHeaders}
+                                onChange={event => setNewImportHeaders(event.target.value)}
+                                placeholder={"X-Env: staging\nX-API-Key: ..."}
+                              />
+                            </label>
+                          </div>
+                        ) : null}
+                      </section>
                     ) : null}
+
                     {newImportSource === "upload" ? (
-                    <section className="pd-import-source-card is-active">
-                    <SectionLoadingMask active={newImporting} label={rt("Analyzing upload...")} />
-                    <div
-                    className={`pd-import-dropzone${newImportDragActive ? " is-dragging" : ""}`}
-                    onClick={() => {
-                      if (newImporting) return
-                      setNewImportSource("upload")
-                      uploadInputRef.current?.click()
-                    }}
-                    onDragEnter={handleUploadDragEnter}
-                    onDragOver={handleUploadDragOver}
-                    onDragLeave={handleUploadDragLeave}
-                    onDrop={(event) => void handleUploadDrop(event)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault()
-                        if (newImporting) return
-                        setNewImportSource("upload")
-                        uploadInputRef.current?.click()
-                      }
-                    }}
-                  >
-                    <strong>{newImporting ? rt("Analyzing upload...") : rt("Upload files, ZIPs, briefs, screenshots, or drop a folder here")}</strong>
-                    <span>{rt("One upload zone handles pages, briefs, screenshots, ZIPs, folders, and asset packs. The importer classifies the package and builds the right project structure automatically.")}</span>
-                    <div className="pd-import-drop-actions">
-                      <button
-                        className="pd-btn pd-btn-primary"
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          if (newImporting) return
-                          setNewImportSource("upload")
-                          uploadInputRef.current?.click()
-                        }}
-                        disabled={newImporting}
-                      >
-                        {rt("Browse files")}
-                      </button>
-                      <button
-                        className="pd-btn"
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          if (newImporting) return
-                          setNewImportSource("upload")
-                          folderInputRef.current?.click()
-                        }}
-                        disabled={newImporting}
-                      >
-                        {rt("Choose folder")}
-                      </button>
-                    </div>
-                    <div className="pd-import-drop-hints">
-                      <span>{rt("HTML, ZIP, PDF, DOCX, screenshots, logos, and multi-file site folders all work here.")}</span>
-                    </div>
-                    </div>
-                  </div>
-                    </section>
+                      <section className="pd-import-source-card is-active">
+                        <div className="pd-import-source-head">
+                          <span className="pd-import-source-step">02</span>
+                          <div>
+                            <strong>{rt("Upload files")}</strong>
+                            <span>{rt("Use this for HTML, ZIPs, briefs, screenshots, or whole folders.")}</span>
+                          </div>
+                        </div>
+                        <div className={`pd-import-dropzone-wrap${newImporting ? " is-loading" : ""}`}>
+                          <SectionLoadingMask active={newImporting} label={rt("Analyzing upload...")} />
+                          <div
+                            className={`pd-import-dropzone${newImportDragActive ? " is-dragging" : ""}`}
+                            onClick={() => {
+                              if (newImporting) return
+                              setNewImportSource("upload")
+                              uploadInputRef.current?.click()
+                            }}
+                            onDragEnter={handleUploadDragEnter}
+                            onDragOver={handleUploadDragOver}
+                            onDragLeave={handleUploadDragLeave}
+                            onDrop={(event) => void handleUploadDrop(event)}
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault()
+                                if (newImporting) return
+                                setNewImportSource("upload")
+                                uploadInputRef.current?.click()
+                              }
+                            }}
+                          >
+                            <strong>{newImporting ? rt("Analyzing upload...") : rt("Upload files, ZIPs, briefs, screenshots, or drop a folder here")}</strong>
+                            <span>{rt("One upload zone handles pages, briefs, screenshots, ZIPs, folders, and asset packs. The importer classifies the package and builds the right project structure automatically.")}</span>
+                            <div className="pd-import-drop-actions">
+                              <button
+                                className="pd-btn pd-btn-primary"
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  if (newImporting) return
+                                  setNewImportSource("upload")
+                                  uploadInputRef.current?.click()
+                                }}
+                                disabled={newImporting}
+                              >
+                                {rt("Browse files")}
+                              </button>
+                              <button
+                                className="pd-btn"
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  if (newImporting) return
+                                  setNewImportSource("upload")
+                                  folderInputRef.current?.click()
+                                }}
+                                disabled={newImporting}
+                              >
+                                {rt("Choose folder")}
+                              </button>
+                            </div>
+                            <div className="pd-import-drop-hints">
+                              <span>{rt("HTML, ZIP, PDF, DOCX, screenshots, logos, and multi-file site folders all work here.")}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </section>
                     ) : null}
                   </div>
                   {(newUploadName || newImportSummary) ? (
