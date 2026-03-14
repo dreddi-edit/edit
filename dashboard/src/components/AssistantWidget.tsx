@@ -110,7 +110,7 @@ export default function AssistantWidget({
     [contextResetKey],
   )
   const [model, setModel] = useState<AssistantModelId>(getDefaultAssistantModel(plan).id)
-  const [messages, setMessages] = useState<WidgetMessage[]>(() => [buildWelcomeMessage(context)])
+  const [messages, setMessages] = useState<WidgetMessage[]>(() => [buildWelcomeMessage(context, t)])
 
   useEffect(() => {
     setModel((current) => (allowedModels.some((item) => item.id === current) ? current : allowedModels[0].id))
