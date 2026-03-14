@@ -211,33 +211,35 @@ function ROICalc() {
   const [rate, setRate] = useState(95)
   const saved = Math.round(projects * hours * rate * 0.85 * 12)
   const { ref, visible } = useVisible()
+  const { t, lang } = useTranslation()
+  const rt = useRuntimeTranslations(lang, LANDING_RUNTIME_STRINGS, t)
 
   return (
     <div ref={ref} className={`lp-roi ${visible ? "lp-roi--visible" : ""}`}>
       <div className="lp-roi__inputs">
         <label>
-          <span>Migrations / month</span>
+          <span>{rt("Migrations / month")}</span>
           <input type="range" min={1} max={20} value={projects} onChange={(e) => setProjects(Number(e.target.value))} />
           <strong>{projects}</strong>
         </label>
         <label>
-          <span>Manual hours / project</span>
+          <span>{rt("Manual hours / project")}</span>
           <input type="range" min={5} max={80} value={hours} onChange={(e) => setHours(Number(e.target.value))} />
           <strong>{hours}h</strong>
         </label>
         <label>
-          <span>Hourly rate (€)</span>
+          <span>{rt("Hourly rate (€)")}</span>
           <input type="range" min={30} max={250} step={5} value={rate} onChange={(e) => setRate(Number(e.target.value))} />
           <strong>€{rate}</strong>
         </label>
       </div>
       <div className="lp-roi__result">
         <div className="lp-roi__num">€{saved.toLocaleString()}</div>
-        <div className="lp-roi__label">recovered annually</div>
+        <div className="lp-roi__label">{rt("recovered annually")}</div>
         <div className="lp-roi__sub">
-          Reframe Pro costs €360/year.
+          {rt("Reframe Pro costs €360/year.")}
           <br />
-          ROI: <strong>{Math.round(saved / 360)}x</strong>
+          {rt("ROI")} : <strong>{Math.round(saved / 360)}x</strong>
         </div>
       </div>
     </div>
@@ -250,6 +252,8 @@ function InquiryForm() {
   const [msg, setMsg] = useState("")
   const [sent, setSent] = useState(false)
   const [loading, setLoading] = useState(false)
+  const { t, lang } = useTranslation()
+  const rt = useRuntimeTranslations(lang, LANDING_RUNTIME_STRINGS, t)
 
   const submit = async () => {
     if (!email.trim()) return
@@ -273,8 +277,8 @@ function InquiryForm() {
       <div className="lp-inquiry lp-inquiry--sent">
         <div className="lp-inquiry__thanks">
           <span className="lp-inquiry__checkmark">✓</span>
-          <strong>You're on the list.</strong>
-          <p>We'll reach out within 48 hours with early-access details and a live demo offer.</p>
+          <strong>{rt("You're on the list.")}</strong>
+          <p>{rt("We'll reach out within 48 hours with early-access details and a live demo offer.")}</p>
         </div>
       </div>
     )
@@ -283,29 +287,29 @@ function InquiryForm() {
   return (
     <div className="lp-inquiry">
       <select value={type} onChange={(e) => setType(e.target.value)} className="lp-inquiry__select">
-        <option value="agency">Digital agency</option>
-        <option value="freelancer">Freelancer</option>
-        <option value="inhouse">In-house team</option>
-        <option value="investor">Investor</option>
-        <option value="other">Other</option>
+        <option value="agency">{rt("Digital agency")}</option>
+        <option value="freelancer">{rt("Freelancer")}</option>
+        <option value="inhouse">{rt("In-house team")}</option>
+        <option value="investor">{rt("Investor")}</option>
+        <option value="other">{rt("Other")}</option>
       </select>
       <input
         type="email"
-        placeholder="your@email.com"
+        placeholder={rt("your@email.com")}
         value={email}
         onChange={(e) => setEmail(e.target.value)}
         onKeyDown={(e) => e.key === "Enter" && submit()}
         className="lp-inquiry__input"
       />
       <textarea
-        placeholder="Anything specific you want to see? (optional)"
+        placeholder={rt("Anything specific you want to see? (optional)")}
         value={msg}
         onChange={(e) => setMsg(e.target.value)}
         className="lp-inquiry__textarea"
         rows={2}
       />
       <button onClick={submit} disabled={loading || !email.trim()} className="lp-inquiry__btn">
-        {loading ? "Sending..." : "Request early access ->"}
+        {loading ? rt("Sending...") : rt("Request early access ->")}
       </button>
     </div>
   )
@@ -404,9 +408,34 @@ const LANDING_RUNTIME_STRINGS = Array.from(new Set([
   "Get in early.",
   "We're onboarding the first wave of agencies manually, each with a live demo call and a direct line to the team.",
   "Leave your email and we'll reach out within 48 hours.",
+  "We'll reach out within 48 hours with early-access details and a live demo offer.",
+  "You're on the list.",
   "Already have an account?",
   "Contact",
   "Request early access ->",
+  "Sending...",
+  "Digital agency",
+  "Freelancer",
+  "In-house team",
+  "Investor",
+  "Other",
+  "your@email.com",
+  "Anything specific you want to see? (optional)",
+  "Migrations / month",
+  "Manual hours / project",
+  "Hourly rate (€)",
+  "recovered annually",
+  "Reframe Pro costs €360/year.",
+  "ROI",
+  "Comparison",
+  "60s demo",
+  "Guided walkthrough",
+  "Menu",
+  "Light",
+  "Dark",
+  "Get started",
+  "Import. Edit. Export.",
+  "© 2025 Reframe · Early access",
 ]))
 
 export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggleTheme }: LandingPageProps) {
@@ -449,11 +478,11 @@ export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggle
             <button onClick={() => scrollTo("early-access")} className="lp-nav__cta-link">{rt("Early access")}</button>
           </div>
           <div className="lp-nav__actions">
-            <button className="lp-btn lp-btn--ghost" onClick={toggleTheme}>{theme === "dark" ? "Light" : "Dark"}</button>
+            <button className="lp-btn lp-btn--ghost" onClick={toggleTheme}>{theme === "dark" ? rt("Light") : rt("Dark")}</button>
             <button className="lp-btn lp-btn--ghost" onClick={onEnter}>{rt("Sign in")}</button>
             <button className="lp-btn lp-btn--ghost" onClick={() => onLearn?.()}>{rt("Learn")}</button>
             <button className="lp-btn lp-btn--primary" onClick={onEnter}>{rt("Start free")}</button>
-            <button className="lp-nav__burger" onClick={() => setMenuOpen((o) => !o)} aria-label="Menu">
+            <button className="lp-nav__burger" onClick={() => setMenuOpen((o) => !o)} aria-label={rt("Menu")}>
               <span /><span /><span />
             </button>
           </div>
@@ -503,8 +532,8 @@ export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggle
           <div className="lp-hero__demo">
             <div className="lp-video-card">
               <div className="lp-video-card__top">
-                <span className="lp-video-card__badge">60s demo</span>
-                <span className="lp-video-card__meta">Guided walkthrough</span>
+                <span className="lp-video-card__badge">{rt("60s demo")}</span>
+                <span className="lp-video-card__meta">{rt("Guided walkthrough")}</span>
               </div>
 
               <div className="lp-video-embed">
@@ -565,24 +594,24 @@ export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggle
 
       <section id="compare" className="lp-compare">
         <div className="lp-section__inner">
-          <div className="lp-eyebrow">Comparison</div>
-          <h2 className="lp-h2">How Reframe fits in.</h2>
-          <p className="lp-compare__sub">Honest comparison for agencies that start with existing sites, not agencies building from scratch.</p>
+          <div className="lp-eyebrow">{rt("Comparison")}</div>
+          <h2 className="lp-h2">{rt("How Reframe fits in.")}</h2>
+          <p className="lp-compare__sub">{rt("Honest comparison for agencies that start with existing sites, not agencies building from scratch.")}</p>
           <div className="lp-compare__wrap">
             <table className="lp-compare__table">
               <thead>
                 <tr>
-                  <th>Capability</th>
-                  <th className="lp-compare__th--rf">Reframe</th>
-                  <th>Webflow</th>
-                  <th>AI generators</th>
-                  <th>Manual</th>
+                  <th>{rt("Capability")}</th>
+                  <th className="lp-compare__th--rf">{rt("Reframe")}</th>
+                  <th>{rt("Webflow")}</th>
+                  <th>{rt("AI generators")}</th>
+                  <th>{rt("Manual")}</th>
                 </tr>
               </thead>
               <tbody>
                 {COMPARE_ROWS.map((row, i) => (
                   <tr key={i}>
-                    <td>{row.label}</td>
+                    <td>{rt(row.label)}</td>
                     <td className="lp-compare__td--rf"><Cell v={row.rf as CellVal} /></td>
                     <td><Cell v={row.wf as CellVal} /></td>
                     <td><Cell v={row.ai as CellVal} /></td>
@@ -597,37 +626,37 @@ export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggle
 
       <section className="lp-roi-section">
         <div className="lp-section__inner">
-          <div className="lp-eyebrow">ROI Calculator</div>
-          <h2 className="lp-h2">Calculate your margin recovery.</h2>
-          <p className="lp-compare__sub">Drag the sliders to match your workload.</p>
+          <div className="lp-eyebrow">{rt("ROI Calculator")}</div>
+          <h2 className="lp-h2">{rt("Calculate your margin recovery.")}</h2>
+          <p className="lp-compare__sub">{rt("Drag the sliders to match your workload.")}</p>
           <ROICalc />
         </div>
       </section>
 
       <section id="pricing" className="lp-pricing">
         <div className="lp-section__inner">
-          <div className="lp-eyebrow">Pricing</div>
-          <h2 className="lp-h2">Pay for AI. Not for projects.</h2>
-          <p className="lp-compare__sub">Credits deduct only when you run AI, not for editing, exporting, or storing.</p>
+          <div className="lp-eyebrow">{rt("Pricing")}</div>
+          <h2 className="lp-h2">{rt("Pay for AI. Not for projects.")}</h2>
+          <p className="lp-compare__sub">{rt("Credits deduct only when you run AI, not for editing, exporting, or storing.")}</p>
           <div className="lp-pricing__grid">
             {PLANS.map((plan, i) => (
               <div key={i} className={`lp-plan ${plan.featured ? "lp-plan--featured" : ""}`}>
-                {plan.featured && <div className="lp-plan__badge">Most popular</div>}
-                <div className="lp-plan__name">{plan.name}</div>
+                {plan.featured && <div className="lp-plan__badge">{rt("Most popular")}</div>}
+                <div className="lp-plan__name">{rt(plan.name)}</div>
                 <div className="lp-plan__price">
                   {plan.price}
-                  {plan.per && <span>{plan.per}</span>}
+                  {plan.per && <span>{rt(plan.per)}</span>}
                 </div>
-                <div className="lp-plan__sub">{plan.sub}</div>
+                <div className="lp-plan__sub">{rt(plan.sub)}</div>
                 <ul className="lp-plan__items">
-                  {plan.items.map((item, j) => <li key={j}>{item}</li>)}
-                  {plan.missing.map((item, j) => <li key={`m${j}`} className="lp-plan__item--off">{item}</li>)}
+                  {plan.items.map((item, j) => <li key={j}>{rt(item)}</li>)}
+                  {plan.missing.map((item, j) => <li key={`m${j}`} className="lp-plan__item--off">{rt(item)}</li>)}
                 </ul>
                 <button
                   className={`lp-btn ${plan.featured ? "lp-btn--primary" : "lp-btn--ghost"} lp-btn--full`}
                   onClick={onEnter}
                 >
-                  {plan.price === "Free" ? "Start free" : "Get started"}
+                  {plan.price === "Free" ? rt("Start free") : rt("Get started")}
                 </button>
               </div>
             ))}
@@ -637,21 +666,22 @@ export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggle
 
       <section id="faq" className="lp-faq">
         <div className="lp-section__inner lp-section__inner--narrow">
-          <div className="lp-eyebrow">FAQ</div>
-          <h2 className="lp-h2">Common questions.</h2>
+          <div className="lp-eyebrow">{rt("FAQ")}</div>
+          <h2 className="lp-h2">{rt("Common questions.")}</h2>
           <div className="lp-faq__list">
-            {FAQS.map((faq, i) => <FAQItem key={i} q={faq.q} a={faq.a} />)}
+            {FAQS.map((faq, i) => <FAQItem key={i} q={rt(faq.q)} a={rt(faq.a)} />)}
           </div>
         </div>
       </section>
 
       <section id="early-access" className="lp-early">
         <div className="lp-section__inner lp-section__inner--narrow">
-          <div className="lp-eyebrow">Early access</div>
-          <h2 className="lp-h2">Get in early.</h2>
+          <div className="lp-eyebrow">{rt("Early access")}</div>
+          <h2 className="lp-h2">{rt("Get in early.")}</h2>
           <p className="lp-early__sub">
-            We're onboarding the first wave of agencies manually, each with a live demo call and a direct line to the team.
-            Leave your email and we'll reach out within 48 hours.
+            {rt("We're onboarding the first wave of agencies manually, each with a live demo call and a direct line to the team.")}
+            {" "}
+            {rt("Leave your email and we'll reach out within 48 hours.")}
           </p>
           <InquiryForm />
           <div className="lp-early__or">
@@ -667,14 +697,14 @@ export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggle
             <div className="lp-nav__mark" />
             <span>Reframe</span>
           </div>
-          <div className="lp-footer__tagline">"Import. Edit. Export."</div>
+          <div className="lp-footer__tagline">"{rt("Import. Edit. Export.")}"</div>
           <div className="lp-footer__links">
             <button onClick={onEnter}>{rt("Sign in")}</button>
             <button onClick={() => scrollTo("pricing")}>{rt("Pricing")}</button>
             <button onClick={() => scrollTo("faq")}>{rt("FAQ")}</button>
             <button onClick={() => scrollTo("early-access")}>{rt("Contact")}</button>
           </div>
-          <div className="lp-footer__copy">© 2025 Reframe · Early access</div>
+          <div className="lp-footer__copy">{rt("© 2025 Reframe · Early access")}</div>
         </div>
       </footer>
     </div>
