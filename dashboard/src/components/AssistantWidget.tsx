@@ -28,34 +28,34 @@ function readTheme() {
   return document.body.getAttribute("data-theme") === "light" ? "light" : "dark"
 }
 
-function buildWelcomeMessage(context: AssistantContext): WidgetMessage {
+function buildWelcomeMessage(context: AssistantContext, translate: (key: string) => string): WidgetMessage {
   const focus =
     context.surface === "editor"
-      ? context.projectName || "the current page"
-      : context.workspace || "the dashboard"
+      ? context.projectName || translate("this page")
+      : context.workspace || translate("this workspace")
 
   return {
     id: `welcome_${Date.now()}`,
     role: "assistant",
-    content: `I’m your AI assistant for ${focus}. Ask me about imports, exports, AI Studio, edits, translations, or the next best move.`,
+    content: `${translate("I’m your AI assistant for")} ${focus}. ${translate("Ask me about imports, exports, AI Studio, edits, translations, or the next best move.")}`,
   }
 }
 
-function getQuickPrompts(context: AssistantContext) {
+function getQuickPrompts(context: AssistantContext, translate: (key: string) => string) {
   if (context.surface === "editor") {
     return [
-      "Explain my current export warnings.",
-      "What should I improve on this page before export?",
-      "Give me three edits for higher conversions.",
-      "How should I localize this page next?",
+      translate("Explain my current export warnings."),
+      translate("What should I improve on this page before export?"),
+      translate("Give me three edits for higher conversions."),
+      translate("How should I localize this page next?"),
     ]
   }
 
   return [
-    "Which AI Studio workflow should I use next?",
-    "How does my current plan compare to the next one?",
-    "What should I improve first across my projects?",
-    "Summarize the current workspace for me.",
+    translate("Which AI Studio workflow should I use next?"),
+    translate("How does my current plan compare to the next one?"),
+    translate("What should I improve first across my projects?"),
+    translate("Summarize the current workspace for me."),
   ]
 }
 
@@ -104,7 +104,7 @@ export default function AssistantWidget({
       }),
     [context.projectId, context.projectName, context.projectUrl, context.surface, context.workspace],
   )
-  const welcomeMessage = useMemo(() => buildWelcomeMessage(context), [context])
+  const welcomeMessage = useMemo(() => buildWelcomeMessage(context, t), [context, t])
   const messageStorageKey = useMemo(
     () => `${ASSISTANT_MESSAGE_STORAGE_PREFIX}:${contextResetKey}`,
     [contextResetKey],
@@ -164,7 +164,7 @@ export default function AssistantWidget({
     return () => window.clearTimeout(timer)
   }, [open])
 
-  const quickPrompts = getQuickPrompts(context)
+  const quickPrompts = useMemo(() => getQuickPrompts(context, t), [context, t])
   const currentModelMeta = allowedModels.find((item) => item.id === model) || allowedModels[0]
   const currentSurfaceLabel =
     context.surface === "editor"

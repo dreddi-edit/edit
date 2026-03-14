@@ -34,7 +34,7 @@ const PROGRESS_STORAGE_KEY = "learn-progress-v2"
 const FEATURE_BOOKMARKS_STORAGE_KEY = "learn-feature-bookmarks-v1"
 const FEATURE_VIEWED_STORAGE_KEY = "learn-feature-viewed-v1"
 
-const DEFAULT_FEATURES_PER_AREA = 8
+const DEFAULT_FEATURES_PER_AREA = 6
 
 const FEATURE_JOURNEYS: Array<{ id: string; label: string; areas: LearnFeatureArea[]; description: string }> = [
   {
@@ -85,7 +85,7 @@ function buildInitialAreaVisibility(): LearnAreaVisibilityState {
 
 function buildInitialAreaExpanded(): LearnAreaExpandedState {
   return LEARN_FEATURE_AREAS.reduce((acc, area, index) => {
-    acc[area.id] = index < 3
+    acc[area.id] = index < 2
     return acc
   }, {} as LearnAreaExpandedState)
 }
@@ -201,12 +201,14 @@ export default function LearnPage({ onBack }: LearnPageProps) {
   )
 
   const featuredVideo = LEARN_VIDEOS.find((video) => video.featured) || LEARN_VIDEOS[0]
-  const [contentMode, setContentMode] = useState<LearnContentMode>("reference")
+  const [contentMode, setContentMode] = useState<LearnContentMode>("tutorials")
   const [activeCategory, setActiveCategory] = useState<LearnVideoCategory>(featuredVideo?.category || "getting-started")
   const [activeSubcategory, setActiveSubcategory] = useState<LearnVideoSubcategory>(featuredVideo?.subcategory || "first-steps")
   const [selectedVideoId, setSelectedVideoId] = useState<string>(featuredVideo?.id || "")
-  const [featureArea, setFeatureArea] = useState<LearnFeatureArea | "all">("all")
-  const [selectedFeatureId, setSelectedFeatureId] = useState<string>(LEARN_FEATURE_REFERENCES[0]?.id || "")
+  const [featureArea, setFeatureArea] = useState<LearnFeatureArea | "all">("core")
+  const [selectedFeatureId, setSelectedFeatureId] = useState<string>(
+    LEARN_FEATURE_REFERENCES.find((item) => item.area === "core")?.id || LEARN_FEATURE_REFERENCES[0]?.id || "",
+  )
   const [query, setQuery] = useState("")
   const [progress, setProgress] = useState<LearnProgressState>(loadProgress)
   const [bookmarkedFeatures, setBookmarkedFeatures] = useState<LearnListState>(() => loadStringList(FEATURE_BOOKMARKS_STORAGE_KEY))

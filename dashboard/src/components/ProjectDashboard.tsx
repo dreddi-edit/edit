@@ -5189,8 +5189,25 @@ export default function ProjectDashboard({
                     <strong>{rt("Choose one source path")}</strong>
                     <span>{rt("You only need one: either import from a live URL or upload files. You do not need to do both.")}</span>
                   </div>
+                  <div className="pd-import-source-switch" role="tablist" aria-label={rt("Import source")}> 
+                    <button
+                      type="button"
+                      className={`pd-segment-btn${newImportSource === "url" ? " is-active" : ""}`}
+                      onClick={() => setNewImportSource("url")}
+                    >
+                      {rt("URL import")}
+                    </button>
+                    <button
+                      type="button"
+                      className={`pd-segment-btn${newImportSource === "upload" ? " is-active" : ""}`}
+                      onClick={() => setNewImportSource("upload")}
+                    >
+                      {rt("File upload")}
+                    </button>
+                  </div>
                   <div className="pd-import-source-grid">
-                    <section className={`pd-import-source-card${newImportSource === "url" ? " is-active" : ""}`}>
+                    {newImportSource === "url" ? (
+                    <section className="pd-import-source-card is-active">
                       <div className="pd-import-source-head">
                         <span className="pd-import-source-step">01</span>
                         <div>
@@ -5291,7 +5308,9 @@ export default function ProjectDashboard({
                       </div>
                   <div
                     className={`pd-import-dropzone-wrap${newImporting ? " is-loading" : ""}`}
-                  >
+                    ) : null}
+                    {newImportSource === "upload" ? (
+                    <section className="pd-import-source-card is-active">
                     <SectionLoadingMask active={newImporting} label={rt("Analyzing upload...")} />
                     <div
                     className={`pd-import-dropzone${newImportDragActive ? " is-dragging" : ""}`}
@@ -5351,6 +5370,7 @@ export default function ProjectDashboard({
                     </div>
                   </div>
                     </section>
+                    ) : null}
                   </div>
                   {(newUploadName || newImportSummary) ? (
                     <div className="pd-import-summary">
