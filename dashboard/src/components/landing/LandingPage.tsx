@@ -1,7 +1,7 @@
 import React from 'react';
 
 import { useState, useEffect, useRef, useMemo } from "react"
-import { AVAILABLE_UI_LANGUAGES, useRuntimeTranslations, useTranslation } from "../../i18n/useTranslation"
+import { useRuntimeTranslations, useTranslation } from "../../i18n/useTranslation"
 import { applyThemeToDocument, persistThemeChoice } from "../../utils/theme"
 import "./landing.css"
 
@@ -635,13 +635,26 @@ const LANDING_RUNTIME_STRINGS = Array.from(new Set([
   "© 2025 Reframe · Early access",
 ]))
 
+const LANDING_TOP_10_LANGUAGES = [
+  { code: "en", label: "English" },
+  { code: "de", label: "German" },
+  { code: "es", label: "Spanish" },
+  { code: "fr", label: "French" },
+  { code: "it", label: "Italian" },
+  { code: "pt", label: "Portuguese" },
+  { code: "nl", label: "Dutch" },
+  { code: "pl", label: "Polish" },
+  { code: "ru", label: "Russian" },
+  { code: "tr", label: "Turkish" },
+]
+
 export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggleTheme }: LandingPageProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const { t, lang, setLang } = useTranslation()
   const rt = useRuntimeTranslations(lang, LANDING_RUNTIME_STRINGS, t)
 
   const currencyData = useMemo(() => getCurrencyData(lang), [lang])
-  const languageOptions = useMemo(() => AVAILABLE_UI_LANGUAGES, [])
+  const languageOptions = useMemo(() => LANDING_TOP_10_LANGUAGES, [])
 
   const handleLanguageChange = (nextLang: string) => {
     if (!nextLang || nextLang === lang) return
