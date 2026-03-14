@@ -239,10 +239,25 @@ const COMPARE_COMPETITOR_COLUMNS = [
   { key: "ai", label: "ChatGPT" },
 ] as const
 
+const COMPARE_MATRIX_COLUMNS = [
+  { key: "rf", label: "Reframe" },
+  ...COMPARE_COMPETITOR_COLUMNS,
+] as const
+
+type CompareMatrixKey = (typeof COMPARE_MATRIX_COLUMNS)[number]["key"]
+
 function scoreCell(value: CellVal) {
   if (value === true) return 1
   if (value === "±") return 0.5
   return 0
+}
+
+function coverageTier(pct: number) {
+  if (pct >= 90) return "tier-5"
+  if (pct >= 70) return "tier-4"
+  if (pct >= 45) return "tier-3"
+  if (pct >= 20) return "tier-2"
+  return "tier-1"
 }
 
 function ComparisonScoreCard({
@@ -555,6 +570,12 @@ const LANDING_RUNTIME_STRINGS = Array.from(new Set([
   "Everything agencies need.",
   "Nothing they don't.",
   "How Reframe fits in.",
+  "Coverage matrix",
+  "Capability category",
+  "Coverage intensity",
+  "High",
+  "Medium",
+  "Low",
   "Honest comparison for agencies that start with existing sites, not agencies building from scratch.",
   "site operations capabilities",
   "No other tool covers the full stack.",
@@ -678,6 +699,23 @@ export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggle
     ],
     [rt],
   )
+  const categoryCoverage = useMemo(() => {
+    const categories = Array.from(new Set(COMPARE_ROWS_EXT.map((row) => row.cat)))
+    return categories.map((category) => {
+      const rows = COMPARE_ROWS_EXT.filter((row) => row.cat === category)
+      const totals = rows.length || 1
+      const coverage = COMPARE_MATRIX_COLUMNS.reduce((acc, column) => {
+        const sum = rows.reduce(
+          (value, row) => value + scoreCell(row[column.key as keyof typeof row] as CellVal),
+          0,
+        )
+        acc[column.key as CompareMatrixKey] = Math.round((sum / totals) * 100)
+        return acc
+      }, {} as Record<CompareMatrixKey, number>)
+
+      return { category, coverage }
+    })
+  }, [])
 
   return (
     <div className={`lp lp--${theme}`}>
@@ -856,6 +894,49 @@ export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggle
               </article>
             ))}
           </div>
+
+          <section className="lp-compare__heatmap" aria-label={rt("Coverage matrix")}>
+            <div className="lp-compare__heatmap-head">
+              <h3>{rt("Coverage matrix")}</h3>
+              <div className="lp-compare__heatmap-legend" aria-hidden="true">
+                <span>{rt("Coverage intensity")}</span>
+                <i className="lp-compare__legend-dot lp-compare__legend-dot--high" />
+                <small>{rt("High")}</small>
+                <i className="lp-compare__legend-dot lp-compare__legend-dot--medium" />
+                <small>{rt("Medium")}</small>
+                <i className="lp-compare__legend-dot lp-compare__legend-dot--low" />
+                <small>{rt("Low")}</small>
+              </div>
+            </div>
+            <div className="lp-compare__heatmap-grid" role="table" aria-label={rt("Coverage matrix")}>
+              <div className="lp-compare__heatmap-label lp-compare__heatmap-label--head" role="columnheader">{rt("Capability category")}</div>
+              {COMPARE_MATRIX_COLUMNS.map((column) => (
+                <div key={column.key} className="lp-compare__heatmap-colhead" role="columnheader">
+                  {rt(column.label)}
+                </div>
+              ))}
+
+              {categoryCoverage.map((row) => (
+                <React.Fragment key={row.category}>
+                  <div className="lp-compare__heatmap-label" role="rowheader">{rt(row.category)}</div>
+                  {COMPARE_MATRIX_COLUMNS.map((column) => {
+                    const pct = row.coverage[column.key]
+                    return (
+                      <div
+                        key={`${row.category}:${column.key}`}
+                        className={`lp-compare__heat ${column.key === "rf" ? "is-reframe" : ""} ${coverageTier(pct)}`}
+                        role="cell"
+                        aria-label={`${rt(row.category)} ${rt(column.label)} ${pct}%`}
+                        title={`${rt(column.label)} · ${pct}%`}
+                      >
+                        {pct}%
+                      </div>
+                    )
+                  })}
+                </React.Fragment>
+              ))}
+            </div>
+          </section>
 
           <div className="lp-compare__vs-grid">
             {COMPETITOR_PROFILES.map((profile, i) => (
