@@ -9,7 +9,7 @@ import {
   apiGetStripePackages,
   apiStripeSubscriptionCheckout,
 } from "../api/credits"
-import { fetchWithAuth } from "../api/client"
+import { apiFetch, fetchWithAuth } from "../api/client"
 import type { CreditTransaction, StripeSubscriptionPlan, UserInvoice } from "../api/types"
 import { getRequireApproval, getApprovalThreshold, setRequireApproval, setApprovalThreshold } from "../approval-settings"
 import { AVAILABLE_UI_LANGUAGES, useTranslation, type Language } from "../i18n/useTranslation"
@@ -51,6 +51,15 @@ type ApiKey = {
 }
 type CreditViewMode = "detailed" | "model" | "application"
 type Org = { id: number; name: string; owner_id: number }
+type OrgInvitation = {
+  id: number
+  org_id: number
+  org_name: string
+  invite_email: string
+  role: string
+  status: string
+  invited_at?: string
+}
 type OrgMember = {
   id: number
   invite_email: string
@@ -58,6 +67,28 @@ type OrgMember = {
   status: string
   name?: string
   email?: string
+  project_count?: number
+  project_names?: string[]
+}
+type OrgDashboard = {
+  org: { id: number; name: string; created_at?: string }
+  viewer: { is_owner: boolean; role: string }
+  owner: {
+    id: number
+    name?: string
+    email: string
+    plan_id: string
+    plan_status: string
+    credits_eur: number
+    project_count: number
+    project_names: string[]
+  } | null
+  members: OrgMember[]
+  stats: {
+    accepted_members: number
+    pending_invites: number
+    assigned_projects: number
+  }
 }
 type DetectedKey = {
   provider: string
@@ -144,29 +175,8 @@ function parseCreditTransactionApplication(description: string) {
   return "Other"
 }
 
-async function parseJson(response: Response) {
-  let payload: unknown
-  try {
-    payload = await response.json()
-  } catch {
-    throw new Error(
-      response.status === 502 || response.status === 503
-        ? "Server nicht erreichbar. Bitte kurz warten und neu laden."
-        : `Server-Fehler ${response.status}`
-    )
-  }
-  if (!response.ok || (payload as Record<string, unknown>)?.ok === false) {
-    throw new Error(
-      (payload as Record<string, unknown>)?.error as string ||
-        `${response.status} ${response.statusText}`
-    )
-  }
-  return payload
-}
-
 async function request(path: string, init?: RequestInit) {
-  const response = await fetchWithAuth(`${BASE}${path}`, init)
-  return parseJson(response)
+  return apiFetch(`${BASE}${path}`, init)
 }
 
 async function requestJson(path: string, method: string, body: unknown) {
@@ -241,7 +251,9 @@ export default function SettingsPanel({
 
   const [ownedOrg, setOwnedOrg] = useState<Org | null>(null)
   const [memberOrgs, setMemberOrgs] = useState<Org[]>([])
+  const [pendingInvites, setPendingInvites] = useState<OrgInvitation[]>([])
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([])
+  const [orgDashboard, setOrgDashboard] = useState<OrgDashboard | null>(null)
   const [newOrgName, setNewOrgName] = useState("")
   const [inviteEmail, setInviteEmail] = useState("")
   const [inviteRole, setInviteRole] = useState("editor")
@@ -400,8 +412,12 @@ export default function SettingsPanel({
           ? ((vertexModelsResult.value.models || []) as VertexModel[])
           : []
       )
-      setOwnedOrg((orgsData.owned?.[0] || null) as Org | null)
-      setMemberOrgs((orgsData.member || []) as Org[])
+      const nextOwned = (orgsData.owned?.[0] || null) as Org | null
+      const nextMemberOrgs = (orgsData.member || []) as Org[]
+      const nextPendingInvites = (orgsData.pending || []) as OrgInvitation[]
+      setOwnedOrg(nextOwned)
+      setMemberOrgs(nextMemberOrgs)
+      setPendingInvites(nextPendingInvites)
       const me = (meData.user || null) as CurrentUser | null
       applyCurrentUser(me)
 
@@ -428,11 +444,13 @@ export default function SettingsPanel({
         setCreditTransactions([])
       }
 
-      const nextOwned = (orgsData.owned?.[0] || null) as Org | null
       if (nextOwned) {
-        await loadOrgMembers(nextOwned.id)
+        await loadOrgDashboard(nextOwned.id)
+      } else if (nextMemberOrgs[0]) {
+        await loadOrgDashboard(nextMemberOrgs[0].id)
       } else {
         setOrgMembers([])
+        setOrgDashboard(null)
       }
     } catch (error) {
       toast.error(errMsg(error))
@@ -678,10 +696,11 @@ export default function SettingsPanel({
     }
   }
 
-  const loadOrgMembers = async (orgId: number) => {
+  const loadOrgDashboard = async (orgId: number) => {
     try {
-      const membersData = await request(`/api/orgs/${orgId}/members`)
-      setOrgMembers((membersData.members || []) as OrgMember[])
+      const dashboardData = await request(`/api/orgs/${orgId}/dashboard`) as { dashboard: OrgDashboard }
+      setOrgDashboard(dashboardData.dashboard)
+      setOrgMembers((dashboardData.dashboard?.members || []) as OrgMember[])
     } catch (error) {
       toast.error(errMsg(error))
     }
@@ -824,7 +843,10 @@ export default function SettingsPanel({
       const data = await requestJson("/api/orgs", "POST", { name: newOrgName.trim() }) as { id: number }
       const created: Org = { id: data.id, name: newOrgName.trim(), owner_id: currentUser?.id ?? 0 }
       setOwnedOrg(created)
+      setMemberOrgs([])
+      setPendingInvites([])
       setOrgMembers([])
+      await loadOrgDashboard(created.id)
       toast.success("Organisation erstellt!")
       setNewOrgName("")
     } catch (error) {
@@ -846,7 +868,7 @@ export default function SettingsPanel({
       })
       toast.success("Einladung gesendet!")
       setInviteEmail("")
-      await loadOrgMembers(ownedOrg.id)
+      await loadOrgDashboard(ownedOrg.id)
     } catch (error) {
       toast.error(errMsg(error))
     }
@@ -857,11 +879,28 @@ export default function SettingsPanel({
     try {
       await request(`/api/orgs/${ownedOrg.id}/members/${memberId}`, { method: "DELETE" })
       setOrgMembers(previous => previous.filter(member => member.id !== memberId))
+      await loadOrgDashboard(ownedOrg.id)
       toast.success("Mitglied entfernt")
     } catch (error) {
       toast.error(errMsg(error))
     }
   }
+
+  const acceptPendingInvites = async () => {
+    try {
+      const data = await request("/api/orgs/accept-invite", { method: "POST" }) as { accepted?: number }
+      if (data.accepted) toast.success(`Organisation invites accepted: ${data.accepted}`)
+      await load()
+    } catch (error) {
+      toast.error(errMsg(error))
+    }
+  }
+
+  const activeOrg = ownedOrg || memberOrgs[0] || null
+  const orgViewerIsOwner = Boolean(orgDashboard?.viewer?.is_owner || ownedOrg)
+  const hasAnyOrganisation = Boolean(ownedOrg || memberOrgs.length)
+  const teamPlanLabel = String(orgDashboard?.owner?.plan_id || currentUser?.plan_id || "basis").toUpperCase()
+  const teamCredits = Number(orgDashboard?.owner?.credits_eur || 0)
 
   return (
     <div className="draft-settings-backdrop" onClick={onClose}>
@@ -1636,7 +1675,7 @@ export default function SettingsPanel({
                   Katalog-, Status- und Auth-Schicht eingebaut; konkrete Workflows koennen spaeter darauf aufsetzen.
                 </p>
 
-                <div className="draft-settings-input-row">
+                <div className="draft-settings-input-row draft-settings-input-row--vertex">
                   <input
                     className="draft-settings-text-input draft-settings-text-input--mono"
                     value={vertexProjectIdInput}
@@ -1651,7 +1690,7 @@ export default function SettingsPanel({
                   />
                 </div>
 
-                <div className="draft-settings-input-row">
+                <div className="draft-settings-input-row draft-settings-input-row--vertex-actions">
                   <button
                     type="button"
                     className="draft-settings-action-button"
@@ -1670,7 +1709,7 @@ export default function SettingsPanel({
                   </button>
                 </div>
 
-                <div className="draft-settings-list">
+                <div className="draft-settings-list draft-settings-api-grid-cards">
                   <div className="draft-settings-list-card">
                     <div className="draft-settings-list-main">
                       <div className="draft-settings-inline">
@@ -1781,69 +1820,145 @@ export default function SettingsPanel({
                 </Section>
               ) : null}
 
-              {!ownedOrg ? (
-                <Section label="Organisation erstellen">
-                  <p className="draft-settings-description">
-                    Erstelle eine Organisation und lade Teammitglieder ein. Alle Mitglieder teilen dein Guthaben und deine
-                    Projekte.
-                  </p>
-                  <div className="draft-settings-input-row">
-                    <input
-                      className="draft-settings-text-input"
-                      value={newOrgName}
-                      onChange={event => setNewOrgName(event.target.value)}
-                      placeholder="z.B. Edgar GmbH"
-                    />
-                    <button
-                      type="button"
-                      className="draft-settings-action-button"
-                      onClick={() => void createOrg()}
-                      disabled={saving}
-                    >
-                      Erstellen
-                    </button>
-                  </div>
-                </Section>
+              {!hasAnyOrganisation ? (
+                <div className="draft-settings-org-onboarding-grid">
+                  <Section label="Team erstellen">
+                    <p className="draft-settings-description">
+                      Erstelle einen gemeinsamen Workspace fuer Plan, Credits, Projekte und Rollenverwaltung.
+                    </p>
+                    <div className="draft-settings-input-row draft-settings-input-row--stack-mobile">
+                      <input
+                        className="draft-settings-text-input"
+                        value={newOrgName}
+                        onChange={event => setNewOrgName(event.target.value)}
+                        placeholder="z.B. Edgar GmbH"
+                      />
+                      <button
+                        type="button"
+                        className="draft-settings-action-button"
+                        onClick={() => void createOrg()}
+                        disabled={saving}
+                      >
+                        Team erstellen
+                      </button>
+                    </div>
+                  </Section>
+
+                  <Section label="Team beitreten">
+                    <p className="draft-settings-description">
+                      Ein Owner muss dich zuerst einladen. Sobald eine Einladung fuer deine E-Mail vorliegt, kannst du sie hier annehmen.
+                    </p>
+                    {pendingInvites.length ? (
+                      <div className="draft-settings-list" style={{ marginBottom: 10 }}>
+                        {pendingInvites.map((invite) => (
+                          <div key={invite.id} className="draft-settings-list-card">
+                            <div className="draft-settings-list-main">
+                              <strong>{invite.org_name}</strong>
+                              <div className="draft-settings-list-meta">Rolle: {invite.role} · Einladung offen</div>
+                            </div>
+                            <span className="draft-settings-pill draft-settings-pill--pending">Pending</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <EmptyState message="Noch keine offenen Team-Einladungen fuer diese E-Mail." />
+                    )}
+                    <div className="draft-settings-input-row">
+                      <button type="button" className="draft-settings-action-button" onClick={() => void acceptPendingInvites()}>
+                        Einladungen annehmen
+                      </button>
+                      <button type="button" className="draft-settings-action-button" onClick={() => void load()}>
+                        Aktualisieren
+                      </button>
+                    </div>
+                  </Section>
+                </div>
               ) : (
                 <>
-                  <Section label="Deine Organisation">
-                    <div className="draft-settings-list-card draft-settings-list-card--highlight">
+                  <Section label={orgViewerIsOwner ? "Team Dashboard" : "Team Übersicht"}>
+                    <div className="draft-settings-list-card draft-settings-list-card--highlight draft-settings-org-hero-card">
                       <div className="draft-settings-list-main">
-                        <strong>{ownedOrg.name}</strong>
-                        <div className="draft-settings-list-meta">Du bist Owner</div>
+                        <div className="draft-settings-inline" style={{ marginBottom: 6 }}>
+                          <strong>{activeOrg?.name || orgDashboard?.org.name}</strong>
+                          <span className={`draft-settings-pill ${orgViewerIsOwner ? "draft-settings-pill--success" : ""}`}>
+                            {orgViewerIsOwner ? "Owner" : String(orgDashboard?.viewer.role || "member")}
+                          </span>
+                        </div>
+                        <div className="draft-settings-list-meta">
+                          Team Plan: {teamPlanLabel} · Credits: €{teamCredits.toFixed(2)} · Members: {orgDashboard?.stats.accepted_members || 1}
+                        </div>
+                        <div className="draft-settings-list-meta">
+                          Zugewiesene Projekte: {orgDashboard?.stats.assigned_projects || 0} · Offene Einladungen: {orgDashboard?.stats.pending_invites || 0}
+                        </div>
+                        {orgDashboard?.owner?.email ? (
+                          <div className="draft-settings-list-meta">
+                            Workspace-Owner: {orgDashboard.owner.name || orgDashboard.owner.email} · {orgDashboard.owner.email}
+                          </div>
+                        ) : null}
                       </div>
                       <span className="draft-settings-pill draft-settings-pill--success">Aktiv</span>
                     </div>
                   </Section>
 
-                  <Section label="Mitglied einladen">
-                    <div className="draft-settings-input-row draft-settings-input-row--stack-mobile">
-                      <input
-                        className="draft-settings-text-input"
-                        value={inviteEmail}
-                        onChange={event => setInviteEmail(event.target.value)}
-                        placeholder="email@beispiel.de"
-                      />
-                      <select
-                        className="draft-settings-select"
-                        value={inviteRole}
-                        onChange={event => setInviteRole(event.target.value)}
-                        aria-label="Invite role"
-                      >
-                        <option value="strategist">Strategist</option>
-                        <option value="designer">Designer</option>
-                        <option value="admin">Admin</option>
-                        <option value="editor">Editor</option>
-                        <option value="client_reviewer">Client Reviewer</option>
-                      </select>
-                      <button type="button" className="draft-settings-action-button" onClick={() => void invite()}>
-                        Einladen
-                      </button>
-                    </div>
-                  </Section>
+                  {orgViewerIsOwner ? (
+                    <Section label="Owner Verwaltung">
+                      <div className="draft-settings-org-stats-grid">
+                        <div className="draft-settings-list-card">
+                          <div className="draft-settings-list-main">
+                            <strong>Abonnement</strong>
+                            <div className="draft-settings-list-meta">
+                              Owner-Plan {teamPlanLabel} · Status {String(orgDashboard?.owner?.plan_status || currentUser?.plan_status || "active")}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="draft-settings-list-card">
+                          <div className="draft-settings-list-main">
+                            <strong>Credits</strong>
+                            <div className="draft-settings-list-meta">Gemeinsames Guthaben: €{teamCredits.toFixed(2)}</div>
+                          </div>
+                        </div>
+                        <div className="draft-settings-list-card">
+                          <div className="draft-settings-list-main">
+                            <strong>Mitglieder</strong>
+                            <div className="draft-settings-list-meta">{orgDashboard?.stats.accepted_members || 1} aktiv · {orgDashboard?.stats.pending_invites || 0} ausstehend</div>
+                          </div>
+                        </div>
+                        <div className="draft-settings-list-card">
+                          <div className="draft-settings-list-main">
+                            <strong>Projektverteilung</strong>
+                            <div className="draft-settings-list-meta">{orgDashboard?.stats.assigned_projects || 0} Zuweisungen im Team</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="draft-settings-input-row draft-settings-input-row--stack-mobile" style={{ marginTop: 12 }}>
+                        <input
+                          className="draft-settings-text-input"
+                          value={inviteEmail}
+                          onChange={event => setInviteEmail(event.target.value)}
+                          placeholder="email@beispiel.de"
+                        />
+                        <select
+                          className="draft-settings-select"
+                          value={inviteRole}
+                          onChange={event => setInviteRole(event.target.value)}
+                          aria-label="Invite role"
+                        >
+                          <option value="strategist">Strategist</option>
+                          <option value="designer">Designer</option>
+                          <option value="admin">Admin</option>
+                          <option value="editor">Editor</option>
+                          <option value="client_reviewer">Client Reviewer</option>
+                        </select>
+                        <button type="button" className="draft-settings-action-button" onClick={() => void invite()}>
+                          Einladen
+                        </button>
+                      </div>
+                    </Section>
+                  ) : null}
 
                   {orgMembers.length ? (
-                    <Section label={`Mitglieder (${orgMembers.length})`}>
+                    <Section label={orgViewerIsOwner ? `Mitglieder (${orgMembers.length})` : `Teammitglieder (${orgMembers.length})`}>
                       <div className="draft-settings-list">
                         {orgMembers.map(member => (
                           <div key={member.id} className="draft-settings-list-card">
@@ -1852,6 +1967,10 @@ export default function SettingsPanel({
                               <div className="draft-settings-list-meta">
                                 {member.invite_email} · {member.role} ·{" "}
                                 {member.status === "accepted" ? "Aktiv" : "Einladung ausstehend"}
+                              </div>
+                              <div className="draft-settings-list-meta">
+                                Zugewiesene Projekte: {Number(member.project_count || 0)}
+                                {member.project_names?.length ? ` · ${member.project_names.slice(0, 3).join(", ")}` : ""}
                               </div>
                             </div>
                             <div className="draft-settings-inline">
@@ -1862,15 +1981,27 @@ export default function SettingsPanel({
                               >
                                 {member.status === "accepted" ? "Aktiv" : "Pending"}
                               </span>
-                              <button
-                                type="button"
-                                className="draft-settings-delete-button"
-                                onClick={() => void removeMember(member.id)}
-                              >
-                                X
-                              </button>
+                              {orgViewerIsOwner ? (
+                                <button
+                                  type="button"
+                                  className="draft-settings-delete-button"
+                                  onClick={() => void removeMember(member.id)}
+                                >
+                                  X
+                                </button>
+                              ) : null}
                             </div>
                           </div>
+                        ))}
+                      </div>
+                    </Section>
+                  ) : null}
+
+                  {!orgViewerIsOwner && orgDashboard?.owner?.project_names?.length ? (
+                    <Section label="Owner Projekte">
+                      <div className="draft-settings-model-list">
+                        {orgDashboard.owner.project_names.map((projectName) => (
+                          <span key={projectName} className="draft-settings-model-chip active">{projectName}</span>
                         ))}
                       </div>
                     </Section>

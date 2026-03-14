@@ -1031,6 +1031,14 @@ body[data-theme="light"] {
   align-items: stretch;
 }
 
+.draft-settings-input-row--vertex > .draft-settings-text-input {
+  min-width: 220px;
+}
+
+.draft-settings-input-row--vertex-actions {
+  justify-content: flex-start;
+}
+
 .draft-settings-action-button,
 .draft-settings-seo-button {
   height: 36px;
@@ -1254,6 +1262,10 @@ body[data-theme="light"] {
   gap: 8px;
 }
 
+.draft-settings-api-grid-cards {
+  gap: 12px;
+}
+
 .draft-settings-list-card {
   display: flex;
   align-items: flex-start;
@@ -1346,6 +1358,22 @@ body[data-theme="light"] {
   color: #a2b1c2;
   font-size: 12px;
   text-align: center;
+}
+
+.draft-settings-org-onboarding-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.draft-settings-org-hero-card {
+  gap: 16px;
+}
+
+.draft-settings-org-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .draft-settings-api-section {
@@ -1619,6 +1647,11 @@ body[data-theme="light"] .draft-settings-api-button:hover {
 }
 
 @media (max-width: 720px) {
+  .draft-settings-org-onboarding-grid,
+  .draft-settings-org-stats-grid {
+    grid-template-columns: 1fr;
+  }
+
   .draft-dashboard-header {
     height: auto;
     align-items: flex-start;

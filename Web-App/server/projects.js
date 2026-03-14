@@ -534,6 +534,7 @@ function syncProjectAssignees(projectId, assignees = []) {
 
 function listAssignableMembers(user) {
   const membersByEmail = new Map()
+  const orgIds = new Set()
   const addMember = (row) => {
     const mapped = mapAssigneeRow(row)
     const key = mapped.email.toLowerCase()
@@ -560,13 +561,34 @@ function listAssignableMembers(user) {
 
   const orgs = db.prepare("SELECT id FROM organisations WHERE owner_id = ?").all(user.id)
   for (const org of orgs) {
+    orgIds.add(Number(org.id))
+  }
+
+  const memberOrgs = db.prepare(
+    `SELECT org_id
+     FROM org_members
+     WHERE user_id = ? AND status = 'accepted'`
+  ).all(user.id)
+  for (const org of memberOrgs) {
+    orgIds.add(Number(org.org_id))
+  }
+
+  for (const orgId of orgIds) {
+    const owner = db.prepare(
+      `SELECT u.email, u.name, 'owner' AS role, 'accepted' AS status
+       FROM organisations o
+       JOIN users u ON u.id = o.owner_id
+       WHERE o.id = ?`
+    ).get(orgId)
+    addMember({ ...owner, source: "organisation-owner" })
+
     const members = db.prepare(
       `SELECT om.invite_email, om.role, om.status, u.name, COALESCE(u.email, om.invite_email) AS email
        FROM org_members om
        LEFT JOIN users u ON u.id = om.user_id
        WHERE om.org_id = ?
        ORDER BY om.invited_at DESC`
-    ).all(org.id)
+    ).all(orgId)
     for (const member of members) addMember({ ...member, source: "organisation" })
   }
 

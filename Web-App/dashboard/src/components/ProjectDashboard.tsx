@@ -2191,6 +2191,7 @@ export default function ProjectDashboard({
   const [newNote, setNewNote] = useState("")
   const [assignableMembers, setAssignableMembers] = useState<AssignableMember[]>([])
   const [loadingAssignableMembers, setLoadingAssignableMembers] = useState(false)
+  const [hasOrgWorkspace, setHasOrgWorkspace] = useState(false)
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [searchActiveIndex, setSearchActiveIndex] = useState(0)
@@ -2390,7 +2391,7 @@ export default function ProjectDashboard({
       String(member.status || "accepted").toLowerCase() === "accepted"
   )
   const hasTeamMembers = acceptedTeamMembers.length > 0
-  const teamScopeRequiresJoin = dashboardScope === "team" && !hasTeamMembers
+  const teamScopeRequiresJoin = dashboardScope === "team" && !hasOrgWorkspace
   const isStudioWorkspace = activeWorkspace === "ai-studio" || activeWorkspace === "google-ai-suite"
   const studioWorkspaceServices = activeWorkspace === "google-ai-suite" ? GOOGLE_AI_SUITE_SERVICES : AI_STUDIO_SERVICES
   const scopedProjects = teamScopeRequiresJoin
@@ -3089,10 +3090,15 @@ export default function ProjectDashboard({
   const loadAssignableMembers = async () => {
     setLoadingAssignableMembers(true)
     try {
-      const response = await apiFetch<{ ok: boolean; members?: AssignableMember[] }>("/api/projects/assignee-options")
+      const [response, orgResponse] = await Promise.all([
+        apiFetch<{ ok: boolean; members?: AssignableMember[] }>("/api/projects/assignee-options"),
+        apiFetch<{ ok: boolean; owned?: Array<{ id: number }>; member?: Array<{ id: number }> }>("/api/orgs").catch(() => ({ ok: true, owned: [], member: [] })),
+      ])
       if (response?.ok) setAssignableMembers(response.members ?? [])
+      setHasOrgWorkspace(Boolean((orgResponse?.owned || []).length || (orgResponse?.member || []).length))
     } catch {
       setAssignableMembers([{ email: user.email, name: user.name || user.email, role: "owner", source: "owner", status: "accepted" }])
+      setHasOrgWorkspace(false)
     } finally {
       setLoadingAssignableMembers(false)
     }

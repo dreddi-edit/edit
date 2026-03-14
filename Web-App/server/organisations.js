@@ -97,6 +97,32 @@ async function discoverKey(provider, key) {
 
 export function registerOrgRoutes(app) {
 
+  function getUserPendingInvites(user) {
+    const normalizedEmail = String(user?.email || "").trim().toLowerCase()
+    if (!normalizedEmail) return []
+    return db.prepare(`
+      SELECT om.id, om.org_id, om.invite_email, om.role, om.status, om.invited_at, om.joined_at, o.name AS org_name
+      FROM org_members om
+      JOIN organisations o ON o.id = om.org_id
+      WHERE lower(om.invite_email) = ? AND om.status = 'pending'
+      ORDER BY om.invited_at DESC
+    `).all(normalizedEmail)
+  }
+
+  function getAccessibleOrgForUser(orgId, user) {
+    const owned = db.prepare("SELECT * FROM organisations WHERE id = ? AND owner_id = ?").get(orgId, user.id)
+    if (owned) return { org: owned, viewerRole: "owner", isOwner: true }
+
+    const membership = db.prepare(`
+      SELECT o.*, om.role
+      FROM organisations o
+      JOIN org_members om ON om.org_id = o.id
+      WHERE o.id = ? AND om.user_id = ? AND om.status = 'accepted'
+    `).get(orgId, user.id)
+    if (!membership) return null
+    return { org: membership, viewerRole: membership.role || "member", isOwner: false }
+  }
+
   // === API KEYS ===
 
   // Smart Key Detection + Test
@@ -154,7 +180,12 @@ export function registerOrgRoutes(app) {
       JOIN org_members om ON om.org_id = o.id
       WHERE om.user_id = ? AND om.status = 'accepted'
     `).all(req.user.id)
-    res.json({ ok: true, owned, member })
+    const pending = getUserPendingInvites(req.user)
+    res.json({ ok: true, owned, member, pending })
+  })
+
+  app.get("/api/orgs/invitations", authMiddleware, (req, res) => {
+    res.json({ ok: true, invitations: getUserPendingInvites(req.user) })
   })
 
   // Org erstellen
@@ -178,6 +209,102 @@ export function registerOrgRoutes(app) {
       ORDER BY om.invited_at DESC
     `).all(req.params.id)
     res.json({ ok: true, org, members })
+  })
+
+  app.get("/api/orgs/:id/dashboard", authMiddleware, (req, res) => {
+    const access = getAccessibleOrgForUser(req.params.id, req.user)
+    if (!access) return res.status(403).json({ ok: false, error: "Kein Zugriff" })
+
+    const owner = db.prepare(`
+      SELECT u.id, u.name, u.email,
+             COALESCE(NULLIF(u.plan_id, ''), 'basis') AS plan_id,
+             COALESCE(NULLIF(u.plan_status, ''), 'active') AS plan_status,
+             COALESCE(c.balance_eur, 0) AS credits_eur
+      FROM organisations o
+      JOIN users u ON u.id = o.owner_id
+      LEFT JOIN credits c ON c.user_id = u.id
+      WHERE o.id = ?
+    `).get(req.params.id)
+
+    const members = db.prepare(`
+      SELECT om.id, om.org_id, om.user_id, om.invite_email, om.role, om.status, om.invited_at, om.joined_at,
+             u.name, COALESCE(u.email, om.invite_email) AS email
+      FROM org_members om
+      LEFT JOIN users u ON u.id = om.user_id
+      WHERE om.org_id = ?
+      ORDER BY CASE WHEN om.status = 'accepted' THEN 0 ELSE 1 END, om.invited_at DESC
+    `).all(req.params.id)
+
+    const projectAssignments = db.prepare(`
+      SELECT pa.member_email,
+             COUNT(DISTINCT pa.project_id) AS project_count,
+             GROUP_CONCAT(DISTINCT p.name) AS project_names
+      FROM project_assignees pa
+      JOIN projects p ON p.id = pa.project_id
+      WHERE lower(pa.member_email) IN (
+        SELECT lower(om.invite_email) FROM org_members om WHERE om.org_id = ?
+        UNION
+        SELECT lower(u.email) FROM organisations o JOIN users u ON u.id = o.owner_id WHERE o.id = ?
+      )
+      GROUP BY lower(pa.member_email)
+    `).all(req.params.id, req.params.id)
+
+    const assignmentMap = new Map(projectAssignments.map((row) => [String(row.member_email || "").toLowerCase(), row]))
+    const ownerEmail = String(owner?.email || "").toLowerCase()
+    const ownerProjects = assignmentMap.get(ownerEmail)
+
+    const normalizedMembers = members.map((member) => {
+      const key = String(member.email || member.invite_email || "").toLowerCase()
+      const assignment = assignmentMap.get(key)
+      return {
+        ...member,
+        project_count: Number(assignment?.project_count || 0),
+        project_names: String(assignment?.project_names || "")
+          .split(",")
+          .map((name) => String(name || "").trim())
+          .filter(Boolean),
+      }
+    })
+
+    const acceptedCount = normalizedMembers.filter((member) => member.status === "accepted").length + 1
+    const pendingCount = normalizedMembers.filter((member) => member.status !== "accepted").length
+    const totalAssignedProjects = normalizedMembers.reduce((sum, member) => sum + Number(member.project_count || 0), Number(ownerProjects?.project_count || 0))
+
+    res.json({
+      ok: true,
+      dashboard: {
+        org: {
+          id: access.org.id,
+          name: access.org.name,
+          created_at: access.org.created_at,
+        },
+        viewer: {
+          is_owner: access.isOwner,
+          role: access.viewerRole,
+        },
+        owner: owner
+          ? {
+              id: owner.id,
+              name: owner.name,
+              email: owner.email,
+              plan_id: owner.plan_id,
+              plan_status: owner.plan_status,
+              credits_eur: Number(owner.credits_eur || 0),
+              project_count: Number(ownerProjects?.project_count || 0),
+              project_names: String(ownerProjects?.project_names || "")
+                .split(",")
+                .map((name) => String(name || "").trim())
+                .filter(Boolean),
+            }
+          : null,
+        members: normalizedMembers,
+        stats: {
+          accepted_members: acceptedCount,
+          pending_invites: pendingCount,
+          assigned_projects: totalAssignedProjects,
+        },
+      },
+    })
   })
 
   // Mitglied einladen
