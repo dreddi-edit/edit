@@ -61,6 +61,7 @@ import { detectSitePlatform, getPlatformMeta, normalizePlatform, type SitePlatfo
 import { buildAvailableExecutableModels } from "./utils/modelCatalog"
 import {
   TOP_TRANSLATION_LANGUAGES,
+  type WebsiteTranslationSegment,
   translateWebsiteHtml,
 } from "./utils/htmlTranslation"
 import {
