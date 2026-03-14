@@ -145,9 +145,21 @@ function parseCreditTransactionApplication(description: string) {
 }
 
 async function parseJson(response: Response) {
-  const payload = await response.json()
-  if (!response.ok || payload?.ok === false) {
-    throw new Error(payload?.error || `${response.status} ${response.statusText}`)
+  let payload: unknown
+  try {
+    payload = await response.json()
+  } catch {
+    throw new Error(
+      response.status === 502 || response.status === 503
+        ? "Server nicht erreichbar. Bitte kurz warten und neu laden."
+        : `Server-Fehler ${response.status}`
+    )
+  }
+  if (!response.ok || (payload as Record<string, unknown>)?.ok === false) {
+    throw new Error(
+      (payload as Record<string, unknown>)?.error as string ||
+        `${response.status} ${response.statusText}`
+    )
   }
   return payload
 }
@@ -809,10 +821,12 @@ export default function SettingsPanel({
     }
     setSaving(true)
     try {
-      await requestJson("/api/orgs", "POST", { name: newOrgName.trim() })
+      const data = await requestJson("/api/orgs", "POST", { name: newOrgName.trim() }) as { id: number }
+      const created: Org = { id: data.id, name: newOrgName.trim(), owner_id: currentUser?.id ?? 0 }
+      setOwnedOrg(created)
+      setOrgMembers([])
       toast.success("Organisation erstellt!")
       setNewOrgName("")
-      await load()
     } catch (error) {
       toast.error(errMsg(error))
     } finally {
@@ -1161,12 +1175,12 @@ export default function SettingsPanel({
 
               <Section label={t("Security")}>
                 <div className="draft-settings-list">
-                  <div className="draft-settings-list-card">
+                  <div className="draft-settings-list-card" style={{ flexDirection: "column", alignItems: "stretch" }}>
                     <div className="draft-settings-list-main">
                       <strong>Password</strong>
                       <div className="draft-settings-list-meta">Change your password with your current credentials.</div>
                     </div>
-                    <div className="draft-settings-input-row draft-settings-input-row--stack-mobile" style={{ marginTop: 12 }}>
+                    <div className="draft-settings-input-row draft-settings-input-row--stack-mobile" style={{ marginTop: 12, flexWrap: "wrap" }}>
                       <input
                         className="draft-settings-text-input"
                         type="password"
@@ -1547,7 +1561,8 @@ export default function SettingsPanel({
                 <div className="draft-settings-input-row">
                   <input
                     className="draft-settings-text-input draft-settings-text-input--mono"
-                    type="password"
+                    type="text"
+                    autoComplete="off"
                     value={detectInput}
                     onChange={event => {
                       setDetectInput(event.target.value)

@@ -1038,8 +1038,8 @@ function getFriendlyImportErrorMessage(error: unknown, source: ImportSourceKind,
   }
   if (/application failed/i.test(message)) {
     return source === "upload"
-      ? fallback("Upload failed. Use either a live URL or upload files. For uploads, use HTML, ZIP, PDF, DOCX, screenshots, or folders.")
-      : fallback("Import failed. Use either a live URL or upload files. For URL import, enter a reachable website link first.")
+      ? fallback("Server nicht erreichbar. Bitte kurz warten und erneut versuchen.")
+      : fallback("Server nicht erreichbar. Bitte kurz warten und erneut versuchen.")
   }
   return message
 }
@@ -5192,8 +5192,7 @@ export default function ProjectDashboard({
                 <div className="pd-field-label pd-field-label-full">
                   {rt("Import source")}
                   <div className="pd-import-compact-note">
-                    <strong>{rt("Choose one source path")}</strong>
-                    <span>{rt("Use either URL import or file upload. One source is enough.")}</span>
+                    <strong>{rt("Import source")}</strong>
                   </div>
                   <div className="pd-import-source-switch" role="tablist" aria-label={rt("Import source")}> 
                     <button
@@ -5541,11 +5540,9 @@ export default function ProjectDashboard({
                 </div>
                 <div className="pd-field-label pd-field-label-full">
                   {rt("Assign team members")}
-                  {loadingAssignableMembers ? (
-                    <div className="pd-field-hint">{rt("Loading team members...")}</div>
-                  ) : assignableMembers.length ? (
+                  {loadingAssignableMembers ? null : assignableMembers.filter(m => m.email.toLowerCase() !== user.email.toLowerCase()).length ? (
                     <div className="pd-assignee-list">
-                      {assignableMembers.map(member => {
+                      {assignableMembers.filter(m => m.email.toLowerCase() !== user.email.toLowerCase()).map(member => {
                         const selected = newAssigneeEmails.includes(member.email)
                         const label = displayMemberName(member)
                         const meta = [
@@ -5572,6 +5569,37 @@ export default function ProjectDashboard({
                     </div>
                   ) : (
                     <span className="pd-field-hint">{rt("No team members yet. Invite them in Settings first.")}</span>
+                                  {!loadingAssignableMembers && assignableMembers.filter(m => m.email.toLowerCase() !== user.email.toLowerCase()).length > 0 ? (
+                                    <div className="pd-field-label pd-field-label-full">
+                                      {rt("Assign team members")}
+                                      <div className="pd-assignee-list">
+                                        {assignableMembers.filter(m => m.email.toLowerCase() !== user.email.toLowerCase()).map(member => {
+                                          const selected = newAssigneeEmails.includes(member.email)
+                                          const label = displayMemberName(member)
+                                          const meta = [
+                                            member.role ? rt(String(member.role).toLowerCase()) : "",
+                                            member.status === "pending" ? rt("pending") : "",
+                                          ]
+                                            .filter(Boolean)
+                                            .join(" · ")
+                                          return (
+                                            <button
+                                              key={member.email}
+                                              type="button"
+                                              className={`pd-assignee-chip${selected ? " is-selected" : ""}`}
+                                              onClick={() => toggleAssignee(member.email)}
+                                            >
+                                              <span className="pd-assignee-avatar">{label.slice(0, 2).toUpperCase()}</span>
+                                              <span className="pd-assignee-copy">
+                                                <span className="pd-assignee-name">{label}</span>
+                                                <span className="pd-assignee-meta">{meta || member.email}</span>
+                                              </span>
+                                            </button>
+                                          )
+                                        })}
+                                      </div>
+                                    </div>
+                                  ) : null}
                   )}
                 </div>
               </div>
