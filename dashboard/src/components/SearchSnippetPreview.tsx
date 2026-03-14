@@ -20,6 +20,19 @@ interface Props {
   onUpdate?: (meta: { title: string; description: string }) => void;
 }
 
+interface SnippetPreviewResponse {
+  ok?: boolean;
+  snippet?: SnippetData;
+  title?: string;
+  description?: string;
+  url?: string;
+  title_length?: number;
+  description_length?: number;
+  title_ok?: boolean;
+  description_ok?: boolean;
+  breadcrumbs?: string[];
+}
+
 export const SearchSnippetPreview: React.FC<Props> = ({ url: propUrl, title: propTitle, description: propDesc, projectId, onUpdate }) => {
   const [snippet, setSnippet] = useState<SnippetData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -35,8 +48,20 @@ export const SearchSnippetPreview: React.FC<Props> = ({ url: propUrl, title: pro
     if (projectId) params.set('project_id', String(projectId));
     setLoading(true);
     try {
-      const data = await apiFetch(`/api/seo/snippet-preview?${params.toString()}`);
-      if (data.ok) setSnippet(data.snippet ?? data);
+      const data = await apiFetch<SnippetPreviewResponse>(`/api/seo/snippet-preview?${params.toString()}`);
+      if (data.ok) {
+        const fallback: SnippetData = {
+          title: data.title ?? '',
+          description: data.description ?? '',
+          url: data.url ?? '',
+          title_length: data.title_length ?? 0,
+          description_length: data.description_length ?? 0,
+          title_ok: data.title_ok ?? false,
+          description_ok: data.description_ok ?? false,
+          breadcrumbs: Array.isArray(data.breadcrumbs) ? data.breadcrumbs : [],
+        };
+        setSnippet(data.snippet ?? fallback);
+      }
     } catch {}
     setLoading(false);
   }, [editUrl, editTitle, editDesc, projectId]);

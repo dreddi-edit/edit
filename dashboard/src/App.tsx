@@ -216,6 +216,15 @@ export default function App() {
     estOutputTokens: number
     prompt: string
   }>(null)
+  const [isDraggingBlock, setIsDraggingBlock] = useState(false)
+  const [authUser, setAuthUser] = useState<User | null | "loading">("loading")
+  const [view, setView] = useState<"auth" | "landing" | "learn" | "dashboard" | "editor" | "admin">("landing")
+  const [currentProject, setCurrentProject] = useState<Project | null>(null)
+  const [projectPages, setProjectPages] = useState<ProjectPage[]>([])
+  const [activePageId, setActivePageId] = useState<string | null>(null)
+  const [scanningPages, setScanningPages] = useState(false)
+  const [savingPageMutation, setSavingPageMutation] = useState(false)
+  const [selectedComponent, setSelectedComponent] = useState<string>("")
 
   // Auth check beim Start
   useEffect(() => {
@@ -296,16 +305,6 @@ export default function App() {
     }
   };
 
-  const [isDraggingBlock, setIsDraggingBlock] = useState(false)
-  const [authUser, setAuthUser] = useState<User | null | "loading">("loading")
-  const [view, setView] = useState<"auth" | "landing" | "learn" | "dashboard" | "editor" | "admin">("landing")
-  const [currentProject, setCurrentProject] = useState<Project | null>(null)
-  const [projectPages, setProjectPages] = useState<ProjectPage[]>([])
-  const [activePageId, setActivePageId] = useState<string | null>(null)
-  const [scanningPages, setScanningPages] = useState(false)
-  const [savingPageMutation, setSavingPageMutation] = useState(false)
-  const [selectedComponent, setSelectedComponent] = useState<string>("")
-  
   const [undoHistory, setUndoHistory] = useState<string[]>([])
   const [redoHistory, setRedoHistory] = useState<string[]>([])
   const undoHistoryRef = useRef<string[]>([])

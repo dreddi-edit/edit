@@ -15,6 +15,15 @@ interface Props {
   projectId?: number;
 }
 
+interface TranslationMemoryListResponse {
+  ok?: boolean;
+  entries?: MemoryEntry[];
+}
+
+interface ApiOkResponse {
+  ok?: boolean;
+}
+
 const LANG_LABELS: Record<string, string> = {
   en: 'EN', de: 'DE', fr: 'FR', es: 'ES', it: 'IT', ja: 'JA', nl: 'NL', pt: 'PT', pl: 'PL', zh: 'ZH',
 };
@@ -36,7 +45,7 @@ export const TranslationMemoryPanel: React.FC<Props> = ({ projectId }) => {
       if (filterSource) params.set('source_lang', filterSource);
       if (filterTarget) params.set('target_lang', filterTarget);
       if (projectId) params.set('project_id', String(projectId));
-      const data = await apiFetch(`/api/translation-memory?${params.toString()}`);
+      const data = await apiFetch<TranslationMemoryListResponse>(`/api/translation-memory?${params.toString()}`);
       if (data.ok) setEntries(data.entries ?? []);
     } catch {}
     setLoading(false);
@@ -48,7 +57,7 @@ export const TranslationMemoryPanel: React.FC<Props> = ({ projectId }) => {
     if (!confirm('Delete this translation memory entry?')) return;
     setDeleting(id);
     try {
-      const data = await apiFetch(`/api/translation-memory/${id}`, { method: 'DELETE' });
+      const data = await apiFetch<ApiOkResponse>(`/api/translation-memory/${id}`, { method: 'DELETE' });
       if (data.ok) setEntries(e => e.filter(x => x.id !== id));
     } catch {}
     setDeleting(null);
