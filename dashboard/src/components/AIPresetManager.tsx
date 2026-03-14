@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { apiFetch } from '../api/client';
 
 interface Preset {
@@ -9,6 +9,16 @@ interface Preset {
   category?: string;
 }
 
+interface PresetsResponse {
+  ok?: boolean;
+  presets?: Preset[];
+}
+
+interface PresetWriteResponse {
+  ok?: boolean;
+  preset?: Preset;
+}
+
 export const AIPresetManager: React.FC = () => {
   const [presets, setPresets] = useState<Preset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -17,16 +27,21 @@ export const AIPresetManager: React.FC = () => {
   const [form, setForm] = useState({ name: '', prompt: '', system_hint: '', category: 'general' });
   const [error, setError] = useState('');
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await apiFetch('/api/presets');
+      const data = await apiFetch<PresetsResponse>('/api/presets');
       if (data.ok) setPresets(data.presets ?? []);
     } catch {}
     setLoading(false);
-  };
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const id = window.setTimeout(() => {
+      void load();
+    }, 0);
+    return () => window.clearTimeout(id);
+  }, [load]);
 
   const resetForm = () => { setForm({ name: '', prompt: '', system_hint: '', category: 'general' }); setAdding(false); setEditId(null); setError(''); };
 
@@ -34,19 +49,19 @@ export const AIPresetManager: React.FC = () => {
     if (!form.name.trim() || !form.prompt.trim()) { setError('Name and prompt required.'); return; }
     try {
       if (editId !== null) {
-        const data = await apiFetch(`/api/presets/${editId}`, { method: 'PUT', body: JSON.stringify(form) });
+        const data = await apiFetch<PresetWriteResponse>(`/api/presets/${editId}`, { method: 'PUT', body: JSON.stringify(form) });
         if (data.ok) { setPresets(p => p.map(x => x.id === editId ? { ...x, ...form } : x)); resetForm(); }
       } else {
-        const data = await apiFetch('/api/presets', { method: 'POST', body: JSON.stringify(form) });
+        const data = await apiFetch<PresetWriteResponse>('/api/presets', { method: 'POST', body: JSON.stringify(form) });
         if (data.ok) { setPresets(p => [...p, data.preset]); resetForm(); }
       }
-    } catch (e: any) { setError(e.message); }
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Save failed'); }
   };
 
   const remove = async (id: number) => {
     if (!confirm('Delete this preset?')) return;
     try {
-      const data = await apiFetch(`/api/presets/${id}`, { method: 'DELETE' });
+      const data = await apiFetch<{ ok?: boolean }>(`/api/presets/${id}`, { method: 'DELETE' });
       if (data.ok) setPresets(p => p.filter(x => x.id !== id));
     } catch {}
   };

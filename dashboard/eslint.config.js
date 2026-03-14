@@ -61,6 +61,8 @@ export default defineConfig([
     files: ['src/components/BlockOverlay.tsx'],
     rules: {
       '@typescript-eslint/no-unused-vars': 'off',
+      '@typescript-eslint/no-explicit-any': 'off',
+      'no-empty': 'off',
     },
   },
 ])

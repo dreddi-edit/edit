@@ -1,6 +1,6 @@
 import React from 'react';
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { toast } from "./Toast"
 import { errMsg } from "../utils/errMsg"
 import {
@@ -21,24 +21,7 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null)
   const [loading, setLoading] = useState<string | null>(null)
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => e.key === "Escape" && onClose()
-    window.addEventListener("keydown", handler)
-    return () => window.removeEventListener("keydown", handler)
-  }, [onClose])
-
-  useEffect(() => {
-    load()
-    // Nach Stripe-Redirect Balance aktualisieren
-    const params = new URLSearchParams(window.location.search)
-    if (params.get("payment") === "success") {
-      setTimeout(() => load(), 2000)
-      toast.success("Zahlung erfolgreich! Guthaben wird aktualisiert...")
-      window.history.replaceState({}, "", window.location.pathname)
-    }
-  }, [])
-
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
       const [b, p, t, me] = await Promise.all([
         apiGetBalance(),
@@ -54,13 +37,35 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
       if (t.ok) setTransactions(t.transactions)
       setCurrentUser(me)
     } catch (e) { toast.error(errMsg(e)) }
-  }
+  }, [])
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => e.key === "Escape" && onClose()
+    window.addEventListener("keydown", handler)
+    return () => window.removeEventListener("keydown", handler)
+  }, [onClose])
+
+  useEffect(() => {
+    const warmup = window.setTimeout(() => {
+      void load()
+    }, 0)
+    // Nach Stripe-Redirect Balance aktualisieren
+    const params = new URLSearchParams(window.location.search)
+    if (params.get("payment") === "success") {
+      setTimeout(() => {
+        void load()
+      }, 2000)
+      toast.success("Zahlung erfolgreich! Guthaben wird aktualisiert...")
+      window.history.replaceState({}, "", window.location.pathname)
+    }
+    return () => window.clearTimeout(warmup)
+  }, [load])
 
   const checkout = async (pkg: StripePackage) => {
     setLoading(`credits:${pkg.id}`)
     try {
       const url = await apiStripeCheckout(pkg.id)
-      window.location.href = url
+      window.location.assign(url)
     } catch (e: unknown) {
       toast.error(errMsg(e))
       setLoading(null)
@@ -71,7 +76,7 @@ export default function CreditsPanel({ onClose }: { onClose: () => void }) {
     setLoading(`plan:${plan.id}`)
     try {
       const url = await apiStripeSubscriptionCheckout(plan.id)
-      window.location.href = url
+      window.location.assign(url)
     } catch (e: unknown) {
       toast.error(errMsg(e))
       setLoading(null)

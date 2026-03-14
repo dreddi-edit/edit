@@ -19,7 +19,6 @@ import type {
   ProjectVersionDetail,
   WorkflowEvent,
 } from "../api/projects";
-import { TOP_TRANSLATION_LANGUAGES } from "../utils/htmlTranslation";
 
 type PlatformMeta = {
   border: string;

@@ -2256,7 +2256,7 @@ app.get("/api/usage/stats", authMiddleware, (req, res) => {
       ok: true,
       period,
       ai_runs: { by_tool: totalRuns, total: totalRuns.reduce((s, r) => s + r.c, 0) },
-      credit_usage: { total_eur: creditRow?.total || 0, by_project: sessionCost },
+      credit_usage: { total_eur: creditRows?.total || 0, by_project: sessionCost },
       exports: exportCount?.c || 0,
       activity_by_day: aiRunsByDay,
     })

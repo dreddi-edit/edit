@@ -1,22 +1,20 @@
-import React from 'react';
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Project } from "../api/projects";
 
-import { useState, useEffect, useMemo, useRef } from "react"
-import type { Project } from "../api/projects"
-
-type Action = { id: string; label: string; shortcut?: string; icon: string }
+type Action = { id: string; label: string; shortcut?: string; icon: string };
 
 type Props = {
-  open: boolean
-  onClose: () => void
-  projects: Project[]
-  onOpenProject: (p: Project) => void
-  onNewProject: () => void
-  onCredits: () => void
-  onSettings: () => void
-  onInvite: () => void
-  onSignOut: () => void
-  theme: "dark" | "light"
-}
+  open: boolean;
+  onClose: () => void;
+  projects: Project[];
+  onOpenProject: (p: Project) => void;
+  onNewProject: () => void;
+  onCredits: () => void;
+  onSettings: () => void;
+  onInvite: () => void;
+  onSignOut: () => void;
+  theme: "dark" | "light";
+};
 
 const ACTIONS: Action[] = [
   { id: "new", label: "New project", shortcut: "⌘N", icon: "+" },
@@ -24,7 +22,7 @@ const ACTIONS: Action[] = [
   { id: "settings", label: "Settings", icon: "⚙" },
   { id: "invite", label: "Invite teammates", icon: "👤" },
   { id: "signout", label: "Sign out", icon: "→" },
-]
+];
 
 export default function CommandPalette({
   open,
@@ -38,75 +36,77 @@ export default function CommandPalette({
   onSignOut,
   theme,
 }: Props) {
-  const [query, setQuery] = useState("")
-  const [selected, setSelected] = useState(0)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const listRef = useRef<HTMLDivElement>(null)
+  const [query, setQuery] = useState("");
+  const [selected, setSelected] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const filteredProjects = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return projects
-    return projects.filter(p =>
-      p.name.toLowerCase().includes(q) ||
-      (p.url || "").toLowerCase().includes(q)
-    )
-  }, [projects, query])
+    const q = query.trim().toLowerCase();
+    if (!q) return projects;
+    return projects.filter(
+      (p) => p.name.toLowerCase().includes(q) || (p.url || "").toLowerCase().includes(q),
+    );
+  }, [projects, query]);
 
   const items = useMemo(() => {
-    const acts = ACTIONS.filter(a =>
-      a.label.toLowerCase().includes(query.trim().toLowerCase())
-    )
+    const acts = ACTIONS.filter((a) => a.label.toLowerCase().includes(query.trim().toLowerCase()));
     return [
-      ...acts.map(a => ({ type: "action" as const, data: a })),
-      ...filteredProjects.map(p => ({ type: "project" as const, data: p })),
-    ]
-  }, [filteredProjects, query])
+      ...acts.map((a) => ({ type: "action" as const, data: a })),
+      ...filteredProjects.map((p) => ({ type: "project" as const, data: p })),
+    ];
+  }, [filteredProjects, query]);
+  const maxIndex = Math.max(0, items.length - 1);
+  const effectiveSelected = Math.min(selected, maxIndex);
 
   useEffect(() => {
-    if (open) {
-      setQuery("")
-      setSelected(0)
-      setTimeout(() => inputRef.current?.focus(), 50)
-    }
-  }, [open])
+    if (!open) return;
+    // Reset search context whenever the palette opens.
+    queueMicrotask(() => {
+      setQuery("");
+      setSelected(0);
+    });
+    const timer = window.setTimeout(() => inputRef.current?.focus(), 50);
+    return () => window.clearTimeout(timer);
+  }, [open]);
 
   useEffect(() => {
-    setSelected(i => Math.min(Math.max(0, i), items.length - 1))
-  }, [items.length])
-
-  useEffect(() => {
-    if (!open) return
+    if (!open) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose()
-      else if (e.key === "ArrowDown") { e.preventDefault(); setSelected(s => Math.min(s + 1, items.length - 1)) }
-      else if (e.key === "ArrowUp") { e.preventDefault(); setSelected(s => Math.max(s - 1, 0)) }
-      else if (e.key === "Enter") {
-        e.preventDefault()
-        const item = items[selected]
-        if (!item) return
-        if (item.type === "project") onOpenProject(item.data)
+      if (e.key === "Escape") onClose();
+      else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelected((s) => Math.min(s + 1, maxIndex));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelected((s) => Math.max(s - 1, 0));
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        const item = items[effectiveSelected];
+        if (!item) return;
+        if (item.type === "project") onOpenProject(item.data);
         else {
-          if (item.data.id === "new") onNewProject()
-          else if (item.data.id === "credits") onCredits()
-          else if (item.data.id === "settings") onSettings()
-          else if (item.data.id === "invite") onInvite()
-          else if (item.data.id === "signout") onSignOut()
+          if (item.data.id === "new") onNewProject();
+          else if (item.data.id === "credits") onCredits();
+          else if (item.data.id === "settings") onSettings();
+          else if (item.data.id === "invite") onInvite();
+          else if (item.data.id === "signout") onSignOut();
         }
-        onClose()
+        onClose();
       }
-    }
-    window.addEventListener("keydown", handler)
-    return () => window.removeEventListener("keydown", handler)
-  }, [open, selected, items, onClose, onOpenProject, onNewProject, onCredits, onSettings, onInvite, onSignOut])
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [open, effectiveSelected, items, maxIndex, onClose, onOpenProject, onNewProject, onCredits, onSettings, onInvite, onSignOut]);
 
   useEffect(() => {
-    const el = listRef.current
-    if (!el) return
-    const sel = el.querySelector(`[data-index="${selected}"]`)
-    sel?.scrollIntoView({ block: "nearest" })
-  }, [selected])
+    const el = listRef.current;
+    if (!el) return;
+    const sel = el.querySelector(`[data-index="${effectiveSelected}"]`);
+    sel?.scrollIntoView({ block: "nearest" });
+  }, [effectiveSelected]);
 
-  if (!open) return null
+  if (!open) return null;
 
   return (
     <div
@@ -125,7 +125,7 @@ export default function CommandPalette({
         paddingTop: "15vh",
         padding: 20,
       }}
-      onClick={e => e.target === e.currentTarget && onClose()}
+      onClick={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
         style={{
@@ -137,13 +137,13 @@ export default function CommandPalette({
           boxShadow: "0 32px 80px rgba(0,0,0,0.4)",
           overflow: "hidden",
         }}
-        onClick={e => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
       >
         <div style={{ padding: 12, borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
           <input
             ref={inputRef}
             value={query}
-            onChange={e => setQuery(e.target.value)}
+            onChange={(e) => setQuery(e.target.value)}
             placeholder="Search projects or run a command…"
             style={{
               width: "100%",
@@ -168,7 +168,14 @@ export default function CommandPalette({
           }}
         >
           {items.length === 0 ? (
-            <div style={{ padding: 24, textAlign: "center", color: theme === "light" ? "#94a3b8" : "rgba(148,163,184,0.6)", fontSize: 13 }}>
+            <div
+              style={{
+                padding: 24,
+                textAlign: "center",
+                color: theme === "light" ? "#94a3b8" : "rgba(148,163,184,0.6)",
+                fontSize: 13,
+              }}
+            >
               No results
             </div>
           ) : (
@@ -177,24 +184,24 @@ export default function CommandPalette({
                 key={item.type === "project" ? `p-${item.data.id}` : item.data.id}
                 data-index={i}
                 role="option"
-                aria-selected={i === selected}
+                aria-selected={i === effectiveSelected}
                 onClick={() => {
-                  if (item.type === "project") onOpenProject(item.data)
+                  if (item.type === "project") onOpenProject(item.data);
                   else {
-                    if (item.data.id === "new") onNewProject()
-                    else if (item.data.id === "credits") onCredits()
-                    else if (item.data.id === "settings") onSettings()
-                    else if (item.data.id === "invite") onInvite()
-                    else if (item.data.id === "signout") onSignOut()
+                    if (item.data.id === "new") onNewProject();
+                    else if (item.data.id === "credits") onCredits();
+                    else if (item.data.id === "settings") onSettings();
+                    else if (item.data.id === "invite") onInvite();
+                    else if (item.data.id === "signout") onSignOut();
                   }
-                  onClose()
+                  onClose();
                 }}
                 style={{
                   width: "100%",
                   padding: "12px 16px",
                   borderRadius: 10,
                   border: "none",
-                  background: i === selected ? "rgba(99,102,241,0.15)" : "transparent",
+                  background: i === effectiveSelected ? "rgba(99,102,241,0.15)" : "transparent",
                   color: theme === "light" ? "#0f172a" : "white",
                   fontSize: 14,
                   textAlign: "left",
@@ -204,23 +211,23 @@ export default function CommandPalette({
                   gap: 12,
                 }}
               >
-                <span style={{
-                  width: 28,
-                  height: 28,
-                  borderRadius: 8,
-                  background: i === selected ? "rgba(99,102,241,0.2)" : "rgba(148,163,184,0.15)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 12,
-                  fontWeight: 700,
-                }}>
+                <span
+                  style={{
+                    width: 28,
+                    height: 28,
+                    borderRadius: 8,
+                    background: i === effectiveSelected ? "rgba(99,102,241,0.2)" : "rgba(148,163,184,0.15)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 12,
+                    fontWeight: 700,
+                  }}
+                >
                   {item.type === "project" ? "◆" : (item.data as Action).icon}
                 </span>
                 <span style={{ flex: 1, fontWeight: 500 }}>
-                  {item.type === "project"
-                    ? (item.data as Project).name
-                    : (item.data as Action).label}
+                  {item.type === "project" ? (item.data as Project).name : (item.data as Action).label}
                 </span>
                 {item.type === "action" && (item.data as Action).shortcut && (
                   <span style={{ fontSize: 11, color: theme === "light" ? "#94a3b8" : "rgba(148,163,184,0.6)" }}>
@@ -231,15 +238,17 @@ export default function CommandPalette({
             ))
           )}
         </div>
-        <div style={{
-          padding: "8px 16px",
-          borderTop: "1px solid rgba(255,255,255,0.06)",
-          fontSize: 11,
-          color: theme === "light" ? "#94a3b8" : "rgba(148,163,184,0.5)",
-        }}>
+        <div
+          style={{
+            padding: "8px 16px",
+            borderTop: "1px solid rgba(255,255,255,0.06)",
+            fontSize: 11,
+            color: theme === "light" ? "#94a3b8" : "rgba(148,163,184,0.5)",
+          }}
+        >
           ↑↓ navigate · Enter select · Esc close
         </div>
       </div>
     </div>
-  )
+  );
 }

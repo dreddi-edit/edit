@@ -4,6 +4,15 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   build: {
     sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (id.includes('/react/') || id.includes('/react-dom/')) return 'react-vendor';
+          return 'vendor';
+        },
+      },
+    },
   },
   plugins: [
     react({

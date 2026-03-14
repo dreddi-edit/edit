@@ -1,6 +1,6 @@
 import React from 'react';
 
-import { useState, useEffect } from "react"
+import { useEffect, useMemo, useState } from "react"
 
 const STORAGE_KEY = "se_onboarding_checklist"
 
@@ -47,23 +47,25 @@ export default function OnboardingChecklist({
   const [items, setItems] = useState<CheckItem[]>(loadItems)
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem("se_checklist_collapsed") === "1")
 
-  useEffect(() => { saveItems(items) }, [items])
+  const effectiveItems = useMemo(
+    () => items.map((item) => {
+      if (item.id === "create" && projectCount > 0 && !item.done) {
+        return { ...item, done: true }
+      }
+      return item
+    }),
+    [items, projectCount],
+  )
+
+  useEffect(() => { saveItems(effectiveItems) }, [effectiveItems])
 
   const update = (id: string, done: boolean) => {
     setItems(prev => prev.map(i => i.id === id ? { ...i, done } : i))
     if (done) onStepComplete?.(id)
   }
 
-  // Auto-complete based on context (project created = create done; opening editor = load)
-  useEffect(() => {
-    setItems(prev => prev.map(i => {
-      if (i.id === "create" && projectCount > 0 && !i.done) return { ...i, done: true }
-      return i
-    }))
-  }, [projectCount])
-
-  const doneCount = items.filter(i => i.done).length
-  const allDone = doneCount === items.length
+  const doneCount = effectiveItems.filter(i => i.done).length
+  const allDone = doneCount === effectiveItems.length
 
   const markLoadDone = () => update("load", true)
 
@@ -111,7 +113,7 @@ export default function OnboardingChecklist({
       </button>
       {!collapsed && (
         <div style={{ padding: "0 18px 18px" }}>
-          {items.map(i => (
+          {effectiveItems.map(i => (
             <div
               key={i.id}
               style={{

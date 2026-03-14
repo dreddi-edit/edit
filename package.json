@@ -10,9 +10,14 @@
     "dev:dashboard": "npm --prefix dashboard run dev",
     "launch": "npm run build && npm start",
     "lint": "npm --prefix dashboard run lint && node scripts/check-server-syntax.mjs",
+    "typecheck": "npm --prefix dashboard run typecheck",
     "test": "npm --prefix server run test",
     "smoke": "node scripts/smoke-e2e.mjs",
-    "audit": "npm audit --audit-level=high && npm --prefix server audit --audit-level=high && npm --prefix dashboard audit --audit-level=high"
+    "ops:health": "node scripts/check-health.mjs",
+    "ops:db-backup": "node scripts/db-backup.mjs",
+    "ops:db-restore-probe": "node scripts/db-restore-probe.mjs",
+    "audit": "npm audit --audit-level=high && npm --prefix server audit --audit-level=high && npm --prefix dashboard audit --audit-level=high",
+    "release:verify": "npm run lint && npm run typecheck && npm run test && npm run build && npm run smoke && npm run ops:db-backup && npm run ops:db-restore-probe"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
