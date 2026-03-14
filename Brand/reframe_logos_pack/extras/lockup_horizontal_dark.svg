@@ -1,0 +1,8 @@
+<svg viewBox="0 0 340 80" xmlns="http://www.w3.org/2000/svg">
+  <rect width="100%" height="100%" fill="#050508"/>
+  <g transform="translate(14,20)">
+    <path d="M10 0L5 20L10 40" stroke="#00ffd5" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M30 0L35 20L30 40" stroke="#8a7cff" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="185" y="44" dominant-baseline="middle" text-anchor="middle" font-family="Syne, sans-serif" font-weight="800" font-size="42" fill="#f0f0f7">RE<tspan fill="#00ffd5">.</tspan>FRAME</text>
+</svg>

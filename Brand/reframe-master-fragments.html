@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Reframe — Master Fragments</title>
+<style>
+:root{
+  --bg:#0a0c11;
+  --panel:#11151d;
+  --panel-2:#151b25;
+  --soft:#1a2230;
+  --line:rgba(255,255,255,.08);
+  --line-2:rgba(255,255,255,.14);
+  --text:#f5f7fb;
+  --muted:#98a2b3;
+  --accent:#8a7cff;
+  --accent-2:#00ffd5;
+  --good:#89f2bf;
+  --warn:#ffd782;
+  --bad:#ff8a9a;
+  --shadow:0 24px 80px rgba(0,0,0,.34);
+  --radius:22px;
+  --radius-sm:16px;
+  --max:1240px;
+}
+body.light{
+  --bg:#f7f8fb;
+  --panel:#ffffff;
+  --panel-2:#f4f6fa;
+  --soft:#eef2f8;
+  --line:rgba(16,24,40,.08);
+  --line-2:rgba(16,24,40,.12);
+  --text:#101828;
+  --muted:#667085;
+  --shadow:0 18px 50px rgba(16,24,40,.08);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text)}
+a{color:inherit}
+.container{width:min(var(--max),calc(100vw - 32px));margin:0 auto}
+.topbar{position:sticky;top:0;z-index:40;background:color-mix(in srgb,var(--bg) 82%, transparent);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+.nav{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 0}
+.brand{display:flex;align-items:center;gap:12px;font-weight:800;letter-spacing:-.03em}
+.logo{width:34px;height:34px;display:grid;place-items:center;border-radius:11px;background:linear-gradient(135deg,var(--accent),var(--accent-2));box-shadow:0 10px 30px rgba(138,124,255,.24)}
+.logo svg{width:22px;height:22px}
+.nav-links{display:flex;gap:8px;flex-wrap:wrap}
+.btn,.nav-links a,.toggle button,.compare-switch button,.copy-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:1px solid var(--line);background:transparent;color:var(--muted);padding:10px 14px;border-radius:999px;text-decoration:none;font-weight:600;font-size:.92rem;cursor:pointer;transition:.18s ease}
+.btn:hover,.nav-links a:hover,.toggle button:hover,.compare-switch button:hover,.copy-btn:hover{border-color:var(--line-2);color:var(--text);transform:translateY(-1px)}
+.btn.primary{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#071018;border:none}
+.toggle button.active,.compare-switch button.active{color:var(--text);border-color:var(--line-2);background:color-mix(in srgb,var(--accent) 12%, transparent)}
+.section{padding:34px 0}
+.hero{padding:54px 0 18px}
+.hero-wrap{display:grid;grid-template-columns:1.05fr .95fr;gap:18px}
+.card{background:linear-gradient(180deg,var(--panel),var(--panel-2));border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow)}
+.hero-copy{padding:34px}
+.kicker{display:inline-flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.08em}
+.hero h1{font-size:clamp(2.4rem,5vw,4.8rem);line-height:.96;letter-spacing:-.055em;margin:18px 0 14px;max-width:10.5ch}
+.hero p{font-size:1.05rem;line-height:1.68;color:var(--muted);max-width:60ch;margin:0 0 24px}
+.actions{display:flex;gap:12px;flex-wrap:wrap}
+.hero-side{padding:22px;display:grid;gap:12px}
+.window{padding:18px;border-radius:18px;background:linear-gradient(180deg,var(--soft),transparent);border:1px solid var(--line)}
+.window-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.dots{display:flex;gap:6px}.dots span{width:8px;height:8px;border-radius:999px;background:var(--line-2)}
+.mono{font:600 .78rem ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}
+.grid-2,.grid-3,.grid-4{display:grid;gap:16px}
+.grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.grid-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.tile{padding:18px;border:1px solid var(--line);border-radius:18px;background:rgba(255,255,255,.02)}
+.tile h3,.tile h4{margin:0 0 8px;letter-spacing:-.03em}
+.tile p{margin:0;color:var(--muted);line-height:1.55}
+.metric{font-size:1.9rem;font-weight:800;letter-spacing:-.05em;margin-bottom:4px}
+.section-head{display:flex;justify-content:space-between;gap:18px;align-items:end;margin-bottom:18px}
+.section-head h2{font-size:clamp(1.6rem,3vw,2.5rem);letter-spacing:-.05em;margin:0}
+.section-head p{margin:0;max-width:62ch;color:var(--muted);line-height:1.65}
+.stack{display:grid;gap:12px}
+.fragment{padding:18px;border:1px dashed var(--line-2);border-radius:18px;background:rgba(255,255,255,.015)}
+.fragment-top{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:12px}
+.fragment-tag{font-size:.78rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.mini-hero{padding:26px;border-radius:18px;border:1px solid var(--line);background:linear-gradient(180deg,rgba(138,124,255,.12),transparent)}
+.mini-hero h3{font-size:2rem;letter-spacing:-.05em;margin:0 0 10px;max-width:11ch}
+.mini-hero p{margin:0;color:var(--muted);max-width:48ch;line-height:1.65}
+.compare-shell{padding:20px}
+.compare-top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.compare-switch{display:flex;gap:8px;flex-wrap:wrap}
+.matrix{display:none;gap:10px}
+.matrix.active{display:grid}
+.matrix-head,.matrix-row{display:grid;grid-template-columns:1.35fr repeat(4,1fr);gap:10px}
+.matrix-head>div,.matrix-row>div{padding:14px;border-radius:16px;border:1px solid var(--line);background:rgba(255,255,255,.02)}
+.matrix-head>div{font-weight:700;color:var(--muted)}
+.matrix-row .label{font-weight:700;color:var(--text)}
+.score{font-weight:800;letter-spacing:-.03em}
+.good{color:var(--good)} .warn{color:var(--warn)} .bad{color:var(--bad)}
+.note{font-size:.9rem;color:var(--muted);line-height:1.55}
+.pill-list{display:flex;gap:8px;flex-wrap:wrap}.pill{padding:8px 11px;border-radius:999px;border:1px solid var(--line);color:var(--muted);font-size:.82rem;font-weight:700}
+.email-box{padding:22px;border-radius:18px;border:1px solid var(--line);background:rgba(255,255,255,.02)}
+.email-box h3{margin:0 0 10px}
+.email-box p{margin:0;color:var(--muted);line-height:1.65}
+.footer{padding:28px 0 60px;color:var(--muted)}
+.divider{height:1px;background:var(--line);margin:10px 0 0}
+@media (max-width: 980px){
+  .hero-wrap,.grid-4,.grid-3,.grid-2,.matrix-head,.matrix-row{grid-template-columns:1fr}
+  .section-head,.fragment-top,.compare-top{align-items:flex-start;flex-direction:column}
+  .nav{align-items:flex-start;flex-direction:column}
+}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="container nav">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">
+          <svg viewBox="0 0 40 40" fill="none"><rect x="6" y="6" width="28" height="28" rx="4" stroke="white" stroke-width="2.4"/></svg>
+        </div>
+        <div>
+          <div>Reframe</div>
+          <div style="font-size:.78rem;color:var(--muted);font-weight:600">private master fragments</div>
+        </div>
+      </div>
+      <div class="nav-links">
+        <a href="#heroes">Hero</a>
+        <a href="#comparisons">Comparisons</a>
+        <a href="#agency">Agency</a>
+        <a href="#investor">Investor</a>
+        <a href="#emails">Emails</a>
+        <button class="btn" id="themeBtn">Theme</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="container hero">
+    <div class="hero-wrap">
+      <div class="card hero-copy">
+        <div class="kicker">Reframe / startup parts library</div>
+        <h1>One file. Clean fragments. Strong comparisons.</h1>
+        <p>This is not a public presentation page. It is a minimal private master file for pulling out strong sections whenever you need to show Reframe to agencies, investors, partners, or technical people.</p>
+        <div class="actions">
+          <a class="btn primary" href="#comparisons">Go to comparison blocks</a>
+          <a class="btn" href="#emails">Go to email blocks</a>
+        </div>
+      </div>
+      <div class="card hero-side">
+        <div class="window">
+          <div class="window-top"><div class="dots"><span></span><span></span><span></span></div><div class="mono">agency-first angle</div></div>
+          <div class="grid-2">
+            <div class="tile"><div class="metric">Import</div><p>Turn existing client websites into editable projects instead of starting from zero.</p></div>
+            <div class="tile"><div class="metric">Operate</div><p>Run revisions, AI edits, translation, and exports inside one workflow.</p></div>
+            <div class="tile"><div class="metric">Deliver</div><p>Make agencies faster and more standardized across multiple client projects.</p></div>
+            <div class="tile"><div class="metric">Show off</div><p>Use single sections from this file as polished snippets in outreach and demos.</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="container section" id="heroes">
+    <div class="section-head">
+      <h2>Hero fragments</h2>
+      <p>These are intentionally compact and minimal so you can screenshot them, paste them into a deck, or reuse them as standalone blocks.</p>
+    </div>
+    <div class="grid-3">
+      <div class="fragment">
+        <div class="fragment-top"><div class="fragment-tag">agency hero / 01</div><button class="copy-btn" data-copy="Reframe helps agencies import existing websites, turn them into structured projects, and deliver revisions, translations, and exports faster.">Copy text</button></div>
+        <div class="mini-hero"><h3>Built for agencies that need speed without chaos.</h3><p>Import client websites, restructure them into editable projects, run AI-assisted revisions, and ship cleaner delivery workflows.</p></div>
+      </div>
+      <div class="fragment">
+        <div class="fragment-top"><div class="fragment-tag">agency hero / 02</div><button class="copy-btn" data-copy="Reframe is the operating layer for agencies handling client website imports, edits, localization, and delivery.">Copy text</button></div>
+        <div class="mini-hero"><h3>The operating layer for modern website delivery.</h3><p>Reframe gives agencies one place to import, edit, optimize, translate, and export websites across multiple client projects.</p></div>
+      </div>
+      <div class="fragment">
+        <div class="fragment-top"><div class="fragment-tag">investor hero / 03</div><button class="copy-btn" data-copy="Reframe turns the broken website rebuild workflow into a structured software layer: import, understand, edit, optimize, export.">Copy text</button></div>
+        <div class="mini-hero"><h3>Import. Understand. Edit. Export.</h3><p>Reframe transforms fragmented website work into software. That creates a bigger platform surface than simple site builders or generic AI tools.</p></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="container section" id="comparisons">
+    <div class="section-head">
+      <h2>Comparison blocks</h2>
+      <p>The strongest part of the file. These sections are written to make Reframe feel bigger than a builder and more operational than AI chat tools, especially for agency workflows.</p>
+    </div>
+    <div class="card compare-shell">
+      <div class="compare-top">
+        <div>
+          <div class="pill-list">
+            <div class="pill">primary target: agencies</div>
+            <div class="pill">secondary: in-house teams</div>
+            <div class="pill">secondary: freelancers</div>
+          </div>
+        </div>
+        <div class="compare-switch">
+          <button class="active" data-target="matrix1">Strategic</button>
+          <button data-target="matrix2">Agency workflow</button>
+          <button data-target="matrix3">Client delivery</button>
+        </div>
+      </div>
+
+      <div class="matrix active" id="matrix1">
+        <div class="matrix-head">
+          <div>Dimension</div><div>Reframe</div><div>Webflow</div><div>WordPress stack</div><div>AI chat tools</div>
+        </div>
+        <div class="matrix-row"><div class="label">Starting from existing client websites</div><div class="score good">Native core story</div><div class="score warn">Possible, not core identity</div><div class="score warn">Possible with migration work</div><div class="score bad">No real project structure</div></div>
+        <div class="matrix-row"><div class="label">Agency operations fit</div><div class="score good">Strong positioning</div><div class="score warn">Design/build centric</div><div class="score warn">Flexible but fragmented</div><div class="score bad">Not an ops system</div></div>
+        <div class="matrix-row"><div class="label">AI inside real site context</div><div class="score good">Core platform thesis</div><div class="score warn">AI features exist but narrower</div><div class="score warn">Plugin dependent</div><div class="score bad">Context breaks across chats</div></div>
+        <div class="matrix-row"><div class="label">Structured delivery workflow</div><div class="score good">High potential moat</div><div class="score warn">Mostly publish/build workflow</div><div class="score warn">Depends on stack discipline</div><div class="score bad">No workflow substrate</div></div>
+        <div class="matrix-row"><div class="label">Replace many tool hops</div><div class="score good">Strong narrative</div><div class="score warn">Some consolidation</div><div class="score bad">Usually many plugins</div><div class="score bad">Still needs many tools</div></div>
+      </div>
+
+      <div class="matrix" id="matrix2">
+        <div class="matrix-head">
+          <div>Agency workflow step</div><div>Reframe</div><div>Webflow</div><div>WordPress stack</div><div>Manual agency stack</div>
+        </div>
+        <div class="matrix-row"><div class="label">Take over an existing client site</div><div class="score good">Core entry point</div><div class="score warn">Often rebuild-led</div><div class="score warn">Migration heavy</div><div class="score bad">Messy audit process</div></div>
+        <div class="matrix-row"><div class="label">Turn it into a reusable project</div><div class="score good">Strong product story</div><div class="score warn">Possible but not same angle</div><div class="score warn">Depends on setup quality</div><div class="score bad">Usually docs + Figma + PM tools</div></div>
+        <div class="matrix-row"><div class="label">Run revisions faster</div><div class="score good">Very strong sell</div><div class="score warn">Good for managed builds</div><div class="score warn">Often plugin and theme friction</div><div class="score bad">Revision loop drag</div></div>
+        <div class="matrix-row"><div class="label">Localization / multilingual work</div><div class="score good">Big agency value</div><div class="score warn">Available, more bounded</div><div class="score warn">Usually plugin-based complexity</div><div class="score bad">Manual duplicated workflow</div></div>
+        <div class="matrix-row"><div class="label">Export / handoff confidence</div><div class="score good">Delivery-centered story</div><div class="score warn">Good but platform-specific</div><div class="score warn">Depends on stack cleanliness</div><div class="score bad">Always inconsistent</div></div>
+      </div>
+
+      <div class="matrix" id="matrix3">
+        <div class="matrix-head">
+          <div>Client-facing outcome</div><div>Reframe</div><div>Webflow</div><div>WordPress stack</div><div>Generic AI tooling</div>
+        </div>
+        <div class="matrix-row"><div class="label">Client feels agency has a system</div><div class="score good">High</div><div class="score warn">Moderate</div><div class="score warn">Varies heavily</div><div class="score bad">Low</div></div>
+        <div class="matrix-row"><div class="label">Less visible workflow chaos</div><div class="score good">High</div><div class="score warn">Medium</div><div class="score bad">Low with plugin sprawl</div><div class="score bad">Very low</div></div>
+        <div class="matrix-row"><div class="label">Faster multilingual turnarounds</div><div class="score good">High</div><div class="score warn">Medium</div><div class="score warn">Medium</div><div class="score bad">Low</div></div>
+        <div class="matrix-row"><div class="label">Clearer revision process</div><div class="score good">High</div><div class="score warn">Medium</div><div class="score warn">Medium</div><div class="score bad">Low</div></div>
+        <div class="matrix-row"><div class="label">Feels like premium infrastructure</div><div class="score good">High</div><div class="score warn">High for design-centric clients</div><div class="score warn">Medium</div><div class="score bad">Low</div></div>
+      </div>
+      <div style="margin-top:14px" class="note">Use this as a strategic comparison, not as a fake benchmark. The goal is to frame Reframe as an agency operating layer rather than just another builder.</div>
+    </div>
+  </div>
+
+  <div class="container section" id="agency">
+    <div class="section-head">
+      <h2>Agency-specific fragments</h2>
+      <p>Short modular sections you can screenshot or paste into outreach, landing pages, product docs, or quick decks.</p>
+    </div>
+    <div class="grid-4">
+      <div class="tile"><h3>Client takeover</h3><p>Reframe starts where agencies actually start: existing client websites, not blank canvases.</p></div>
+      <div class="tile"><h3>Revision velocity</h3><p>Reduce slow client revision loops by moving edits, AI, and structure into one project workflow.</p></div>
+      <div class="tile"><h3>Localization</h3><p>Make multilingual delivery feel like an extension of the workflow, not a separate project nightmare.</p></div>
+      <div class="tile"><h3>Delivery system</h3><p>Look more premium to clients because the agency has a real operating layer behind the work.</p></div>
+    </div>
+  </div>
+
+  <div class="container section" id="investor">
+    <div class="section-head">
+      <h2>Investor / thesis fragments</h2>
+      <p>These are written for concise founder outreach or small teaser docs rather than full investor decks.</p>
+    </div>
+    <div class="grid-3">
+      <div class="email-box"><h3>Category framing</h3><p>Reframe is not just a builder. It is a workflow layer for agencies and teams that need to take over existing websites, turn them into structured projects, and run edits, localization, AI, and delivery from one place.</p></div>
+      <div class="email-box"><h3>Why now</h3><p>Website work is still fragmented across builders, plugins, docs, PM tools, and AI chats. The stack is overdue for a system that connects the real website, the workflow, and the intelligence layer.</p></div>
+      <div class="email-box"><h3>Moat angle</h3><p>If Reframe becomes the system agencies use to ingest, restructure, edit, and deliver websites, it can own more of the operational surface than tools that focus only on design or only on AI chat.</p></div>
+    </div>
+  </div>
+
+  <div class="container section" id="emails">
+    <div class="section-head">
+      <h2>Email snippet blocks</h2>
+      <p>These are the tiny building blocks. Full email templates are also included below in chat so you can copy them directly.</p>
+    </div>
+    <div class="grid-3">
+      <div class="fragment"><div class="fragment-top"><div class="fragment-tag">one-liner</div><button class="copy-btn" data-copy="Reframe helps agencies import existing websites, turn them into structured projects, and run edits, AI workflows, localization, and delivery from one system.">Copy text</button></div><p class="note">Reframe helps agencies import existing websites, turn them into structured projects, and run edits, AI workflows, localization, and delivery from one system.</p></div>
+      <div class="fragment"><div class="fragment-top"><div class="fragment-tag">investor hook</div><button class="copy-btn" data-copy="We're building Reframe, an agency-first operating layer for website takeovers, revisions, localization, and delivery.">Copy text</button></div><p class="note">We're building Reframe, an agency-first operating layer for website takeovers, revisions, localization, and delivery.</p></div>
+      <div class="fragment"><div class="fragment-top"><div class="fragment-tag">agency hook</div><button class="copy-btn" data-copy="Most agencies still handle client website work across too many disconnected tools. Reframe compresses that workflow into one product.">Copy text</button></div><p class="note">Most agencies still handle client website work across too many disconnected tools. Reframe compresses that workflow into one product.</p></div>
+    </div>
+  </div>
+
+  <div class="container footer">
+    <div class="divider"></div>
+    <p>Reframe private master file — built to pull sections from, not to show as one giant presentation.</p>
+  </div>
+
+<script>
+const themeBtn = document.getElementById('themeBtn');
+themeBtn.addEventListener('click', () => document.body.classList.toggle('light'));
+
+document.querySelectorAll('.compare-switch button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.compare-switch button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('.matrix').forEach(m => m.classList.remove('active'));
+    document.getElementById(btn.dataset.target).classList.add('active');
+  });
+});
+
+document.querySelectorAll('.copy-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(btn.dataset.copy || '');
+      const old = btn.textContent;
+      btn.textContent = 'Copied';
+      setTimeout(() => btn.textContent = old, 1200);
+    } catch(e) {
+      btn.textContent = 'Copy failed';
+      setTimeout(() => btn.textContent = 'Copy text', 1200);
+    }
+  });
+});
+</script>
+</body>
+</html>

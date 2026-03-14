@@ -1,22 +1,27 @@
 # Edit Workspace
 
-Clean monorepo layout:
+Top-level layout:
 
-- `apps/web`
-  - `apps/web/dashboard`: Web frontend (Vite + React)
-  - `apps/web/server`: Web backend (Node + Express)
-- `apps/mobile`
-  - `apps/mobile/ios`: iOS native wrapper (Capacitor)
-  - `apps/mobile/android`: Android native wrapper (Capacitor)
-- `apps/desktop`
-  - Reserved area for desktop app shell
+- `Web-App`
+  - `Web-App/dashboard`: Web frontend (Vite + React)
+  - `Web-App/server`: Web backend (Node + Express)
+- `Desktop-Software`
+  - Reserved area for desktop shell (Electron/Tauri)
+- `IOS_App`
+  - iOS native wrapper (Capacitor)
+- `Google-App`
+  - Android native wrapper (Capacitor)
+- `Brand`
+  - Brand/media assets
+- `Rest`
+  - Runtime support, docs, scripts, and legacy material
 
 Support folders:
 
-- `scripts`: root automation scripts (smoke, checks, ops)
-- `docs`: architecture and status/checklists
-- `assets`: brand/media assets
-- `archive`: legacy or non-runtime files
+- `Rest/scripts`: automation scripts (smoke, checks, ops)
+- `Rest/docs`: architecture and status/checklists
+- `Rest/archive`: legacy or non-runtime files
+- `Rest/mobile-workspace`: Capacitor workspace glue for iOS/Android sync
 
 ## Common Commands (from repo root)
 

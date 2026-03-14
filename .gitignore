@@ -1,9 +1,10 @@
 node_modules
-apps/web/dashboard/node_modules
-apps/web/server/node_modules
-apps/web/dashboard/dist
+Web-App/dashboard/node_modules
+Web-App/server/node_modules
+Web-App/dashboard/dist
+Rest/mobile-workspace/node_modules
 exports
-apps/web/server/editor.db
+Web-App/server/editor.db
 .env
 .DS_Store
 node_modules/
@@ -11,19 +12,19 @@ dist/
 Bin/
 .playwright-cli/
 .vscode/
-apps/web/dashboard/_backups/
-apps/web/dashboard/.env.local
-apps/web/dashboard/src/ui-draft/
-apps/web/dashboard/src/ui-draft-agency-v2/
-apps/web/server/.env
-apps/web/server/data/*.db
-apps/web/server/thumbnails/
+Web-App/dashboard/_backups/
+Web-App/dashboard/.env.local
+Web-App/dashboard/src/ui-draft/
+Web-App/dashboard/src/ui-draft-agency-v2/
+Web-App/server/.env
+Web-App/server/data/*.db
+Web-App/server/thumbnails/
 *.backup
 *.tmp
 *.bak
 repo/
 roadmap/
-apps/web/server/data/
+Web-App/server/data/
 
 # local assessment / scratch files
 auth_assessment.html
