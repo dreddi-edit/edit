@@ -55,6 +55,8 @@
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.26);
   backdrop-filter: blur(20px);
   z-index: 80;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .editor-toolbar__cluster {
@@ -436,7 +438,52 @@
   padding: 16px 12px 24px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+}
+
+.editor-panel__accordion {
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(255, 255, 255, 0.02);
+  overflow: hidden;
+}
+
+.editor-panel__accordion-toggle {
+  list-style: none;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(180, 196, 214, 0.92);
+}
+
+.editor-panel__accordion-toggle::-webkit-details-marker {
+  display: none;
+}
+
+.editor-panel__accordion-chevron {
+  font-size: 12px;
+  line-height: 1;
+  transition: transform 0.18s ease;
+}
+
+.editor-panel__accordion[open] .editor-panel__accordion-chevron {
+  transform: rotate(180deg);
+}
+
+.editor-panel__accordion .editor-panel__section {
+  border: 0;
+  border-top: 1px solid rgba(148, 163, 184, 0.12);
+  border-radius: 0;
+  background: transparent;
 }
 
 .editor-panel__collapsed-stack {
@@ -1449,6 +1496,7 @@
 .editor-shell.theme-light .editor-panel__mini-platform,
 .editor-shell.theme-light .editor-panel__mini-action,
 .editor-shell.theme-light .editor-panel__mini-readiness,
+.editor-shell.theme-light .editor-panel__accordion,
 .editor-shell.theme-light .editor-panel__section,
 .editor-shell.theme-light .editor-panel__site-card,
 .editor-shell.theme-light .editor-panel__url,
@@ -1472,6 +1520,7 @@
 }
 
 .editor-shell.theme-light .editor-panel__label,
+.editor-shell.theme-light .editor-panel__accordion-toggle,
 .editor-shell.theme-light .editor-panel__site-meta,
 .editor-shell.theme-light .editor-panel__url,
 .editor-shell.theme-light .editor-panel__note,
@@ -1651,8 +1700,6 @@
   .editor-toolbar {
     gap: 8px;
     padding-inline: 10px;
-    overflow-x: auto;
-    overflow-y: hidden;
   }
 
   .editor-toolbar__project,

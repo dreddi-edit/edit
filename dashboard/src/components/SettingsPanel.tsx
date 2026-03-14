@@ -1,6 +1,5 @@
-import React from 'react';
-
 import { useEffect, useState, type ReactNode } from "react"
+import { useMemo } from "react"
 import { toast } from "./Toast"
 import { errMsg } from "../utils/errMsg"
 import {
@@ -23,12 +22,9 @@ import {
   searchUrl,
   type PageSpeedData,
 } from "../utils/googleApis"
-
 const BASE = ""
 
-type TabId = "general" | "profile" | "apikeys" | "org" | "google"
-type GoogleSectionId = "seo" | "ai" | "media" | "export"
-type GoogleResult = Record<string, any>
+type TabId = "general" | "profile" | "apikeys" | "org"
 type Settings = { theme: string; disabled_models: string[]; theme_explicit?: boolean }
 type NotificationPrefs = { email_updates: boolean; team_mentions: boolean }
 type ApiKey = {
@@ -71,7 +67,6 @@ const TABS: Array<{ id: TabId; label: string }> = [
   { id: "profile", label: "Profile & Billing" },
   { id: "apikeys", label: "API Keys" },
   { id: "org", label: "Organisation" },
-  { id: "google", label: "Google AI Suite" },
 ]
 
 const PROVIDER_COLORS: Record<string, string> = {
@@ -144,8 +139,6 @@ export default function SettingsPanel({
   const [approvalThreshold, setApprovalThresholdState] = useState(getApprovalThreshold())
   const [approvalThresholdInput, setApprovalThresholdInput] = useState(formatThreshold(getApprovalThreshold()))
   const [onlyOwnKey, setOnlyOwnKey] = useState(false)
-  const [seoData, setSeoData] = useState<PageSpeedData | null>(null)
-  const [seoLoading, setSeoLoading] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
@@ -184,21 +177,31 @@ export default function SettingsPanel({
   const [inviteEmail, setInviteEmail] = useState("")
   const [inviteRole, setInviteRole] = useState("editor")
 
-  const [googleLoading, setGoogleLoading] = useState<string | null>(null)
-  const [googleResults, setGoogleResults] = useState<Record<string, GoogleResult>>({})
-  const [expandedSections, setExpandedSections] = useState<Record<GoogleSectionId, boolean>>({
-    seo: true,
-    ai: true,
-    media: true,
-    export: true,
-  })
-
   const effectiveSettings =
     settings ??
     ({
       theme: resolveThemePreference(),
       disabled_models: [],
     } satisfies Settings)
+
+  const keyDetectedModels = useMemo(() => {
+    const map = new Map<string, { value: string; label: string }>()
+    for (const key of myKeys) {
+      for (const model of key.detected_models || []) {
+        const value = String(model.value || "").trim()
+        if (!value) continue
+        if (!map.has(value)) {
+          map.set(value, {
+            value,
+            label: String(model.label || value),
+          })
+        }
+      }
+    }
+    return Array.from(map.values())
+  }, [myKeys])
+
+  const keyDetectedModelSet = useMemo(() => new Set(keyDetectedModels.map((model) => model.value)), [keyDetectedModels])
 
   useEffect(() => {
     setLanguageChoice(lang)
@@ -672,155 +675,6 @@ export default function SettingsPanel({
     }
   }
 
-  const analyzeSeo = async () => {
-    setSeoLoading(true)
-    try {
-      const data = await analyzePageSpeed(getCurrentUrl())
-      setSeoData(data)
-      toast.success("SEO Analyse fertig")
-    } catch (error) {
-      toast.error(errMsg(error))
-    } finally {
-      setSeoLoading(false)
-    }
-  }
-
-  const toggleSection = (section: GoogleSectionId) => {
-    setExpandedSections(previous => ({ ...previous, [section]: !previous[section] }))
-  }
-
-  const getCurrentUrl = () => {
-    const cached = localStorage.getItem("se_last_loaded_url") || ""
-    if (/^https?:\/\//i.test(cached)) return cached
-    const fallback = window.location.origin + "/preview/" + window.location.pathname.split("/").pop()
-    return fallback
-  }
-
-  const runGoogleApi = async (apiName: string, apiFunction: () => Promise<unknown>) => {
-    setGoogleLoading(apiName)
-    try {
-      const result = (await apiFunction()) || {}
-      setGoogleResults(previous => ({ ...previous, [apiName]: result as GoogleResult }))
-      toast.success(`${apiName} abgeschlossen`)
-    } catch (error) {
-      toast.error(errMsg(error))
-    } finally {
-      setGoogleLoading(null)
-    }
-  }
-
-  const renderGoogleResult = (apiName: string) => {
-    const result = googleResults[apiName]
-    if (!result) return null
-
-    if (apiName === "Chrome UX Report") {
-      return (
-        <ResultCard>
-          <strong>Chrome UX:</strong> Mobile {result.mobileP75 ?? 0}ms | Desktop {result.desktopP75 ?? 0}ms
-        </ResultCard>
-      )
-    }
-    if (apiName === "PageSpeed Insights") {
-      return (
-        <ResultCard>
-          <strong>PageSpeed:</strong> {result.performance ?? 0}/100 | SEO {result.seo ?? 0}/100 | FCP {result.fcp || "N/A"}
-        </ResultCard>
-      )
-    }
-    if (apiName === "Custom Search") {
-      return (
-        <ResultCard>
-          <strong>Search Results:</strong> {result.items?.length || 0} Treffer
-        </ResultCard>
-      )
-    }
-    if (apiName === "Gemini Generate") {
-      return (
-        <ResultCard>
-          <strong>Gemini Output:</strong> {previewText(String(result.text || ""))}
-        </ResultCard>
-      )
-    }
-    if (apiName === "NLP Entities") {
-      return (
-        <ResultCard>
-          <strong>Entities:</strong> {result.entities?.length || 0} erkannt
-        </ResultCard>
-      )
-    }
-    if (apiName === "Translation") {
-      return (
-        <ResultCard>
-          <strong>Translation:</strong> {result.translatedText || "Keine Ausgabe"}
-        </ResultCard>
-      )
-    }
-    if (apiName === "Speech to Text") {
-      return (
-        <ResultCard>
-          <strong>Speech:</strong> {result.transcript || "Keine Audiodatei"}
-        </ResultCard>
-      )
-    }
-    if (apiName === "Vision Analysis") {
-      return (
-        <ResultCard>
-          <strong>Vision:</strong> {result.labels?.length || 0} Labels, {result.objects?.length || 0} Objekte
-        </ResultCard>
-      )
-    }
-    if (apiName === "Video Intelligence") {
-      return (
-        <ResultCard>
-          <strong>Video:</strong> {result.shots?.length || 0} Shots, {result.labels?.length || 0} Labels
-        </ResultCard>
-      )
-    }
-    if (apiName === "YouTube Search") {
-      return (
-        <ResultCard>
-          <strong>YouTube:</strong> {result.items?.length || 0} Videos gefunden
-        </ResultCard>
-      )
-    }
-    if (apiName === "Device Specs") {
-      return (
-        <ResultCard>
-          <strong>Devices:</strong> {result.deviceSpecs?.length || 0} Gerätetypen
-        </ResultCard>
-      )
-    }
-    if (apiName === "Document AI") {
-      return (
-        <ResultCard>
-          <strong>Document AI:</strong> {result.entities?.length || 0} Entities extrahiert
-        </ResultCard>
-      )
-    }
-    if (apiName === "Firebase Hosting") {
-      return (
-        <ResultCard>
-          <strong>Hosting:</strong> {result.siteUrl || "Keine Site"} ({result.version || "n/a"})
-        </ResultCard>
-      )
-    }
-    if (apiName === "Cloud Storage") {
-      return (
-        <ResultCard>
-          <strong>Storage:</strong> {result.bucket || "Kein Bucket"} · {result.size || 0} bytes
-        </ResultCard>
-      )
-    }
-    if (apiName === "BigQuery") {
-      return (
-        <ResultCard>
-          <strong>BigQuery:</strong> {result.totalRows || 0} rows returned
-        </ResultCard>
-      )
-    }
-    return null
-  }
-
   return (
     <div className="draft-settings-backdrop" onClick={onClose}>
       <div
@@ -982,6 +836,14 @@ export default function SettingsPanel({
                 />
 
                 <div className="draft-settings-model-browser">
+                  {keyDetectedModels.length ? (
+                    <div className="draft-settings-model-availability">
+                      <strong>{keyDetectedModels.length} models detected from your API keys</strong>
+                      <span>
+                        The list below prioritizes models your saved keys can actually call, plus curated fallbacks.
+                      </span>
+                    </div>
+                  ) : null}
                   <button
                     type="button"
                     className={`draft-settings-model-browser-toggle ${modelBrowserOpen ? "is-open" : ""}`}
@@ -999,7 +861,10 @@ export default function SettingsPanel({
                   {modelBrowserOpen ? (
                     <div className="draft-settings-model-browser-body">
                       {MODEL_CATEGORIES.map(category => {
-                        const categoryModels = getCategoryModels(category.id)
+                        const categoryModels = getCategoryModels(category.id).filter((model) => {
+                          if (!keyDetectedModelSet.size) return true
+                          return keyDetectedModelSet.has(model.id) || model.provider === "ollama"
+                        })
                         const activeCount = categoryModels.filter(
                           model => !effectiveSettings.disabled_models.includes(model.id)
                         ).length
@@ -1048,6 +913,11 @@ export default function SettingsPanel({
                                     </div>
                                   )
                                 })}
+                                {categoryModels.length === 0 ? (
+                                  <div className="draft-settings-model-empty">
+                                    No detected models in this category for your currently saved keys.
+                                  </div>
+                                ) : null}
                               </div>
                             ) : null}
                           </div>
@@ -1056,22 +926,6 @@ export default function SettingsPanel({
                     </div>
                   ) : null}
                 </div>
-              </Section>
-
-              <Section label={t("SEO Analysis")}>
-                <button
-                  type="button"
-                  className="draft-settings-seo-button"
-                  onClick={() => void analyzeSeo()}
-                  disabled={seoLoading || loading}
-                >
-                  {seoLoading ? "..." : "🔍"} {t("Analyze SEO")}
-                </button>
-                {seoData ? (
-                  <ResultCard>
-                    <strong>Performance:</strong> {seoData.performance}/100 | SEO {seoData.seo}/100 | FCP {seoData.fcp}
-                  </ResultCard>
-                ) : null}
               </Section>
             </div>
           ) : null}
@@ -1087,120 +941,54 @@ export default function SettingsPanel({
                         ? `Member since ${new Date(currentUser.created_at).toLocaleDateString("de-DE")}`
                         : "Account details"}
                     </div>
-                  </div>
-                  <div className="draft-settings-inline" style={{ flexWrap: "wrap", justifyContent: "flex-end" }}>
-                    <span
-                      className={`draft-settings-pill ${
-                        currentUser?.email_verified ? "draft-settings-pill--success" : "draft-settings-pill--pending"
-                      }`}
-                    >
-                      {currentUser?.email_verified ? "Email verified" : "Email pending"}
-                    </span>
-                    <span className="draft-settings-pill">{String(currentUser?.plan_id || "basis").toUpperCase()}</span>
-                    <span className="draft-settings-pill">
-                      {String(currentUser?.plan_status || "active").replace(/_/g, " ")}
-                    </span>
-                    <span
-                      className={`draft-settings-pill ${
-                        currentUser?.totp_enabled ? "draft-settings-pill--success" : "draft-settings-pill--pending"
-                      }`}
-                    >
-                      {currentUser?.totp_enabled ? "2FA on" : "2FA off"}
-                    </span>
+                    {currentUser?.email ? (
+                      <div className="draft-settings-list-meta" style={{ marginTop: 6 }}>
+                        {currentUser.email}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
-                <SettingRow
-                  title={t("Display Name")}
-                  subtitle={t("Update how your name appears across the app")}
-                  control={
-                    <input
-                      aria-label={t("Display Name")}
-                      className="draft-settings-text-input"
-                      placeholder={t("Your Name")}
-                      value={currentUser?.name || ""}
-                      onChange={(event) =>
-                        setCurrentUser((previous) => (previous ? { ...previous, name: event.target.value } : previous))
-                      }
-                      onBlur={(event) => {
-                        const value = event.target.value.trim()
-                        if (value) void saveProfile({ name: value })
-                      }}
-                    />
-                  }
-                />
-                <SettingRow
-                  title={t("Email Address")}
-                  subtitle={t("Changing your email sends a verification link before the new address becomes active")}
-                  control={
-                    <input
-                      aria-label={t("Email Address")}
-                      className="draft-settings-text-input"
-                      type="email"
-                      placeholder="email@example.com"
-                      value={currentUser?.email || ""}
-                      onChange={(event) =>
-                        setCurrentUser((previous) => (previous ? { ...previous, email: event.target.value } : previous))
-                      }
-                      onBlur={(event) => {
-                        const value = event.target.value.trim()
-                        if (value) void saveProfile({ email: value })
-                      }}
-                    />
-                  }
-                />
-
-                <div className="draft-settings-input-row draft-settings-input-row--stack-mobile" style={{ marginTop: 14 }}>
-                  <input
-                    aria-label={t("Avatar URL")}
-                    className="draft-settings-text-input"
-                    type="url"
-                    placeholder="https://images.example.com/avatar.jpg"
-                    value={avatarDraft}
-                    onChange={(event) => setAvatarDraft(event.target.value)}
-                  />
-                  <button
-                    type="button"
-                    className="draft-settings-action-button"
-                    disabled={accountBusy === "avatar" || accountBusy === "avatar-upload"}
-                    onClick={() => void saveAvatar()}
-                  >
-                    {accountBusy === "avatar" ? "Saving..." : "Save avatar"}
-                  </button>
-                </div>
-                <div className="draft-settings-input-row draft-settings-input-row--stack-mobile" style={{ marginTop: 10 }}>
-                  <input
-                    aria-label={t("Upload avatar image")}
-                    className="draft-settings-text-input"
-                    type="file"
-                    accept="image/png,image/jpeg,image/webp,image/gif"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0] || null
-                      void uploadAvatarFile(file)
-                      event.currentTarget.value = ""
-                    }}
-                  />
-                  <div className="draft-settings-description" style={{ margin: 0, alignSelf: "center" }}>
-                    {accountBusy === "avatar-upload" ? "Uploading..." : "Choose an image to upload"}
-                  </div>
-                </div>
-                {avatarDraft ? (
-                  <div className="draft-settings-list-card" style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 14 }}>
-                    <img
-                      src={avatarDraft}
-                      alt="Avatar preview"
-                      style={{ width: 56, height: 56, borderRadius: 14, objectFit: "cover", border: "1px solid rgba(255,255,255,0.12)" }}
-                    />
-                    <div className="draft-settings-list-main">
-                      <strong>Avatar preview</strong>
-                      <div className="draft-settings-list-meta">The image URL is saved on your account profile.</div>
+                <div className="draft-settings-list-card">
+                  <div className="draft-settings-list-main">
+                    <strong>Avatar</strong>
+                    <div className="draft-settings-list-meta">
+                      Add an image URL if you want your account avatar to appear in account and activity surfaces.
                     </div>
                   </div>
-                ) : (
-                  <p className="draft-settings-description" style={{ marginTop: 10, marginBottom: 0 }}>
-                    Add an image URL if you want your account avatar to appear in account and activity surfaces.
-                  </p>
-                )}
+                  <div className="draft-settings-input-row draft-settings-input-row--stack-mobile" style={{ marginTop: 12 }}>
+                    <input
+                      className="draft-settings-text-input"
+                      type="url"
+                      placeholder="https://..."
+                      value={avatarDraft}
+                      onChange={(event) => setAvatarDraft(event.target.value)}
+                    />
+                    <button
+                      type="button"
+                      className="draft-settings-action-button"
+                      disabled={accountBusy === "avatar"}
+                      onClick={() => void saveAvatar()}
+                    >
+                      {accountBusy === "avatar" ? "Saving..." : "Save avatar URL"}
+                    </button>
+                  </div>
+                  <div className="draft-settings-input-row" style={{ marginTop: 10 }}>
+                    <label className="draft-settings-action-button" style={{ display: "inline-flex", cursor: "pointer" }}>
+                      {accountBusy === "avatar-upload" ? "Uploading..." : "Upload image"}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        style={{ display: "none" }}
+                        onChange={(event) => {
+                          const file = event.target.files?.[0] || null
+                          void uploadAvatarFile(file)
+                          event.target.value = ""
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
               </Section>
 
               <Section label={t("Security")}>
@@ -1772,156 +1560,6 @@ export default function SettingsPanel({
               )}
             </div>
           ) : null}
-
-          {tab === "google" ? (
-            <div className="draft-settings-pane" role="tabpanel" id="tabpanel-google" aria-labelledby="tab-google">
-              <p className="draft-settings-description">
-                15 Google APIs für SEO, KI-Inhalte, Bilder/Videos und Export/Deployment.
-              </p>
-
-              <GoogleSection
-                emoji="📊"
-                title="SEO & Performance"
-                open={expandedSections.seo}
-                onToggle={() => toggleSection("seo")}
-              >
-                <div className="draft-settings-api-grid">
-                  <GoogleActionButton
-                    emoji="🔍"
-                    label="Chrome UX Report"
-                    loading={googleLoading === "Chrome UX Report"}
-                    onClick={() => void runGoogleApi("Chrome UX Report", () => getCrUXMetrics(getCurrentUrl()))}
-                  />
-                  <GoogleActionButton
-                    emoji="⚡"
-                    label="PageSpeed Insights"
-                    loading={googleLoading === "PageSpeed Insights"}
-                    onClick={() => void runGoogleApi("PageSpeed Insights", () => analyzePageSpeed(getCurrentUrl()))}
-                  />
-                  <GoogleActionButton
-                    emoji="🔎"
-                    label="Custom Search"
-                    loading={googleLoading === "Custom Search"}
-                    onClick={() => void runGoogleApi("Custom Search", () => searchUrl(getCurrentUrl()))}
-                  />
-                </div>
-                {renderGoogleResult("Chrome UX Report")}
-                {renderGoogleResult("PageSpeed Insights")}
-                {renderGoogleResult("Custom Search")}
-              </GoogleSection>
-
-              <GoogleSection emoji="🤖" title="AI Content" open={expandedSections.ai} onToggle={() => toggleSection("ai")}>
-                <div className="draft-settings-api-grid">
-                  <GoogleActionButton
-                    emoji="✨"
-                    label="Gemini Generate"
-                    loading={googleLoading === "Gemini Generate"}
-                    onClick={() =>
-                      void runGoogleApi("Gemini Generate", () => generateContent("Generate marketing copy for this website"))
-                    }
-                  />
-                  <GoogleActionButton
-                    emoji="📝"
-                    label="NLP Entities (requires real text input)"
-                    loading={false}
-                    onClick={() => toast.warning("NLP Entities needs real text input and is disabled in Settings.")}
-                  />
-                  <GoogleActionButton
-                    emoji="🌐"
-                    label="Translate Text (requires real text input)"
-                    loading={false}
-                    onClick={() => toast.warning("Translation needs real text input and is disabled in Settings.")}
-                  />
-                  <GoogleActionButton
-                    emoji="🎙️"
-                    label="Speech to Text (requires real audio file)"
-                    loading={false}
-                    onClick={() => toast.warning("Speech to Text needs a real audio file and is disabled in Settings.")}
-                  />
-                </div>
-                {renderGoogleResult("Gemini Generate")}
-                {renderGoogleResult("NLP Entities")}
-                {renderGoogleResult("Translation")}
-                {renderGoogleResult("Speech to Text")}
-              </GoogleSection>
-
-              <GoogleSection
-                emoji="🎬"
-                title="Images & Videos"
-                open={expandedSections.media}
-                onToggle={() => toggleSection("media")}
-              >
-                <div className="draft-settings-api-grid">
-                  <GoogleActionButton
-                    emoji="👁️"
-                    label="Vision Analysis (requires real image input)"
-                    loading={false}
-                    onClick={() => toast.warning("Vision Analysis needs a real image input and is disabled in Settings.")}
-                  />
-                  <GoogleActionButton
-                    emoji="🎥"
-                    label="Video Intelligence"
-                    loading={googleLoading === "Video Intelligence"}
-                    onClick={() => void runGoogleApi("Video Intelligence", () => analyzeVideo(getCurrentUrl()))}
-                  />
-                  <GoogleActionButton
-                    emoji="📺"
-                    label="YouTube Search (requires search query)"
-                    loading={false}
-                    onClick={() => toast.warning("YouTube Search needs a real query and is disabled in Settings.")}
-                  />
-                  <GoogleActionButton
-                    emoji="📱"
-                    label="Device Specs"
-                    loading={googleLoading === "Device Specs"}
-                    onClick={() => void runGoogleApi("Device Specs", () => getDeviceSpecs())}
-                  />
-                </div>
-                {renderGoogleResult("Vision Analysis")}
-                {renderGoogleResult("Video Intelligence")}
-                {renderGoogleResult("YouTube Search")}
-                {renderGoogleResult("Device Specs")}
-              </GoogleSection>
-
-              <GoogleSection
-                emoji="🚀"
-                title="Export & Deploy"
-                open={expandedSections.export}
-                onToggle={() => toggleSection("export")}
-              >
-                <div className="draft-settings-api-grid">
-                  <GoogleActionButton
-                    emoji="📄"
-                    label="Document AI (requires real document)"
-                    loading={false}
-                    onClick={() => toast.warning("Document AI needs a real document and is disabled in Settings.")}
-                  />
-                  <GoogleActionButton
-                    emoji="🔥"
-                    label="Firebase Hosting (requires real site ID)"
-                    loading={false}
-                    onClick={() => toast.warning("Firebase Hosting needs a real site ID and is disabled in Settings.")}
-                  />
-                  <GoogleActionButton
-                    emoji="☁️"
-                    label="Cloud Storage (requires real file and bucket)"
-                    loading={false}
-                    onClick={() => toast.warning("Cloud Storage needs a real file and bucket and is disabled in Settings.")}
-                  />
-                  <GoogleActionButton
-                    emoji="📊"
-                    label="BigQuery (requires real project/query)"
-                    loading={false}
-                    onClick={() => toast.warning("BigQuery needs a real project and query and is disabled in Settings.")}
-                  />
-                </div>
-                {renderGoogleResult("Document AI")}
-                {renderGoogleResult("Firebase Hosting")}
-                {renderGoogleResult("Cloud Storage")}
-                {renderGoogleResult("BigQuery")}
-              </GoogleSection>
-            </div>
-          ) : null}
         </div>
       </div>
     </div>
@@ -1972,52 +1610,6 @@ function Toggle({
       <span className="draft-settings-toggle-track" />
       <span className="draft-settings-toggle-thumb" />
     </label>
-  )
-}
-
-function GoogleSection({
-  emoji,
-  title,
-  open,
-  onToggle,
-  children,
-}: {
-  emoji: string
-  title: string
-  open: boolean
-  onToggle: () => void
-  children: ReactNode
-}) {
-  return (
-    <section className={`draft-settings-api-section ${open ? "open" : ""}`}>
-      <button type="button" className="draft-settings-api-section-header" onClick={onToggle}>
-        <span className="draft-settings-api-title">
-          <span className="draft-settings-api-title-emoji">{emoji}</span>
-          {title}
-        </span>
-        <span className="draft-settings-api-arrow">▼</span>
-      </button>
-      {open ? children : null}
-    </section>
-  )
-}
-
-function GoogleActionButton({
-  emoji,
-  label,
-  loading,
-  onClick,
-}: {
-  emoji: string
-  label: string
-  loading: boolean
-  onClick: () => void
-}) {
-  return (
-    <button type="button" className="draft-settings-api-button" onClick={onClick} disabled={loading}>
-      <span className="draft-settings-api-button-emoji">{loading ? "..." : emoji}</span>
-      <span>{label}</span>
-    </button>
   )
 }
 

@@ -167,6 +167,7 @@ interface SidebarProps {
   runBatchAiAcrossPages: () => void;
   translationTargetLanguage: string;
   setTranslationTargetLanguage: (value: string) => void;
+  translationLanguages: Array<{ code: string; label: string }>;
   availableLanguageVariants: Array<{ code: string; label: string }>;
   activeLanguageVariant: string;
   switchLanguageVariant: (variant: string) => void;
@@ -530,8 +531,12 @@ export const EditorSidebar: React.FC<SidebarProps> = (props) => {
         </div>
       ) : (
         <div className="editor-panel__scroll">
-          <section className="editor-panel__section">
-            <h2 className="editor-panel__label">Page</h2>
+          <details className="editor-panel__accordion">
+            <summary className="editor-panel__accordion-toggle">
+              <span>Page</span>
+              <span className="editor-panel__accordion-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <section className="editor-panel__section">
             <div className="editor-panel__site-card">
               <div
                 className="editor-panel__site-icon"
@@ -598,12 +603,15 @@ export const EditorSidebar: React.FC<SidebarProps> = (props) => {
                 ))}
               </div>
             ) : null}
-          </section>
+            </section>
+          </details>
 
-          <div className="editor-panel__divider" />
-
-          <section className="editor-panel__section">
-            <h2 className="editor-panel__label">Pages</h2>
+          <details className="editor-panel__accordion">
+            <summary className="editor-panel__accordion-toggle">
+              <span>Pages</span>
+              <span className="editor-panel__accordion-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <section className="editor-panel__section">
             <div className="editor-panel__page-tools">
               <div className="editor-panel__page-count">
                 {props.projectPages.length
@@ -673,11 +681,15 @@ export const EditorSidebar: React.FC<SidebarProps> = (props) => {
                   : "Save or open a live project before building a page list."}
               </div>
             )}
-          </section>
+            </section>
+          </details>
 
           {props.exportWarnings.length ? (
-            <>
-              <div className="editor-panel__divider" />
+            <details className="editor-panel__accordion">
+              <summary className="editor-panel__accordion-toggle">
+                <span>Delivery warnings</span>
+                <span className="editor-panel__accordion-chevron" aria-hidden="true">▾</span>
+              </summary>
               <section className="editor-panel__section">
                 <button
                   type="button"
@@ -702,13 +714,15 @@ export const EditorSidebar: React.FC<SidebarProps> = (props) => {
                   </div>
                 ) : null}
               </section>
-            </>
+            </details>
           ) : null}
 
-          <div className="editor-panel__divider" />
-
-          <section className="editor-panel__section">
-            <h2 className="editor-panel__label">Localization</h2>
+          <details className="editor-panel__accordion">
+            <summary className="editor-panel__accordion-toggle">
+              <span>Localization</span>
+              <span className="editor-panel__accordion-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <section className="editor-panel__section">
             <div className="editor-panel__translation-card">
               <div className="editor-panel__translation-head">
                 <div className="editor-panel__translation-title">Language workflow</div>
@@ -723,7 +737,7 @@ export const EditorSidebar: React.FC<SidebarProps> = (props) => {
                 onChange={(event) => props.setTranslationTargetLanguage(event.target.value)}
                 aria-label="Translation target language"
               >
-                {TOP_TRANSLATION_LANGUAGES.map((language) => (
+                {props.translationLanguages.map((language) => (
                   <option key={language.code} value={language.code}>
                     {language.label}
                   </option>
@@ -916,12 +930,15 @@ export const EditorSidebar: React.FC<SidebarProps> = (props) => {
                 </>
               ) : null}
             </div>
-          </section>
+            </section>
+          </details>
 
-          <div className="editor-panel__divider" />
-
-          <section className="editor-panel__section">
-            <h2 className="editor-panel__label">Components</h2>
+          <details className="editor-panel__accordion">
+            <summary className="editor-panel__accordion-toggle">
+              <span>Components</span>
+              <span className="editor-panel__accordion-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <section className="editor-panel__section">
             <select
               className="editor-select editor-select--full"
               value={props.selectedComponent}
@@ -947,39 +964,54 @@ export const EditorSidebar: React.FC<SidebarProps> = (props) => {
             >
               Insert component
             </button>
-          </section>
+            </section>
+          </details>
 
-          <div className="editor-panel__divider" />
+          <details className="editor-panel__accordion">
+            <summary className="editor-panel__accordion-toggle">
+              <span>Audits</span>
+              <span className="editor-panel__accordion-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <EditorAudits
+              runEditorAudit={props.runEditorAudit}
+              runningAudit={props.runningAudit}
+              editorAudit={props.editorAudit}
+            />
+          </details>
 
-          <EditorAudits
-            runEditorAudit={props.runEditorAudit}
-            runningAudit={props.runningAudit}
-            editorAudit={props.editorAudit}
-          />
+          <details className="editor-panel__accordion">
+            <summary className="editor-panel__accordion-toggle">
+              <span>Overlay</span>
+              <span className="editor-panel__accordion-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <EditorOverlay
+              blockFilter={props.blockFilter}
+              setBlockFilter={props.setBlockFilter}
+              BLOCK_FILTER_OPTIONS={props.BLOCK_FILTER_OPTIONS}
+              handleAiRescan={props.handleAiRescan}
+              aiScanLoading={props.aiScanLoading}
+              versionPreview={props.versionPreview}
+            />
+          </details>
 
-          <div className="editor-panel__divider" />
+          <details className="editor-panel__accordion">
+            <summary className="editor-panel__accordion-toggle">
+              <span>Structure</span>
+              <span className="editor-panel__accordion-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <EditorStructure
+              structureItems={props.structureItems}
+              moveStructureItem={props.moveStructureItem}
+              titleCaseFallback={props.titleCaseFallback}
+            />
+          </details>
 
-          <EditorOverlay
-            blockFilter={props.blockFilter}
-            setBlockFilter={props.setBlockFilter}
-            BLOCK_FILTER_OPTIONS={props.BLOCK_FILTER_OPTIONS}
-            handleAiRescan={props.handleAiRescan}
-            aiScanLoading={props.aiScanLoading}
-            versionPreview={props.versionPreview}
-          />
-
-          <div className="editor-panel__divider" />
-
-          <EditorStructure
-            structureItems={props.structureItems}
-            moveStructureItem={props.moveStructureItem}
-            titleCaseFallback={props.titleCaseFallback}
-          />
-
-          <div className="editor-panel__divider" />
-
-          <section className="editor-panel__section">
-            <h2 className="editor-panel__label">Assets</h2>
+          <details className="editor-panel__accordion">
+            <summary className="editor-panel__accordion-toggle">
+              <span>Assets</span>
+              <span className="editor-panel__accordion-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <section className="editor-panel__section">
             <input
               className="editor-select editor-select--full"
               value={props.assetLibraryQuery}
@@ -1035,12 +1067,15 @@ export const EditorSidebar: React.FC<SidebarProps> = (props) => {
             ) : (
               <div className="editor-panel__note">Upload fonts or images to create a reusable project asset library.</div>
             )}
-          </section>
+            </section>
+          </details>
 
-          <div className="editor-panel__divider" />
-
-          <section className="editor-panel__section">
-            <h2 className="editor-panel__label">Global styles</h2>
+          <details className="editor-panel__accordion">
+            <summary className="editor-panel__accordion-toggle">
+              <span>Global styles</span>
+              <span className="editor-panel__accordion-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <section className="editor-panel__section">
             <select
               className="editor-select editor-select--full"
               value={props.selectedFontAssetId || ""}
@@ -1106,12 +1141,15 @@ export const EditorSidebar: React.FC<SidebarProps> = (props) => {
             <button className="editor-btn editor-btn--panel editor-btn--accent" type="button" onClick={props.applyGlobalStyleOverridesNow}>
               Apply site-wide styles
             </button>
-          </section>
+            </section>
+          </details>
 
-          <div className="editor-panel__divider" />
-
-          <section className="editor-panel__section">
-            <h2 className="editor-panel__label">Snapshots</h2>
+          <details className="editor-panel__accordion">
+            <summary className="editor-panel__accordion-toggle">
+              <span>Snapshots</span>
+              <span className="editor-panel__accordion-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <section className="editor-panel__section">
             <div className="editor-panel__version-toolbar">
               <button
                 className="editor-btn editor-btn--panel"
@@ -1217,12 +1255,15 @@ export const EditorSidebar: React.FC<SidebarProps> = (props) => {
             ) : (
               <div className="editor-panel__note">No snapshots yet. Manual saves and autosaves will appear here.</div>
             )}
-          </section>
+            </section>
+          </details>
 
-          <div className="editor-panel__divider" />
-
-          <section className="editor-panel__section">
-            <h2 className="editor-panel__label">Client review</h2>
+          <details className="editor-panel__accordion">
+            <summary className="editor-panel__accordion-toggle">
+              <span>Client review</span>
+              <span className="editor-panel__accordion-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <section className="editor-panel__section">
             <input
               className="editor-select editor-select--full"
               value={props.shareEmail}
@@ -1286,12 +1327,15 @@ export const EditorSidebar: React.FC<SidebarProps> = (props) => {
             ) : (
               <div className="editor-panel__note">Create review links for the current project, page, or language variant.</div>
             )}
-          </section>
+            </section>
+          </details>
 
-          <div className="editor-panel__divider" />
-
-          <section className="editor-panel__section">
-            <h2 className="editor-panel__label">Publish</h2>
+          <details className="editor-panel__accordion">
+            <summary className="editor-panel__accordion-toggle">
+              <span>Publish</span>
+              <span className="editor-panel__accordion-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <section className="editor-panel__section">
             <select
               className="editor-select editor-select--full"
               value={props.publishDraft.target}
@@ -1449,24 +1493,29 @@ export const EditorSidebar: React.FC<SidebarProps> = (props) => {
             ) : (
               <div className="editor-panel__note">Deployment previews, rollbacks, and custom-domain setup will collect here.</div>
             )}
-          </section>
+            </section>
+          </details>
 
-          <div className="editor-panel__divider" />
-
-          <EditorAiAssistant
-            leftAiModel={props.leftAiModel}
-            setLeftAiModel={props.setLeftAiModel}
-            leftAiTone={props.leftAiTone}
-            setLeftAiTone={props.setLeftAiTone}
-            leftAiPrompt={props.leftAiPrompt}
-            setLeftAiPrompt={props.setLeftAiPrompt}
-            AI_MODELS={props.AI_MODELS}
-            leftAiRunning={props.leftAiRunning}
-            batchAiRunning={props.batchAiRunning}
-            runLeftAiPrompt={props.runLeftAiPrompt}
-            runBatchAiAcrossPages={props.runBatchAiAcrossPages}
-            versionPreview={props.versionPreview}
-          />
+          <details className="editor-panel__accordion">
+            <summary className="editor-panel__accordion-toggle">
+              <span>AI assistant</span>
+              <span className="editor-panel__accordion-chevron" aria-hidden="true">▾</span>
+            </summary>
+            <EditorAiAssistant
+              leftAiModel={props.leftAiModel}
+              setLeftAiModel={props.setLeftAiModel}
+              leftAiTone={props.leftAiTone}
+              setLeftAiTone={props.setLeftAiTone}
+              leftAiPrompt={props.leftAiPrompt}
+              setLeftAiPrompt={props.setLeftAiPrompt}
+              AI_MODELS={props.AI_MODELS}
+              leftAiRunning={props.leftAiRunning}
+              batchAiRunning={props.batchAiRunning}
+              runLeftAiPrompt={props.runLeftAiPrompt}
+              runBatchAiAcrossPages={props.runBatchAiAcrossPages}
+              versionPreview={props.versionPreview}
+            />
+          </details>
         </div>
       )}
     </aside>

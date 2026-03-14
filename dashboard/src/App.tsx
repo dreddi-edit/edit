@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState, useEffect, type CSSProperties } from 'react';
+import { useCallback, useRef, useState, useEffect, type CSSProperties } from 'react';
 
 import {  readSavedTheme, DEFAULT_CHROME_BACKGROUND, DEFAULT_CHROME_BORDER, VIEWPORT_PRESETS, EXPORT_MODE_OPTIONS, WORKFLOW_STAGE_OPTIONS, PROJECT_VERSION_SOURCE_LABELS, DEFAULT_GLOBAL_STYLE_OVERRIDES, BLOCK_FILTER_OPTIONS, EDIT_RAIL_EXPANDED_WIDTH, EDIT_RAIL_COLLAPSED_WIDTH, titleCaseFallback, formatEditorDateTime, pickEditorChromeFromDocument, getDownloadFilename, collectProjectAssets, mergeAssetLibraries, collectCssVariables, applyGlobalStylesToHtml, applyTranslationOverridesToHtml, getLanguageVariantEffectiveHtml, buildLocalAudit, buildDiffPreview, readFileAsDataUrl, buildTranslationSegmentsWithOverrides  } from "./editorHelpers";
 import { useAdmin } from "./hooks/useAdmin";
@@ -201,7 +201,6 @@ export default function App() {
   const [creatingPublishPreview, setCreatingPublishPreview] = useState(false)
   const [publishingTarget, setPublishingTarget] = useState<PublishTarget | null>(null)
   const [rollingBackDeploymentId, setRollingBackDeploymentId] = useState<number | null>(null)
-  const [dashboardRefreshKey, setDashboardRefreshKey] = useState(0)
   const [activeVersionActionId, setActiveVersionActionId] = useState<number | null>(null)
   const [aiScanLoading, setAiScanLoading] = useState(false)
   const [versionPreview, setVersionPreview] = useState<ProjectVersionDetail | null>(null)
@@ -272,7 +271,7 @@ export default function App() {
 
   const [isDraggingBlock, setIsDraggingBlock] = useState(false)
   const [authUser, setAuthUser] = useState<User | null | "loading">("loading")
-  const [view, setView] = useState<"auth" | "landing" | "dashboard" | "editor" | "admin">("landing")
+  const [view, setView] = useState<"auth" | "landing" | "learn" | "dashboard" | "editor" | "admin">("landing")
   const [currentProject, setCurrentProject] = useState<Project | null>(null)
   const [projectPages, setProjectPages] = useState<ProjectPage[]>([])
   const [activePageId, setActivePageId] = useState<string | null>(null)
@@ -329,7 +328,7 @@ type AdminUser = {
   const [newUser, setNewUser] = useState({ email: "", password: "", name: "", credits: 0 })
   const [demoPlan, setDemoPlan] = useState<"basis" | "starter" | "pro" | "scale">("basis")
   const [blockFilter, setBlockFilter] = useState<BlockFilter>("all")
-  const [isEditRailCollapsed, setIsEditRailCollapsed] = useState(false)
+  const [isEditRailCollapsed, setIsEditRailCollapsed] = useState(true)
   const [structureItems, setStructureItems] = useState<StructureSnapshotItem[]>([])
   const [selectedRootId, setSelectedRootId] = useState<string | null>(null)
   const [translationTargetLanguage, setTranslationTargetLanguage] = useState<string>(
@@ -855,7 +854,6 @@ const autoSave = async (html: string) => {
       if (refreshedProject) {
         setCurrentProject(refreshedProject)
       }
-      setDashboardRefreshKey(previous => previous + 1)
       toast.success(result.deployUrl ? `Published to ${target}` : `Deployment queued for ${target}`)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Publish failed")
@@ -880,7 +878,6 @@ const autoSave = async (html: string) => {
       if (refreshedProject) {
         setCurrentProject(refreshedProject)
       }
-      setDashboardRefreshKey(previous => previous + 1)
       toast.success(result.deployUrl ? "Rollback deployed" : "Rollback completed")
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Rollback failed")
@@ -3198,6 +3195,7 @@ useEffect(() => {
           runBatchAiAcrossPages={runBatchAiAcrossPages}
           translationTargetLanguage={translationTargetLanguage}
           setTranslationTargetLanguage={setTranslationTargetLanguage}
+          translationLanguages={TOP_TRANSLATION_LANGUAGES}
           availableLanguageVariants={availableLanguageVariants}
           activeLanguageVariant={activeLanguageVariant}
           switchLanguageVariant={switchLanguageVariant}
@@ -3261,7 +3259,6 @@ useEffect(() => {
           updateCssVariableOverride={updateCssVariableOverride}
           applyGlobalStyleOverridesNow={applyGlobalStyleOverridesNow}
           selectedFontAsset={selectedFontAsset}
-          dashboardRefreshKey={dashboardRefreshKey}
         />
       ) : null}
 

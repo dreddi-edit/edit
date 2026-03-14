@@ -29,7 +29,13 @@ async function discoverKey(provider, key) {
         providerLabel: "Anthropic",
         models: [
           { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+          { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5" },
           { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
+          { value: "claude-opus-4-1-20250805", label: "Claude Opus 4.1" },
+          { value: "claude-opus-4-20250514", label: "Claude Opus 4" },
+          { value: "claude-3-7-sonnet-latest", label: "Claude 3.7 Sonnet" },
+          { value: "claude-3-5-sonnet-latest", label: "Claude 3.5 Sonnet" },
+          { value: "claude-3-5-haiku-latest", label: "Claude 3.5 Haiku" },
         ]
       }
     }
@@ -41,7 +47,7 @@ async function discoverKey(provider, key) {
       const models = (data.models || [])
         .filter(m => m.name.includes("gemini"))
         .map(m => ({ value: m.name.replace("models/", ""), label: m.displayName || m.name }))
-        .slice(0, 6)
+        .slice(0, 20)
       return { ok: true, provider: "gemini", providerLabel: "Google Gemini", models }
     }
 
@@ -51,8 +57,36 @@ async function discoverKey(provider, key) {
       })
       if (!r.ok) return { ok: false, error: "Key ungültig" }
       const data = await r.json()
-      const models = (data.data || []).map(m => ({ value: `groq:${m.id}`, label: m.id })).slice(0, 8)
+      const models = (data.data || []).map(m => ({ value: `groq:${m.id}`, label: m.id })).slice(0, 20)
       return { ok: true, provider: "groq", providerLabel: "Groq", models }
+    }
+
+    if (provider === "openai") {
+      const r = await fetch("https://api.openai.com/v1/models", {
+        headers: { "Authorization": `Bearer ${key}` },
+      })
+      if (!r.ok) return { ok: false, error: "Key ungültig" }
+      const data = await r.json()
+      const models = (data.data || [])
+        .map(m => ({ value: m.id, label: m.id }))
+        .filter(m => /^(gpt-|o[134]|text-|chatgpt)/i.test(String(m.value || "")))
+        .slice(0, 25)
+      return { ok: true, provider: "openai", providerLabel: "OpenAI", models }
+    }
+
+    if (provider === "openrouter") {
+      const r = await fetch("https://openrouter.ai/api/v1/models", {
+        headers: {
+          "Authorization": `Bearer ${key}`,
+          "Content-Type": "application/json",
+        },
+      })
+      if (!r.ok) return { ok: false, error: "Key ungültig" }
+      const data = await r.json()
+      const models = (data.data || [])
+        .map(m => ({ value: `openrouter:${m.id}`, label: m.name || m.id }))
+        .slice(0, 30)
+      return { ok: true, provider: "openrouter", providerLabel: "OpenRouter", models }
     }
 
     return { ok: false, error: "Provider nicht erkannt" }
@@ -71,7 +105,7 @@ export function registerOrgRoutes(app) {
     if (!key) return res.status(400).json({ ok: false, error: "Key erforderlich" })
 
     const provider = detectProvider(key.trim())
-    if (!provider) return res.json({ ok: false, error: "Key-Format nicht erkannt. Unterstützt: Anthropic (sk-ant-), Gemini (AIza...), Groq (gsk_)" })
+    if (!provider) return res.json({ ok: false, error: "Key-Format nicht erkannt. Unterstützt: Anthropic (sk-ant-), Gemini (AIza...), Groq (gsk_), OpenRouter (sk-or-), OpenAI (sk-)" })
 
     const result = await discoverKey(provider, key.trim())
     res.json(result)

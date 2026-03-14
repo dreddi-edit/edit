@@ -409,6 +409,7 @@ body[data-theme="light"] .pd-studio-result {
   border-right: 1px solid var(--pd-border-sub);
   display: flex;
   flex-direction: column;
+  gap: 4px;
   overflow-y: auto;
   padding: 12px 10px 14px;
   background: var(--pd-bg);
@@ -505,7 +506,7 @@ body[data-theme="light"] .pd-studio-result {
 }
 
 .pd-sidebar-footer {
-  margin-top: auto;
+  margin-top: 8px;
 }
 
 .pd-scroll-box {
