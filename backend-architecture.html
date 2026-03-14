@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reframe Backend Architecture</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #0f172a;
+      --panel-2: #111b31;
+      --text: #e5edf9;
+      --muted: #9fb2cc;
+      --accent: #5eead4;
+      --accent-2: #60a5fa;
+      --border: #21304f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at 10% 0%, #12203d 0%, var(--bg) 42%);
+      line-height: 1.45;
+    }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 28px 18px 64px; }
+    h1, h2, h3 { margin: 0 0 10px; }
+    h1 { font-size: 2rem; letter-spacing: -0.02em; }
+    h2 { font-size: 1.2rem; color: var(--accent); margin-top: 26px; }
+    h3 { font-size: 0.95rem; color: var(--accent-2); margin-top: 18px; }
+    p, li { color: var(--muted); }
+    .lead { max-width: 90ch; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .card {
+      background: linear-gradient(180deg, var(--panel), var(--panel-2));
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+    }
+    .card h3 { margin-top: 0; }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: #08101d;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px;
+      overflow: auto;
+      font-size: 12px;
+      line-height: 1.55;
+      white-space: pre;
+      color: #d8e8ff;
+    }
+    .tag {
+      display: inline-block;
+      border: 1px solid #2f466d;
+      border-radius: 999px;
+      padding: 3px 10px;
+      margin: 0 8px 8px 0;
+      font-size: 12px;
+      color: #bcd5f8;
+      background: #0d1a30;
+    }
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <h1>Reframe Backend Architecture</h1>
+    <p class="lead">
+      This document is a code-level backend map for investor/engineering due diligence.
+      It describes service boundaries, request lifecycle, core runtime processes, and the full route inventory currently registered in the codebase.
+    </p>
+
+    <h2>1. System Overview</h2>
+    <div class="grid">
+      <section class="card">
+        <h3>Execution Model</h3>
+        <p>Single Node.js Express API server with modular route registration and shared middleware stack.</p>
+        <span class="tag">Express</span>
+        <span class="tag">JWT/Cookie Auth</span>
+        <span class="tag">SQLite/Postgres-compatible DB layer</span>
+        <span class="tag">Rate Limits</span>
+        <span class="tag">Audit Log</span>
+      </section>
+      <section class="card">
+        <h3>Frontend/Backend Contract</h3>
+        <p>
+          Frontend (React + Vite dashboard) consumes JSON APIs for auth, projects, AI, SEO, publishing,
+          settings, billing, team/orgs, and admin operations.
+        </p>
+      </section>
+      <section class="card">
+        <h3>Security Stack</h3>
+        <p>
+          Helmet defaults + CSP, SSRF-protected fetch path, request-id correlation, owner-only admin routes,
+          auth middleware, and scoped rate limits by operation class.
+        </p>
+      </section>
+      <section class="card">
+        <h3>AI Orchestration</h3>
+        <p>
+          Multi-provider model routing (Claude/Gemini/Groq/Ollama/auto-router), per-call credit checks,
+          model capability detection, and guarded rewrite/export actions.
+        </p>
+      </section>
+    </div>
+
+    <h2>2. Runtime Processes</h2>
+    <div class="grid">
+      <section class="card">
+        <h3>Auth Lifecycle</h3>
+        <p>Register/login/refresh/logout + email verification + password reset + optional 2FA + profile/avatar/export/delete.</p>
+      </section>
+      <section class="card">
+        <h3>Project Lifecycle</h3>
+        <p>Create/import/update/archive/restore/duplicate + pages CRUD + versions + workflow stage + activity + share links.</p>
+      </section>
+      <section class="card">
+        <h3>AI Rewrite Lifecycle</h3>
+        <p>Validate prompt/scope -> estimate/check credits -> run provider rewrite -> return diff/state -> log usage.</p>
+      </section>
+      <section class="card">
+        <h3>Export/Delivery Lifecycle</h3>
+        <p>Validate source -> build artifact (multiple targets) -> async export job optional -> cloud upload -> deployment history.</p>
+      </section>
+      <section class="card">
+        <h3>Publishing Lifecycle</h3>
+        <p>Publish targets -> preview token generation -> deployment execution -> history retrieval -> rollback.</p>
+      </section>
+      <section class="card">
+        <h3>Org/Team Lifecycle</h3>
+        <p>Organizations + members + invites + API key vault entries + owner/admin policy enforcement.</p>
+      </section>
+      <section class="card">
+        <h3>Billing Lifecycle</h3>
+        <p>Stripe packages/invoices/checkout/portal/webhook + credit wallet balance/transactions/top-up/admin migration.</p>
+      </section>
+      <section class="card">
+        <h3>Admin Lifecycle</h3>
+        <p>Owner-only health/audit/metrics + user management (ban/unban/reset/delete/plan/credits/create).</p>
+      </section>
+    </div>
+
+    <h2>3. Module Boundaries</h2>
+    <div class="grid">
+      <section class="card"><h3>Core entrypoint</h3><p>server/index.js bootstraps app, middleware, static serving, AI/export endpoints, and route registrations.</p></section>
+      <section class="card"><h3>Auth</h3><p>server/auth.js contains account lifecycle + Google OAuth + 2FA paths.</p></section>
+      <section class="card"><h3>Projects</h3><p>server/projects.js handles import preview, CRUD, pages, versions, shares, comments, approvals, search.</p></section>
+      <section class="card"><h3>Publish</h3><p>server/publish.js controls targets, previews, publish/rollback/custom-domain.</p></section>
+      <section class="card"><h3>SEO</h3><p>server/seo.js provides audit/generation/suggestions/snippet/project meta operations.</p></section>
+      <section class="card"><h3>AI Studio/Assistant</h3><p>server/assistant.js provides chat + studio runs APIs.</p></section>
+      <section class="card"><h3>Settings/Org/Credits</h3><p>server/settings.js, server/organisations.js, server/credits.js.</p></section>
+      <section class="card"><h3>Infra adapters</h3><p>cloudStorage, stripe, screenshot, googleServices, templates, translationMemory, presets.</p></section>
+    </div>
+
+    <h2>4. Full Route Inventory (Current Code)</h2>
+    <div class="mono">adminRoutes.js | get | /api/admin/ssl-status
+adminRoutes.js | get | /api/admin/system-health
+assistant.js | get | /api/studio/runs
+assistant.js | get | /api/studio/runs/:runId
+assistant.js | post | /api/assistant/chat
+assistant.js | post | /api/studio/runs
+auth.js | delete | /api/auth/2fa
+auth.js | delete | /api/auth/me
+auth.js | get | /api/auth/email-verified
+auth.js | get | /api/auth/export
+auth.js | get | /api/auth/google
+auth.js | get | /api/auth/google/callback
+auth.js | get | /api/auth/me
+auth.js | get | /api/auth/providers
+auth.js | get | /verify
+auth.js | post | /api/auth/2fa/setup
+auth.js | post | /api/auth/2fa/verify-setup
+auth.js | post | /api/auth/avatar
+auth.js | post | /api/auth/forgot-password
+auth.js | post | /api/auth/login
+auth.js | post | /api/auth/login/2fa
+auth.js | post | /api/auth/logout
+auth.js | post | /api/auth/refresh
+auth.js | post | /api/auth/register
+auth.js | post | /api/auth/reset-password
+auth.js | post | /api/auth/verify-email
+auth.js | put | /api/auth/me
+credits.js | get | /api/credits/balance
+credits.js | get | /api/credits/transactions
+credits.js | post | /api/credits/topup
+googleServices.js | post | /api/google/bigquery/query
+googleServices.js | post | /api/google/documentai
+googleServices.js | post | /api/google/firebase/deploy
+googleServices.js | post | /api/google/gemini/generate
+googleServices.js | post | /api/google/imagen
+googleServices.js | post | /api/google/storage/upload
+googleServices.js | post | /api/google/video
+index.js | delete | /api/admin/users/:id
+index.js | get | /
+index.js | get | /api/admin/audit
+index.js | get | /api/admin/export-stats
+index.js | get | /api/admin/me
+index.js | get | /api/admin/metrics
+index.js | get | /api/admin/ssl-status
+index.js | get | /api/admin/system-health
+index.js | get | /api/admin/users
+index.js | get | /api/ai/ollama-health
+index.js | get | /api/credits/by-project
+index.js | get | /api/export/jobs/:jobId
+index.js | get | /api/feature-flags
+index.js | get | /api/platforms/:platform
+index.js | get | /api/usage/stats
+index.js | get | /api/user/plan
+index.js | get | /asset
+index.js | get | /health
+index.js | get | /proxy
+index.js | get | /reset-password
+index.js | get | /share/:token
+index.js | get | /status
+index.js | post | /api/admin/migrate-credits
+index.js | post | /api/admin/send-reset
+index.js | post | /api/admin/users
+index.js | post | /api/admin/users/:id/add-credits
+index.js | post | /api/admin/users/:id/ban
+index.js | post | /api/admin/users/:id/set-plan
+index.js | post | /api/admin/users/:id/unban
+index.js | post | /api/ai/analyze-and-rebuild
+index.js | post | /api/ai/demo-landing-copy
+index.js | post | /api/ai/html-refactor
+index.js | post | /api/ai/inline-suggestions
+index.js | post | /api/ai/rewrite-block
+index.js | post | /api/ai/rewrite-block-stream
+index.js | post | /api/export
+index.js | post | /api/export/jobs
+index.js | post | /api/export/validate
+index.js | post | /api/validate/html-safety
+index.js | post | /reset-password
+organisations.js | delete | /api/keys/:id
+organisations.js | delete | /api/orgs/:id
+organisations.js | delete | /api/orgs/:orgId/members/:memberId
+organisations.js | get | /api/keys
+organisations.js | get | /api/orgs
+organisations.js | get | /api/orgs/:id/members
+organisations.js | post | /api/keys
+organisations.js | post | /api/keys/detect
+organisations.js | post | /api/orgs
+organisations.js | post | /api/orgs/:id/invite
+organisations.js | post | /api/orgs/accept-invite
+presets.js | delete | /api/presets/:id
+presets.js | get | /api/presets
+presets.js | post | /api/presets
+presets.js | put | /api/presets/:id
+projects.js | delete | /api/projects/:id
+projects.js | delete | /api/projects/:id/client-share
+projects.js | delete | /api/projects/:id/pages/:pageId
+projects.js | delete | /api/projects/:id/shares/:shareId
+projects.js | get | /api/projects
+projects.js | get | /api/projects/:id
+projects.js | get | /api/projects/:id/activity
+projects.js | get | /api/projects/:id/comments
+projects.js | get | /api/projects/:id/shares
+projects.js | get | /api/projects/:id/versions
+projects.js | get | /api/projects/:id/versions/:versionId
+projects.js | get | /api/projects/:id/workflow-history
+projects.js | get | /api/projects/assignee-options
+projects.js | get | /api/projects/deleted
+projects.js | get | /api/projects/import-preview/jobs/:jobId
+projects.js | get | /api/search
+projects.js | get | /api/shared/:token
+projects.js | post | /api/projects
+projects.js | post | /api/projects/:id/client-share
+projects.js | post | /api/projects/:id/comments
+projects.js | post | /api/projects/:id/duplicate
+projects.js | post | /api/projects/:id/pages
+projects.js | post | /api/projects/:id/pages/load
+projects.js | post | /api/projects/:id/pages/scan
+projects.js | post | /api/projects/:id/pin
+projects.js | post | /api/projects/:id/restore/:versionId
+projects.js | post | /api/projects/:id/share
+projects.js | post | /api/projects/:id/versions
+projects.js | post | /api/projects/:id/workflow-stage
+projects.js | post | /api/projects/deleted/:archiveId/restore
+projects.js | post | /api/projects/import-preview
+projects.js | put | /api/projects/:id
+projects.js | put | /api/projects/:id/approval
+projects.js | put | /api/projects/:id/comments/:commentId
+projects.js | put | /api/projects/:id/pages/:pageId
+publish.js | get | /api/projects/:id/publish/history
+publish.js | get | /api/publish/targets
+publish.js | get | /publish-preview/:token
+publish.js | post | /api/projects/:id/publish
+publish.js | post | /api/projects/:id/publish/:deploymentId/rollback
+publish.js | post | /api/projects/:id/publish/custom-domain
+publish.js | post | /api/projects/:id/publish/preview
+screenshot.js | get | /thumbnails/:filename
+screenshot.js | post | /api/screenshot
+seo.js | get | /api/seo/project-meta/:projectId
+seo.js | get | /api/seo/snippet-preview
+seo.js | post | /api/seo/audit
+seo.js | post | /api/seo/content-gap
+seo.js | post | /api/seo/generate-meta
+seo.js | post | /api/seo/keyword-suggestions
+seo.js | post | /api/seo/page-optimization
+seo.js | post | /api/seo/schema-suggestions
+settings.js | delete | /api/team/:id
+settings.js | get | /api/settings
+settings.js | get | /api/team
+settings.js | post | /api/settings/test-key
+settings.js | post | /api/team/invite
+settings.js | put | /api/settings
+stripe.js | get | /api/stripe/invoices
+stripe.js | get | /api/stripe/packages
+stripe.js | post | /api/stripe/checkout
+stripe.js | post | /api/stripe/create-checkout
+stripe.js | post | /api/stripe/portal
+stripe.js | post | /api/stripe/webhook
+templates.js | delete | /api/templates/:id
+templates.js | get | /api/templates
+templates.js | get | /api/templates/deleted
+templates.js | post | /api/templates/apply
+templates.js | post | /api/templates/deleted/:archiveId/restore
+templates.js | post | /api/templates/extract
+translationMemory.js | delete | /api/translation-memory
+translationMemory.js | delete | /api/translation-memory/:id
+translationMemory.js | get | /api/translation-memory
+translationMemory.js | post | /api/translation-memory
+translationMemory.js | post | /api/translation-memory/lookup</div>
+
+    <h2>5. Non-route Background/Support Processes</h2>
+    <div class="grid">
+      <section class="card"><h3>Job Queue</h3><p>Asynchronous export tasks (`enqueueJob`/`getJobForUser`) with polling endpoint on export jobs.</p></section>
+      <section class="card"><h3>Credit Accounting</h3><p>Balance checks + deductions gate expensive AI/export actions before execution.</p></section>
+      <section class="card"><h3>Audit + Metrics</h3><p>Structured request log with request-id, status, duration and user context, plus admin export/usage metrics.</p></section>
+      <section class="card"><h3>Static Delivery</h3><p>Serves dashboard dist build, reset-password pages, share views, thumbnails and publish preview pages.</p></section>
+    </div>
+  </main>
+</body>
+</html>

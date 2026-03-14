@@ -1,8 +1,8 @@
 import React from 'react';
 
 import { useState, useEffect, useRef, useMemo } from "react"
-import { AVAILABLE_UI_LANGUAGES, useRuntimeTranslations, useTranslation } from "../i18n/useTranslation"
-import { applyThemeToDocument, persistThemeChoice } from "../utils/theme"
+import { AVAILABLE_UI_LANGUAGES, useRuntimeTranslations, useTranslation } from "../../i18n/useTranslation"
+import { applyThemeToDocument, persistThemeChoice } from "../../utils/theme"
 import "./landing.css"
 
 interface LandingPageProps {
@@ -230,6 +230,45 @@ function Cell({ v }: { v: CellVal }) {
   if (v === true) return <span className="lp-cell lp-cell--yes">✓</span>
   if (v === "±") return <span className="lp-cell lp-cell--partial">~</span>
   return <span className="lp-cell lp-cell--no">-</span>
+}
+
+const COMPARE_COMPETITOR_COLUMNS = [
+  { key: "wf", label: "Webflow" },
+  { key: "fr", label: "Framer" },
+  { key: "wp", label: "WP + Elementor" },
+  { key: "ai", label: "ChatGPT" },
+] as const
+
+function scoreCell(value: CellVal) {
+  if (value === true) return 1
+  if (value === "±") return 0.5
+  return 0
+}
+
+function ComparisonScoreCard({
+  title,
+  covered,
+  total,
+  rt,
+}: {
+  title: string
+  covered: number
+  total: number
+  rt: (s: string) => string
+}) {
+  const pct = Math.round((covered / Math.max(1, total)) * 100)
+  return (
+    <article className="lp-compare__score-card">
+      <div className="lp-compare__score-head">
+        <span className="lp-compare__score-title">{title}</span>
+        <strong>{covered.toFixed(1)} / {total}</strong>
+      </div>
+      <div className="lp-compare__score-meter" role="meter" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+        <span style={{ width: `${pct}%` }} />
+      </div>
+      <div className="lp-compare__score-meta">{pct}% {rt("capability coverage")}</div>
+    </article>
+  )
 }
 
 function CompetitorCard({ profile, rt }: { profile: typeof COMPETITOR_PROFILES[0]; rt: (s: string) => string }) {
@@ -519,6 +558,13 @@ const LANDING_RUNTIME_STRINGS = Array.from(new Set([
   "Honest comparison for agencies that start with existing sites, not agencies building from scratch.",
   "site operations capabilities",
   "No other tool covers the full stack.",
+  "capability coverage",
+  "End-to-end delivery",
+  "Import -> AI rewrite -> multi-format export -> one-click deploy in one workflow.",
+  "Agency operations",
+  "RBAC, approvals, share links and audit history are native, not patched together.",
+  "Cost control",
+  "Pay only for AI usage and optionally run self-hosted models with near-zero marginal cost.",
   "Capability",
   "Reframe",
   "Webflow",
@@ -599,6 +645,39 @@ export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggle
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth" })
     setMenuOpen(false)
   }
+
+  const reframeCoverage = useMemo(
+    () => COMPARE_ROWS_EXT.reduce((acc, row) => acc + scoreCell(row.rf as CellVal), 0),
+    [],
+  )
+  const competitorCoverage = useMemo(
+    () =>
+      COMPARE_COMPETITOR_COLUMNS.map((competitor) => ({
+        ...competitor,
+        covered: COMPARE_ROWS_EXT.reduce(
+          (acc, row) => acc + scoreCell(row[competitor.key] as CellVal),
+          0,
+        ),
+      })),
+    [],
+  )
+  const strongestGaps = useMemo(
+    () => [
+      {
+        title: rt("End-to-end delivery"),
+        detail: rt("Import -> AI rewrite -> multi-format export -> one-click deploy in one workflow."),
+      },
+      {
+        title: rt("Agency operations"),
+        detail: rt("RBAC, approvals, share links and audit history are native, not patched together."),
+      },
+      {
+        title: rt("Cost control"),
+        detail: rt("Pay only for AI usage and optionally run self-hosted models with near-zero marginal cost."),
+      },
+    ],
+    [rt],
+  )
 
   return (
     <div className={`lp lp--${theme}`}>
@@ -749,6 +828,33 @@ export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggle
             <span className="lp-compare__score-label">{rt("site operations capabilities")}</span>
             <span className="lp-compare__score-sep">·</span>
             <span className="lp-compare__score-note">{rt("No other tool covers the full stack.")}</span>
+          </div>
+
+          <div className="lp-compare__score-grid">
+            <ComparisonScoreCard
+              title={rt("Reframe")}
+              covered={reframeCoverage}
+              total={COMPARE_ROWS_EXT.length}
+              rt={rt}
+            />
+            {competitorCoverage.map((competitor) => (
+              <ComparisonScoreCard
+                key={competitor.key}
+                title={rt(competitor.label)}
+                covered={competitor.covered}
+                total={COMPARE_ROWS_EXT.length}
+                rt={rt}
+              />
+            ))}
+          </div>
+
+          <div className="lp-compare__adv-grid">
+            {strongestGaps.map((gap, index) => (
+              <article className="lp-compare__adv-card" key={index}>
+                <div className="lp-compare__adv-title">{gap.title}</div>
+                <p>{gap.detail}</p>
+              </article>
+            ))}
           </div>
 
           <div className="lp-compare__vs-grid">

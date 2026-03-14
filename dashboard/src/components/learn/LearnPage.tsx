@@ -5,7 +5,7 @@ import {
   LEARN_FEATURE_REFERENCE_RUNTIME_STRINGS,
   getLearnFeatureAreaLabel,
   type LearnFeatureArea,
-} from "../data/learnFeatureReference"
+} from "../../data/learnFeatureReference"
 import {
   LEARN_RUNTIME_STRINGS,
   LEARN_VIDEO_CATEGORIES,
@@ -15,8 +15,8 @@ import {
   getSubcategoryLabel,
   type LearnVideoCategory,
   type LearnVideoSubcategory,
-} from "../data/learnVideos"
-import { useRuntimeTranslations, useTranslation } from "../i18n/useTranslation"
+} from "../../data/learnVideos"
+import { useRuntimeTranslations, useTranslation } from "../../i18n/useTranslation"
 import "./LearnPage.css"
 
 type LearnPageProps = {
@@ -160,25 +160,23 @@ export default function LearnPage({ onBack }: LearnPageProps) {
     })
   }, [featureArea, query])
 
-  useEffect(() => {
-    if (filteredVideos.length && !filteredVideos.some((video) => video.id === selectedVideoId)) {
-      setSelectedVideoId(filteredVideos[0].id)
-    }
-  }, [filteredVideos, selectedVideoId])
+  const effectiveSelectedVideoId =
+    filteredVideos.some((video) => video.id === selectedVideoId)
+      ? selectedVideoId
+      : (filteredVideos[0]?.id || featuredVideo.id)
 
-  useEffect(() => {
-    if (filteredFeatures.length && !filteredFeatures.some((item) => item.id === selectedFeatureId)) {
-      setSelectedFeatureId(filteredFeatures[0].id)
-    }
-  }, [filteredFeatures, selectedFeatureId])
+  const effectiveSelectedFeatureId =
+    filteredFeatures.some((item) => item.id === selectedFeatureId)
+      ? selectedFeatureId
+      : (filteredFeatures[0]?.id || LEARN_FEATURE_REFERENCES[0].id)
 
   const selectedVideo = useMemo(
-    () => filteredVideos.find((video) => video.id === selectedVideoId) || filteredVideos[0] || featuredVideo,
-    [featuredVideo, filteredVideos, selectedVideoId],
+    () => filteredVideos.find((video) => video.id === effectiveSelectedVideoId) || filteredVideos[0] || featuredVideo,
+    [effectiveSelectedVideoId, featuredVideo, filteredVideos],
   )
   const selectedFeature = useMemo(
-    () => filteredFeatures.find((item) => item.id === selectedFeatureId) || filteredFeatures[0] || LEARN_FEATURE_REFERENCES[0],
-    [filteredFeatures, selectedFeatureId],
+    () => filteredFeatures.find((item) => item.id === effectiveSelectedFeatureId) || filteredFeatures[0] || LEARN_FEATURE_REFERENCES[0],
+    [effectiveSelectedFeatureId, filteredFeatures],
   )
 
   const completedSteps = progress[selectedVideo.id] || []

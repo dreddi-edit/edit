@@ -35,7 +35,6 @@ import {
   type PublishTarget,
   type PublishTargetInfo,
   type Project,
-  type ProjectAsset,
   type ProjectPage,
   type ProjectShare,
   type ProjectVersion,
@@ -45,8 +44,8 @@ import {
   type WorkflowStage,
 } from "./api/projects"
 import AuthScreen from "./components/AuthScreen"
-import LandingPage from "./components/LandingPage"
-import LearnPage from "./components/LearnPage"
+import LandingPage from "./components/landing/LandingPage"
+import LearnPage from "./components/learn/LearnPage"
 import ResetPasswordScreen from "./components/ResetPasswordScreen"
 import ProjectDashboard from "./components/ProjectDashboard"
 import AssistantWidget from "./components/AssistantWidget"
@@ -63,79 +62,19 @@ import { buildAvailableExecutableModels } from "./utils/modelCatalog"
 import {
   TOP_TRANSLATION_LANGUAGES,
   translateWebsiteHtml,
-  type WebsiteTranslationSegment,
 } from "./utils/htmlTranslation"
+import {
+  type AiDiffState,
+  type AssetEntry,
+  type BlockFilter,
+  type EditorAudit,
+  type ExportMode,
+  type GlobalStyleOverrides,
+  type StructureSnapshotItem,
+  type TranslationReviewState,
+  type ViewportPreset,
+} from "./app/editorTypes"
 import "./components/editor-viewer-dark.css"
-
-type BlockFilter =
-  | "all"
-  | "button"
-  | "heading"
-  | "image"
-  | "form"
-  | "navigation"
-  | "container"
-  | "list"
-  | "content"
-
-type StructureSnapshotItem = {
-  id: string
-  rootId: string
-  displayLabel: string
-  label: string
-  kind: string
-  childCount: number
-  isExpanded: boolean
-  isSelected: boolean
-}
-
-type ExportMode =
-  | "wp-placeholder"
-  | "html-clean"
-  | "html-raw"
-  | "shopify-section"
-  | "wp-theme"
-  | "wp-block"
-  | "web-component"
-  | "react-component"
-  | "webflow-json"
-  | "email-newsletter"
-  | "markdown-content"
-  | "pdf-print"
-
-type ViewportPreset = "desktop" | "tablet" | "mobile"
-
-type EditorAudit = {
-  source: "seo" | "cro" | "accessibility"
-  headline: string
-  summary: string
-  items: string[]
-  scoreBadges?: string[]
-}
-
-type AiDiffState = {
-  id: string
-  scope: "block" | "page"
-  beforeHtml: string
-  afterHtml: string
-  beforeDocumentHtml: string
-}
-
-type TranslationReviewState = {
-  targetLanguage: string
-  detectedSourceLanguage: string
-  translatedCount: number
-  segments: WebsiteTranslationSegment[]
-}
-
-type AssetEntry = ProjectAsset
-
-type GlobalStyleOverrides = {
-  fontFamily: string
-  textColor: string
-  backgroundColor: string
-  accentColor: string
-}
 
 export default function App() {
   const defaultAiModels = [

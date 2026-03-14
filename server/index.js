@@ -71,110 +71,25 @@ import { fileURLToPath } from "url"
 import { fetchWithSsrfProtection, ProxySafetyError } from "./proxy.js"
 import { enqueueJob, getJobForUser } from "./jobQueue.js"
 import { FEATURE_FLAGS } from "./featureFlags.js"
+import {
+  extractJsonFromText,
+  localRebuild,
+  safeErrorMessage,
+  sanitizeSharedHtml,
+  sendError,
+  stripJsonFences,
+} from "./lib/httpContentUtils.js"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const dashboardDist = path.join(__dirname, "..", "dashboard", "dist")
 
-function sendError(res, status, message) {
-  res.status(status).json({ ok: false, error: message })
-}
-
-function safeErrorMessage(e, status = 500) {
-  if (process.env.NODE_ENV === "production" && status >= 500) {
-    return "Internal server error"
-  }
-  return String(e?.message || e || "Unknown error")
-}
-
-function sanitizeSharedHtml(rawHtml) {
-  let html = String(rawHtml || "")
-  if (!html) return ""
-  html = html.replace(/<\s*script\b[^>]*>[\s\S]*?<\s*\/\s*script\s*>/gi, "")
-  html = html.replace(/<\s*(iframe|object|embed)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, "")
-  html = html.replace(/<\s*meta\b[^>]*http-equiv\s*=\s*['\"]?refresh['\"]?[^>]*>/gi, "")
-  html = html.replace(/\son[a-z]+\s*=\s*(['\"]).*?\1/gi, "")
-  html = html.replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, "")
-  html = html.replace(/\s(href|src)\s*=\s*(['\"])\s*javascript:[\s\S]*?\2/gi, ' $1="#"')
-  html = html.replace(/\ssrcset\s*=\s*(['\"])([\s\S]*?)\1/gi, (_m, quote, value) => {
-    const cleaned = String(value || "")
-      .split(",")
-      .map((entry) => entry.trim())
-      .filter((entry) => !/^javascript:/i.test(entry))
-      .join(", ")
-    return ` srcset=${quote}${cleaned}${quote}`
-  })
-  return html
-}
 
 try {
   dns.setDefaultResultOrder("ipv4first")
   console.log("DNS result order set to ipv4first")
 } catch (e) {
   console.warn("Could not set DNS result order:", e?.message || e)
-}
-
-function extractJsonFromText(text) {
-  if (!text) return text;
-  const s = String(text).trim();
-  const m = s.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  const inner = (m ? m[1] : s).trim();
-  return inner;
-}
-
-function stripJsonFences(txt) {
-  if (!txt) return txt;
-  let t = String(txt).trim();
-  if (t.startsWith("```")) {
-    t = t.replace(/^```(?:json)?\s*/i, "");
-    t = t.replace(/\s*```$/i, "");
-  }
-  const objStart = t.indexOf("{");
-  const arrStart = t.indexOf("[");
-  let start = -1;
-  if (objStart !== -1 && arrStart !== -1) start = Math.min(objStart, arrStart);
-  else if (objStart !== -1) start = objStart;
-  else if (arrStart !== -1) start = arrStart;
-  if (start > 0) t = t.slice(start);
-  const lastObj = t.lastIndexOf("}");
-  const lastArr = t.lastIndexOf("]");
-  let end = -1;
-  if (lastObj !== -1 && lastArr !== -1) end = Math.max(lastObj, lastArr);
-  else if (lastObj !== -1) end = lastObj;
-  else if (lastArr !== -1) end = lastArr;
-  if (end !== -1) t = t.slice(0, end + 1);
-  return t.trim();
-}
-
-function localRebuild(html) {
-  let out = String(html || "");
-  const blocks = [];
-  let i = 1;
-
-  function inject(tag, type, labelBase) {
-    const reTag = new RegExp(`<${tag}(\\s[^>]*?)?>`, "gi");
-    out = out.replace(reTag, (m, attrs = "") => {
-      if (/data-block-id\s*=\s*["']/.test(m)) return m;
-      const id = `block-${i++}`;
-      blocks.push({ id, selector: `[data-block-id="${id}"]`, label: labelBase, type, description: "" });
-      return `<${tag} data-block-id="${id}"${attrs}>`;
-    });
-  }
-
-  inject("header", "section", "Header");
-  inject("nav", "section", "Nav");
-  inject("main", "section", "Main");
-  inject("section", "section", "Section");
-  inject("article", "section", "Article");
-  inject("aside", "section", "Aside");
-  inject("footer", "section", "Footer");
-  inject("h1", "heading", "H1");
-  inject("h2", "heading", "H2");
-  inject("h3", "heading", "H3");
-  inject("button", "cta", "Button");
-  inject("a", "cta", "Link");
-
-  return { rebuiltHtml: out, blocks };
 }
 
 const app = express()
