@@ -28,6 +28,7 @@ const SECRET = process.env.JWT_SECRET || DEFAULT_SECRET
 const COOKIE = "se_token"
 const REFRESH_COOKIE = "se_refresh"
 const OAUTH_STATE_COOKIE = "se_oauth_state"
+const OAUTH_PKCE_COOKIE = "se_oauth_pkce"
 const IS_PROD = process.env.NODE_ENV === "production"
 const AUTH_IDLE_TIMEOUT_MIN = Number(process.env.AUTH_IDLE_TIMEOUT_MIN) || 120
 const AUTH_IDLE_TIMEOUT_MS = AUTH_IDLE_TIMEOUT_MIN * 60 * 1000
@@ -176,11 +177,106 @@ function clearOAuthStateCookie(res) {
   res.clearCookie(OAUTH_STATE_COOKIE, { path: "/api/auth" })
 }
 
+function setOAuthPkceCookie(res, verifier) {
+  res.cookie(OAUTH_PKCE_COOKIE, verifier, {
+    ...AUTH_COOKIE_OPTIONS,
+    maxAge: OAUTH_STATE_MAX_AGE_MS,
+    path: "/api/auth",
+  })
+}
+
+function clearOAuthPkceCookie(res) {
+  res.clearCookie(OAUTH_PKCE_COOKIE, { path: "/api/auth" })
+}
+
+function createPkceVerifier() {
+  return crypto.randomBytes(32).toString("base64url")
+}
+
+function createPkceChallenge(verifier) {
+  return crypto.createHash("sha256").update(String(verifier || "")).digest("base64url")
+}
+
 function tokensMatch(left, right) {
   const a = Buffer.from(String(left || ""), "utf8")
   const b = Buffer.from(String(right || ""), "utf8")
   if (!a.length || !b.length || a.length !== b.length) return false
   return crypto.timingSafeEqual(a, b)
+}
+
+const SOCIAL_OAUTH_PROVIDERS = {
+  google: {
+    id: "google",
+    label: "Google",
+    clientIdEnv: "GOOGLE_CLIENT_ID",
+    clientSecretEnv: "GOOGLE_CLIENT_SECRET",
+  },
+  github: {
+    id: "github",
+    label: "GitHub",
+    clientIdEnv: "GITHUB_CLIENT_ID",
+    clientSecretEnv: "GITHUB_CLIENT_SECRET",
+  },
+  facebook: {
+    id: "facebook",
+    label: "Facebook",
+    clientIdEnv: "FACEBOOK_CLIENT_ID",
+    clientSecretEnv: "FACEBOOK_CLIENT_SECRET",
+  },
+  x: {
+    id: "x",
+    label: "X",
+    clientIdEnv: "TWITTER_CLIENT_ID",
+    clientSecretEnv: "TWITTER_CLIENT_SECRET",
+  },
+  figma: {
+    id: "figma",
+    label: "Figma",
+    clientIdEnv: "FIGMA_CLIENT_ID",
+    clientSecretEnv: "FIGMA_CLIENT_SECRET",
+  },
+}
+
+function isOAuthProviderEnabled(providerId) {
+  const provider = SOCIAL_OAUTH_PROVIDERS[providerId]
+  if (!provider) return false
+  const clientId = process.env[provider.clientIdEnv]
+  const clientSecret = process.env[provider.clientSecretEnv]
+  return Boolean(clientId && clientSecret)
+}
+
+async function upsertOAuthUser({ provider, email, name, avatarUrl }) {
+  const normalizedEmail = readEmail(email, `${provider} email`)
+  const displayName = readOptionalString(name, `${provider} name`, { max: 120, empty: normalizedEmail.split("@")[0] })
+  const safeAvatar = readOptionalString(avatarUrl, `${provider} avatar`, { max: 512, empty: "" })
+
+  let userId = null
+  const existing = db.prepare("SELECT id FROM users WHERE lower(email) = ?").get(normalizedEmail)
+  if (existing) {
+    userId = existing.id
+    db.prepare(`
+      UPDATE users
+      SET
+        avatar_url = CASE
+          WHEN COALESCE(NULLIF(avatar_url, ''), '') = '' THEN ?
+          ELSE avatar_url
+        END,
+        email_verified = 1
+      WHERE id = ?
+    `).run(safeAvatar || null, userId)
+  } else {
+    const hash = await bcrypt.hash(crypto.randomBytes(24).toString("hex"), 10)
+    const result = db.prepare(`
+      INSERT INTO users (email, password_hash, name, avatar_url, email_verified, plan_id, plan_status)
+      VALUES (?, ?, ?, ?, 1, 'basis', 'active')
+    `).run(normalizedEmail, hash, displayName, safeAvatar || null)
+    userId = Number(result.lastInsertRowid)
+    syncUserSettingsPlan(userId, "basis")
+    logAudit({ userId, action: `auth.register.${provider}`, targetType: "user", targetId: userId, meta: { email: normalizedEmail } })
+  }
+
+  syncUserSettingsPlan(userId, "basis")
+  return { userId, email: normalizedEmail }
 }
 
 function isHttpsRequest(req) {
@@ -652,9 +748,11 @@ export function registerAuthRoutes(app) {
     res.json({
       ok: true,
       providers: {
-        google: {
-          enabled: Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET),
-        },
+        google: { enabled: isOAuthProviderEnabled("google") },
+        github: { enabled: isOAuthProviderEnabled("github") },
+        facebook: { enabled: isOAuthProviderEnabled("facebook") },
+        x: { enabled: isOAuthProviderEnabled("x") },
+        figma: { enabled: isOAuthProviderEnabled("figma") },
       },
     })
   })
@@ -759,6 +857,288 @@ export function registerAuthRoutes(app) {
     } catch (error) {
       console.error("Google OAuth callback error:", error)
       res.redirect(`/?error=${encodeURIComponent("Google sign-in failed. Please try again.")}`)
+    }
+  })
+
+  app.get("/api/auth/github", (req, res) => {
+    const clientId = process.env.GITHUB_CLIENT_ID
+    const clientSecret = process.env.GITHUB_CLIENT_SECRET
+    if (!clientId || !clientSecret) {
+      return res.redirect(`/?error=${encodeURIComponent("GitHub sign-in is not configured yet.")}`)
+    }
+    const state = createOAuthStateToken()
+    setOAuthStateCookie(res, state)
+    const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/github/callback`
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      scope: "read:user user:email",
+      state,
+      allow_signup: "true",
+    })
+    res.redirect(`https://github.com/login/oauth/authorize?${params.toString()}`)
+  })
+
+  app.get("/api/auth/github/callback", async (req, res) => {
+    try {
+      const code = readRequiredString(String(req.query.code || ""), "code", { max: 1024 })
+      const state = readRequiredString(String(req.query.state || ""), "state", { max: 256 })
+      const storedState = String(req.cookies?.[OAUTH_STATE_COOKIE] || "")
+      clearOAuthStateCookie(res)
+      if (!tokensMatch(state, storedState)) throw new Error("Invalid OAuth state")
+
+      const clientId = readRequiredString(process.env.GITHUB_CLIENT_ID || "", "GITHUB_CLIENT_ID", { max: 512 })
+      const clientSecret = readRequiredString(process.env.GITHUB_CLIENT_SECRET || "", "GITHUB_CLIENT_SECRET", { max: 512 })
+      const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/github/callback`
+
+      const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+        body: new URLSearchParams({ code, client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri }).toString(),
+      })
+      if (!tokenRes.ok) throw new Error(`GitHub token exchange failed (${tokenRes.status})`)
+      const tokenData = await tokenRes.json()
+      const accessToken = readRequiredString(tokenData?.access_token || "", "GitHub access token", { max: 2048 })
+
+      const profileRes = await fetch("https://api.github.com/user", {
+        headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/vnd.github+json" },
+      })
+      if (!profileRes.ok) throw new Error(`GitHub userinfo failed (${profileRes.status})`)
+      const profile = await profileRes.json()
+
+      const emailsRes = await fetch("https://api.github.com/user/emails", {
+        headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/vnd.github+json" },
+      })
+      if (!emailsRes.ok) throw new Error(`GitHub email fetch failed (${emailsRes.status})`)
+      const emails = await emailsRes.json()
+      const preferred = Array.isArray(emails)
+        ? emails.find((item) => item?.primary && item?.verified) || emails.find((item) => item?.verified) || emails[0]
+        : null
+
+      const { userId, email } = await upsertOAuthUser({
+        provider: "github",
+        email: preferred?.email || profile?.email,
+        name: profile?.name || profile?.login,
+        avatarUrl: profile?.avatar_url || "",
+      })
+      setAuthCookies(res, userId, email)
+      logAudit({ userId, action: "auth.login.github", targetType: "user", targetId: userId, meta: { email } })
+      res.redirect("/")
+    } catch (error) {
+      console.error("GitHub OAuth callback error:", error)
+      res.redirect(`/?error=${encodeURIComponent("GitHub sign-in failed. Please try again.")}`)
+    }
+  })
+
+  app.get("/api/auth/facebook", (req, res) => {
+    const clientId = process.env.FACEBOOK_CLIENT_ID
+    const clientSecret = process.env.FACEBOOK_CLIENT_SECRET
+    if (!clientId || !clientSecret) {
+      return res.redirect(`/?error=${encodeURIComponent("Facebook sign-in is not configured yet.")}`)
+    }
+    const state = createOAuthStateToken()
+    setOAuthStateCookie(res, state)
+    const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/facebook/callback`
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      scope: "email,public_profile",
+      state,
+    })
+    res.redirect(`https://www.facebook.com/v19.0/dialog/oauth?${params.toString()}`)
+  })
+
+  app.get("/api/auth/facebook/callback", async (req, res) => {
+    try {
+      const code = readRequiredString(String(req.query.code || ""), "code", { max: 1024 })
+      const state = readRequiredString(String(req.query.state || ""), "state", { max: 256 })
+      const storedState = String(req.cookies?.[OAUTH_STATE_COOKIE] || "")
+      clearOAuthStateCookie(res)
+      if (!tokensMatch(state, storedState)) throw new Error("Invalid OAuth state")
+
+      const clientId = readRequiredString(process.env.FACEBOOK_CLIENT_ID || "", "FACEBOOK_CLIENT_ID", { max: 512 })
+      const clientSecret = readRequiredString(process.env.FACEBOOK_CLIENT_SECRET || "", "FACEBOOK_CLIENT_SECRET", { max: 512 })
+      const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/facebook/callback`
+
+      const tokenRes = await fetch(`https://graph.facebook.com/v19.0/oauth/access_token?${new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        code,
+      }).toString()}`)
+      if (!tokenRes.ok) throw new Error(`Facebook token exchange failed (${tokenRes.status})`)
+      const tokenData = await tokenRes.json()
+      const accessToken = readRequiredString(tokenData?.access_token || "", "Facebook access token", { max: 2048 })
+
+      const profileRes = await fetch(`https://graph.facebook.com/me?${new URLSearchParams({
+        fields: "id,name,email,picture.type(large)",
+        access_token: accessToken,
+      }).toString()}`)
+      if (!profileRes.ok) throw new Error(`Facebook userinfo failed (${profileRes.status})`)
+      const profile = await profileRes.json()
+
+      const fallbackEmail = `facebook_${profile?.id || "user"}@oauth.local`
+      const { userId, email } = await upsertOAuthUser({
+        provider: "facebook",
+        email: profile?.email || fallbackEmail,
+        name: profile?.name || "Facebook User",
+        avatarUrl: profile?.picture?.data?.url || "",
+      })
+      setAuthCookies(res, userId, email)
+      logAudit({ userId, action: "auth.login.facebook", targetType: "user", targetId: userId, meta: { email } })
+      res.redirect("/")
+    } catch (error) {
+      console.error("Facebook OAuth callback error:", error)
+      res.redirect(`/?error=${encodeURIComponent("Facebook sign-in failed. Please try again.")}`)
+    }
+  })
+
+  app.get("/api/auth/figma", (req, res) => {
+    const clientId = process.env.FIGMA_CLIENT_ID
+    const clientSecret = process.env.FIGMA_CLIENT_SECRET
+    if (!clientId || !clientSecret) {
+      return res.redirect(`/?error=${encodeURIComponent("Figma sign-in is not configured yet.")}`)
+    }
+    const state = createOAuthStateToken()
+    setOAuthStateCookie(res, state)
+    const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/figma/callback`
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: "code",
+      scope: "files:read",
+      state,
+    })
+    res.redirect(`https://www.figma.com/oauth?${params.toString()}`)
+  })
+
+  app.get("/api/auth/figma/callback", async (req, res) => {
+    try {
+      const code = readRequiredString(String(req.query.code || ""), "code", { max: 1024 })
+      const state = readRequiredString(String(req.query.state || ""), "state", { max: 256 })
+      const storedState = String(req.cookies?.[OAUTH_STATE_COOKIE] || "")
+      clearOAuthStateCookie(res)
+      if (!tokensMatch(state, storedState)) throw new Error("Invalid OAuth state")
+
+      const clientId = readRequiredString(process.env.FIGMA_CLIENT_ID || "", "FIGMA_CLIENT_ID", { max: 512 })
+      const clientSecret = readRequiredString(process.env.FIGMA_CLIENT_SECRET || "", "FIGMA_CLIENT_SECRET", { max: 512 })
+      const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/figma/callback`
+
+      const tokenRes = await fetch("https://api.figma.com/v1/oauth/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code,
+          client_id: clientId,
+          client_secret: clientSecret,
+          redirect_uri: redirectUri,
+        }).toString(),
+      })
+      if (!tokenRes.ok) throw new Error(`Figma token exchange failed (${tokenRes.status})`)
+      const tokenData = await tokenRes.json()
+      const accessToken = readRequiredString(tokenData?.access_token || "", "Figma access token", { max: 2048 })
+
+      const profileRes = await fetch("https://api.figma.com/v1/me", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      if (!profileRes.ok) throw new Error(`Figma userinfo failed (${profileRes.status})`)
+      const profile = await profileRes.json()
+
+      const fallbackEmail = `figma_${profile?.id || "user"}@oauth.local`
+      const { userId, email } = await upsertOAuthUser({
+        provider: "figma",
+        email: profile?.email || fallbackEmail,
+        name: profile?.handle || profile?.name || "Figma User",
+        avatarUrl: profile?.img_url || profile?.avatar_url || "",
+      })
+      setAuthCookies(res, userId, email)
+      logAudit({ userId, action: "auth.login.figma", targetType: "user", targetId: userId, meta: { email } })
+      res.redirect("/")
+    } catch (error) {
+      console.error("Figma OAuth callback error:", error)
+      res.redirect(`/?error=${encodeURIComponent("Figma sign-in failed. Please try again.")}`)
+    }
+  })
+
+  app.get("/api/auth/x", (req, res) => {
+    const clientId = process.env.TWITTER_CLIENT_ID
+    const clientSecret = process.env.TWITTER_CLIENT_SECRET
+    if (!clientId || !clientSecret) {
+      return res.redirect(`/?error=${encodeURIComponent("X sign-in is not configured yet.")}`)
+    }
+    const state = createOAuthStateToken()
+    const verifier = createPkceVerifier()
+    const challenge = createPkceChallenge(verifier)
+    setOAuthStateCookie(res, state)
+    setOAuthPkceCookie(res, verifier)
+
+    const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/x/callback`
+    const params = new URLSearchParams({
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      scope: "tweet.read users.read offline.access",
+      state,
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+    })
+    res.redirect(`https://twitter.com/i/oauth2/authorize?${params.toString()}`)
+  })
+
+  app.get("/api/auth/x/callback", async (req, res) => {
+    try {
+      const code = readRequiredString(String(req.query.code || ""), "code", { max: 1024 })
+      const state = readRequiredString(String(req.query.state || ""), "state", { max: 256 })
+      const storedState = String(req.cookies?.[OAUTH_STATE_COOKIE] || "")
+      const verifier = String(req.cookies?.[OAUTH_PKCE_COOKIE] || "")
+      clearOAuthStateCookie(res)
+      clearOAuthPkceCookie(res)
+      if (!tokensMatch(state, storedState)) throw new Error("Invalid OAuth state")
+      if (!verifier) throw new Error("Missing PKCE verifier")
+
+      const clientId = readRequiredString(process.env.TWITTER_CLIENT_ID || "", "TWITTER_CLIENT_ID", { max: 512 })
+      const clientSecret = readRequiredString(process.env.TWITTER_CLIENT_SECRET || "", "TWITTER_CLIENT_SECRET", { max: 512 })
+      const redirectUri = `${req.protocol}://${req.get("host")}/api/auth/x/callback`
+
+      const tokenRes = await fetch("https://api.twitter.com/2/oauth2/token", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+        },
+        body: new URLSearchParams({
+          code,
+          grant_type: "authorization_code",
+          redirect_uri: redirectUri,
+          code_verifier: verifier,
+        }).toString(),
+      })
+      if (!tokenRes.ok) throw new Error(`X token exchange failed (${tokenRes.status})`)
+      const tokenData = await tokenRes.json()
+      const accessToken = readRequiredString(tokenData?.access_token || "", "X access token", { max: 2048 })
+
+      const profileRes = await fetch("https://api.twitter.com/2/users/me?user.fields=name,username,profile_image_url", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      if (!profileRes.ok) throw new Error(`X userinfo failed (${profileRes.status})`)
+      const profilePayload = await profileRes.json()
+      const profile = profilePayload?.data || {}
+
+      const fallbackEmail = `x_${profile?.id || "user"}@oauth.local`
+      const { userId, email } = await upsertOAuthUser({
+        provider: "x",
+        email: fallbackEmail,
+        name: profile?.name || profile?.username || "X User",
+        avatarUrl: profile?.profile_image_url || "",
+      })
+      setAuthCookies(res, userId, email)
+      logAudit({ userId, action: "auth.login.x", targetType: "user", targetId: userId, meta: { email } })
+      res.redirect("/")
+    } catch (error) {
+      console.error("X OAuth callback error:", error)
+      res.redirect(`/?error=${encodeURIComponent("X sign-in failed. Please try again.")}`)
     }
   })
 

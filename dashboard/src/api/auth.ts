@@ -27,9 +27,11 @@ export type LoginTwoFactorChallenge = {
 
 export type LoginResult = User | LoginTwoFactorChallenge
 export type AuthProviders = {
-  google: {
-    enabled: boolean
-  }
+  google: { enabled: boolean }
+  github?: { enabled: boolean }
+  facebook?: { enabled: boolean }
+  x?: { enabled: boolean }
+  figma?: { enabled: boolean }
 }
 
 function isTwoFactorChallenge(value: unknown): value is LoginTwoFactorChallenge {
