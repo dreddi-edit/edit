@@ -58,6 +58,7 @@ type SpendRange = "1h" | "24h" | "7d" | "30d"
 type UsageMode = "model" | "task"
 type StudioTool = StudioToolId
 type ProjectImportMode = "single" | "crawl" | "sitemap"
+type ImportSourceKind = "url" | "upload"
 type Template = { id: number; name: string; url?: string; platform?: SitePlatform; thumbnail?: string; created_at: string }
 type ChecklistItem = { id: string; label: string; done: boolean }
 type NoteItem = { id: string; text: string; done: boolean }
@@ -1026,6 +1027,16 @@ function parseImportHeaderLines(value: string) {
     })
     .filter((item): item is { key: string; value: string } => Boolean(item))
     .slice(0, 12)
+}
+
+function getFriendlyImportErrorMessage(error: unknown, source: ImportSourceKind, fallback: (text: string) => string) {
+  const message = errMsg(error)
+  if (/application failed/i.test(message)) {
+    return source === "upload"
+      ? fallback("Upload failed. Use either a live URL or upload files. For uploads, use HTML, ZIP, PDF, DOCX, screenshots, or folders.")
+      : fallback("Import failed. Use either a live URL or upload files. For URL import, enter a reachable website link first.")
+  }
+  return message
 }
 
 function plainTextFromHtml(html?: string | null) {
@@ -2153,6 +2164,7 @@ export default function ProjectDashboard({
   const [newImportSummary, setNewImportSummary] = useState("")
   const [newImportAnalysis, setNewImportAnalysis] = useState<ProjectImportAnalysis | null>(null)
   const [newImportMode, setNewImportMode] = useState<ProjectImportMode>("crawl")
+  const [newImportSource, setNewImportSource] = useState<ImportSourceKind>("url")
   const [newImportShowAuth, setNewImportShowAuth] = useState(false)
   const [newImportBasicUser, setNewImportBasicUser] = useState("")
   const [newImportBasicPass, setNewImportBasicPass] = useState("")
@@ -2795,6 +2807,7 @@ export default function ProjectDashboard({
     setNewImportSummary("")
     setNewImportAnalysis(null)
     setNewImportMode("crawl")
+    setNewImportSource("url")
     setNewImportShowAuth(false)
     setNewImportBasicUser("")
     setNewImportBasicPass("")
@@ -3121,6 +3134,7 @@ export default function ProjectDashboard({
       toast.warning(rt("Enter a website URL first."))
       return
     }
+    setNewImportSource("url")
     const headers = parseImportHeaderLines(newImportHeaders)
     const requestOverrides = {
       basicAuth: newImportBasicUser.trim()
@@ -3143,7 +3157,7 @@ export default function ProjectDashboard({
       applyImportPreview(preview)
       toast.success(preview.summary || rt("Website imported"))
     } catch (error) {
-      toast.error(errMsg(error))
+      toast.error(getFriendlyImportErrorMessage(error, "url", rt))
     } finally {
       setNewImporting(false)
     }
@@ -3151,6 +3165,7 @@ export default function ProjectDashboard({
 
   const runAutoUploadImport = async (items: Array<{ file: File; relativePath?: string }>) => {
     if (!items.length) return
+    setNewImportSource("upload")
     setNewImporting(true)
     try {
       const payload = await buildAutoImportPayload(items)
@@ -3158,7 +3173,7 @@ export default function ProjectDashboard({
       applyImportPreview(preview)
       toast.success(preview.summary || rt("Upload analyzed"))
     } catch (error) {
-      toast.error(errMsg(error))
+      toast.error(getFriendlyImportErrorMessage(error, "upload", rt))
     } finally {
       setNewImporting(false)
       setNewImportDragActive(false)
@@ -3422,6 +3437,10 @@ export default function ProjectDashboard({
   const createProject = async () => {
     if (!newName.trim()) {
       toast.warning(rt("Project name required"))
+      return
+    }
+    if (!newUrl.trim() && !newUploadHtml.trim() && newUploadPages.length === 0) {
+      toast.warning(rt("Choose one source first: either enter a website URL or upload files."))
       return
     }
     setCreatingProject(true)
@@ -5166,6 +5185,19 @@ export default function ProjectDashboard({
                 </label>
                 <div className="pd-field-label pd-field-label-full">
                   {rt("Import source")}
+                  <div className="pd-import-intro-card">
+                    <strong>{rt("Choose one source path")}</strong>
+                    <span>{rt("You only need one: either import from a live URL or upload files. You do not need to do both.")}</span>
+                  </div>
+                  <div className="pd-import-source-grid">
+                    <section className={`pd-import-source-card${newImportSource === "url" ? " is-active" : ""}`}>
+                      <div className="pd-import-source-head">
+                        <span className="pd-import-source-step">01</span>
+                        <div>
+                          <strong>{rt("Import from URL")}</strong>
+                          <span>{rt("Use this when the site is already live and reachable.")}</span>
+                        </div>
+                      </div>
                   <div className="pd-import-toolbar">
                     <div className="pd-import-mode">
                       {([
@@ -5177,21 +5209,28 @@ export default function ProjectDashboard({
                           key={value}
                           type="button"
                           className={`pd-segment-btn${newImportMode === value ? " is-active" : ""}`}
-                          onClick={() => setNewImportMode(value)}
+                          onClick={() => {
+                            setNewImportSource("url")
+                            setNewImportMode(value)
+                          }}
                         >
                           {label}
                         </button>
                       ))}
                     </div>
-                    <button className="pd-btn pd-btn-primary" type="button" onClick={() => void importFromUrl()} disabled={newImporting}>
+                    <button className="pd-btn pd-btn-primary" type="button" onClick={() => void importFromUrl()} disabled={newImporting || !newUrl.trim()}>
                       {newImporting ? rt("Importing...") : rt("Import website")}
                     </button>
                   </div>
+                  <span className="pd-field-hint">{rt("Paste a live URL and choose how deep the importer should go. URL import is separate from file upload.")}</span>
                   <div className="pd-import-auth-toggle">
                     <button
                       className="pd-btn"
                       type="button"
-                      onClick={() => setNewImportShowAuth((value) => !value)}
+                      onClick={() => {
+                        setNewImportSource("url")
+                        setNewImportShowAuth((value) => !value)
+                      }}
                     >
                       {newImportShowAuth ? rt("Hide auth/headers") : rt("Use auth, cookie, or headers")}
                     </button>
@@ -5241,6 +5280,15 @@ export default function ProjectDashboard({
                       </label>
                     </div>
                   ) : null}
+                    </section>
+                    <section className={`pd-import-source-card${newImportSource === "upload" ? " is-active" : ""}`}>
+                      <div className="pd-import-source-head">
+                        <span className="pd-import-source-step">02</span>
+                        <div>
+                          <strong>{rt("Upload files")}</strong>
+                          <span>{rt("Use this for HTML, ZIPs, briefs, screenshots, or whole folders.")}</span>
+                        </div>
+                      </div>
                   <div
                     className={`pd-import-dropzone-wrap${newImporting ? " is-loading" : ""}`}
                   >
@@ -5249,6 +5297,7 @@ export default function ProjectDashboard({
                     className={`pd-import-dropzone${newImportDragActive ? " is-dragging" : ""}`}
                     onClick={() => {
                       if (newImporting) return
+                      setNewImportSource("upload")
                       uploadInputRef.current?.click()
                     }}
                     onDragEnter={handleUploadDragEnter}
@@ -5261,6 +5310,7 @@ export default function ProjectDashboard({
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault()
                         if (newImporting) return
+                        setNewImportSource("upload")
                         uploadInputRef.current?.click()
                       }
                     }}
@@ -5274,6 +5324,7 @@ export default function ProjectDashboard({
                         onClick={(event) => {
                           event.stopPropagation()
                           if (newImporting) return
+                          setNewImportSource("upload")
                           uploadInputRef.current?.click()
                         }}
                         disabled={newImporting}
@@ -5286,6 +5337,7 @@ export default function ProjectDashboard({
                         onClick={(event) => {
                           event.stopPropagation()
                           if (newImporting) return
+                          setNewImportSource("upload")
                           folderInputRef.current?.click()
                         }}
                         disabled={newImporting}
@@ -5298,6 +5350,8 @@ export default function ProjectDashboard({
                     </div>
                     </div>
                   </div>
+                    </section>
+                  </div>
                   {(newUploadName || newImportSummary) ? (
                     <div className="pd-import-summary">
                       <div className="pd-import-summary-head">
@@ -5305,6 +5359,7 @@ export default function ProjectDashboard({
                         <span>{newImportSummary || summarizeImportPreview({ name: newUploadName || "", html: newUploadHtml, url: newUrl, pages: newUploadPages, platform: newUploadPlatform, analysis: newImportAnalysis || undefined })}</span>
                       </div>
                       <div className="pd-import-summary-meta">
+                        <span>{newImportSource === "upload" ? rt("Uploaded files") : rt("Live URL")}</span>
                         <span>{(newImportAnalysis?.pageCount || newUploadPages.length || (newUploadHtml ? 1 : 0))} {rt("pages")}</span>
                         <span>{getPlatformMeta(newUploadPlatform).label}</span>
                         {newImportAnalysis?.projectType ? <span>{newImportAnalysis.projectType}</span> : null}

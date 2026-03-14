@@ -815,6 +815,36 @@ body[data-theme="light"] {
   gap: 6px;
 }
 
+.draft-settings-mini-toggle {
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid #2a2a2a;
+  background: #171717;
+  color: #8d9aae;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.draft-settings-mini-toggle.is-active {
+  color: #60a5fa;
+  border-color: rgba(96,165,250,0.25);
+  background: rgba(96,165,250,0.16);
+}
+
+.draft-settings-credit-amount {
+  font-size: 12px;
+  font-weight: 800;
+  color: #7fd1a7;
+  font-variant-numeric: tabular-nums;
+}
+
+.draft-settings-credit-amount[data-negative="true"] {
+  color: #f59e94;
+}
+
 .draft-settings-toggle-button {
   flex: 1;
   padding: 12px 10px;

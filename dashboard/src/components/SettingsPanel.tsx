@@ -3,12 +3,14 @@ import { useMemo } from "react"
 import { toast } from "./Toast"
 import { errMsg } from "../utils/errMsg"
 import {
+  apiGetBalance,
+  apiGetCreditsTransactions,
   apiGetStripeInvoices,
   apiGetStripePackages,
   apiStripeSubscriptionCheckout,
 } from "../api/credits"
 import { fetchWithAuth } from "../api/client"
-import type { StripeSubscriptionPlan, UserInvoice } from "../api/types"
+import type { CreditTransaction, StripeSubscriptionPlan, UserInvoice } from "../api/types"
 import { getRequireApproval, getApprovalThreshold, setRequireApproval, setApprovalThreshold } from "../approval-settings"
 import { AVAILABLE_UI_LANGUAGES, useTranslation, type Language } from "../i18n/useTranslation"
 import {
@@ -40,6 +42,7 @@ type ApiKey = {
   active: number
   created_at?: string
 }
+type CreditViewMode = "detailed" | "model" | "application"
 type Org = { id: number; name: string; owner_id: number }
 type OrgMember = {
   id: number
@@ -100,6 +103,19 @@ function previewText(value: string, max = 120) {
   return value.length > max ? `${value.slice(0, max).trim()}...` : value
 }
 
+function parseCreditTransactionModel(description: string) {
+  const modelMatch = String(description || "").match(/\|\s*([^|(]+?)\s*\(/)
+  return modelMatch ? modelMatch[1].trim() : "Other"
+}
+
+function parseCreditTransactionApplication(description: string) {
+  const appMatch = String(description || "").match(/^AI:\s*(.+?)\s*\|/)
+  if (appMatch) return appMatch[1].trim()
+  if (/topup|auflad/i.test(description)) return "Top-up"
+  if (/stripe/i.test(description)) return "Stripe"
+  return "Other"
+}
+
 async function parseJson(response: Response) {
   const payload = await response.json()
   if (!response.ok || payload?.ok === false) {
@@ -150,6 +166,9 @@ export default function SettingsPanel({
   const [notificationPrefs, setNotificationPrefs] = useState<NotificationPrefs>({ email_updates: true, team_mentions: true })
   const [subscriptionPlans, setSubscriptionPlans] = useState<StripeSubscriptionPlan[]>([])
   const [invoiceRows, setInvoiceRows] = useState<UserInvoice[]>([])
+  const [creditBalance, setCreditBalance] = useState<number | null>(null)
+  const [creditTransactions, setCreditTransactions] = useState<CreditTransaction[]>([])
+  const [creditViewMode, setCreditViewMode] = useState<CreditViewMode>("detailed")
   const [avatarDraft, setAvatarDraft] = useState("")
   const [currentPasswordInput, setCurrentPasswordInput] = useState("")
   const [newPasswordInput, setNewPasswordInput] = useState("")
@@ -212,6 +231,55 @@ export default function SettingsPanel({
     [availableModels, effectiveSettings.disabled_models],
   )
 
+  const creditTransactionSummary = useMemo(() => {
+    const spendRows = creditTransactions.filter((row) => Number(row.amount_eur || 0) < 0)
+    const totalSpent = spendRows.reduce((sum, row) => sum + Math.abs(Number(row.amount_eur || 0)), 0)
+    const grouped = new Map<string, { label: string; amount: number; count: number }>()
+    for (const row of creditTransactions) {
+      const label =
+        creditViewMode === "model"
+          ? parseCreditTransactionModel(row.description || row.type)
+          : creditViewMode === "application"
+          ? parseCreditTransactionApplication(row.description || row.type)
+          : `${row.id}`
+      const key = creditViewMode === "detailed" ? `${row.id}` : label
+      const current = grouped.get(key) || { label, amount: 0, count: 0 }
+      current.amount += Number(row.amount_eur || 0)
+      current.count += 1
+      grouped.set(key, current)
+    }
+    return {
+      totalSpent,
+      rows:
+        creditViewMode === "detailed"
+          ? creditTransactions.map((row) => ({
+              key: `${row.id}`,
+              label:
+                row.type === "topup"
+                  ? "Top-up"
+                  : row.type === "stripe"
+                  ? "Stripe"
+                  : row.type === "deduct"
+                  ? parseCreditTransactionApplication(row.description || "AI usage")
+                  : row.type,
+              detail: row.description || row.type,
+              amount: Number(row.amount_eur || 0),
+              count: 1,
+              createdAt: row.created_at,
+            }))
+          : Array.from(grouped.values())
+              .map((row) => ({
+                key: row.label,
+                label: row.label,
+                detail: `${row.count} transactions`,
+                amount: row.amount,
+                count: row.count,
+                createdAt: "",
+              }))
+              .sort((left, right) => Math.abs(right.amount) - Math.abs(left.amount)),
+    }
+  }, [creditTransactions, creditViewMode])
+
   useEffect(() => {
     setLanguageChoice(lang)
   }, [lang])
@@ -242,7 +310,7 @@ export default function SettingsPanel({
     try {
       const acceptInviteData = await request("/api/orgs/accept-invite", { method: "POST" }).catch(() => null)
 
-      const [settingsDataResult, keysDataResult, orgsDataResult, meDataResult, billingDataResult, invoicesDataResult] =
+      const [settingsDataResult, keysDataResult, orgsDataResult, meDataResult, billingDataResult, invoicesDataResult, balanceDataResult, transactionsDataResult] =
         await Promise.allSettled([
         request("/api/settings"),
         request("/api/keys"),
@@ -250,6 +318,8 @@ export default function SettingsPanel({
         request("/api/auth/me"),
         apiGetStripePackages(),
         apiGetStripeInvoices(),
+        apiGetBalance(),
+        apiGetCreditsTransactions(),
       ])
 
       if (settingsDataResult.status === "rejected") throw settingsDataResult.reason
@@ -285,6 +355,15 @@ export default function SettingsPanel({
         setInvoiceRows(invoicesData.ok ? invoicesData.invoices || [] : [])
       } else {
         setInvoiceRows([])
+      }
+
+      setCreditBalance(balanceDataResult.status === "fulfilled" ? balanceDataResult.value : null)
+
+      if (transactionsDataResult.status === "fulfilled") {
+        const txData = transactionsDataResult.value
+        setCreditTransactions(txData.ok ? txData.transactions || [] : [])
+      } else {
+        setCreditTransactions([])
       }
 
       const nextOwned = (orgsData.owned?.[0] || null) as Org | null
@@ -1136,6 +1215,9 @@ export default function SettingsPanel({
                     <div className="draft-settings-list-meta">
                       {String(currentUser?.plan_id || "basis").toUpperCase()} · {String(currentUser?.plan_status || "active").replace(/_/g, " ")}
                     </div>
+                    <div className="draft-settings-list-meta" style={{ marginTop: 6 }}>
+                      {t("Available credit")}: €{Number(creditBalance || 0).toFixed(2)} · {t("Recorded AI spend")}: €{creditTransactionSummary.totalSpent.toFixed(2)}
+                    </div>
                   </div>
                   <button
                     type="button"
@@ -1235,6 +1317,50 @@ export default function SettingsPanel({
                   ) : (
                     <p className="draft-settings-description" style={{ marginTop: 10, marginBottom: 0 }}>
                       Invoices will appear here after successful Stripe charges.
+                    </p>
+                  )}
+                </div>
+
+                <div style={{ marginTop: 16 }}>
+                  <div className="draft-settings-inline" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                    <div className="draft-settings-label" style={{ marginBottom: 0 }}>Credit transactions</div>
+                    <div className="draft-settings-inline" style={{ gap: 6, flexWrap: "wrap" }}>
+                      <button type="button" className={`draft-settings-mini-toggle${creditViewMode === "detailed" ? " is-active" : ""}`} onClick={() => setCreditViewMode("detailed")}>Detailed</button>
+                      <button type="button" className={`draft-settings-mini-toggle${creditViewMode === "model" ? " is-active" : ""}`} onClick={() => setCreditViewMode("model")}>By model</button>
+                      <button type="button" className={`draft-settings-mini-toggle${creditViewMode === "application" ? " is-active" : ""}`} onClick={() => setCreditViewMode("application")}>By application</button>
+                    </div>
+                  </div>
+                  <p className="draft-settings-description" style={{ marginTop: 0, marginBottom: 10 }}>
+                    {t("This makes deductions transparent: detailed shows each charge, model groups by model name, and application groups by task or feature.")}
+                  </p>
+                  {creditTransactionSummary.rows.length ? (
+                    <div className="draft-settings-list">
+                      {creditTransactionSummary.rows.slice(0, 25).map((row) => (
+                        <div key={row.key} className="draft-settings-list-card">
+                          <div className="draft-settings-list-main">
+                            <div className="draft-settings-inline" style={{ marginBottom: 4 }}>
+                              <strong>{row.label}</strong>
+                              <span className={`draft-settings-pill ${row.amount < 0 ? "draft-settings-pill--pending" : "draft-settings-pill--success"}`}>
+                                {row.amount < 0 ? "Spend" : "Credit"}
+                              </span>
+                              {creditViewMode !== "detailed" ? <span className="draft-settings-pill">{row.count} tx</span> : null}
+                            </div>
+                            <div className="draft-settings-list-meta">{row.detail}</div>
+                            {creditViewMode === "detailed" && row.createdAt ? (
+                              <div className="draft-settings-list-meta" style={{ marginTop: 6 }}>
+                                {new Date(row.createdAt).toLocaleString("de-DE")}
+                              </div>
+                            ) : null}
+                          </div>
+                          <div className="draft-settings-credit-amount" data-negative={row.amount < 0 ? "true" : "false"}>
+                            {row.amount >= 0 ? "+" : "-"}€{Math.abs(row.amount).toFixed(4)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="draft-settings-description" style={{ marginTop: 10, marginBottom: 0 }}>
+                      {t("No credit transactions recorded yet.")}
                     </p>
                   )}
                 </div>
