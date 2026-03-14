@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const root = process.cwd();
-const backupDir = process.env.DB_BACKUP_DIR || path.join(root, 'server', 'data', 'backups');
+const backupDir = process.env.DB_BACKUP_DIR || path.join(root, 'apps', 'web', 'server', 'data', 'backups');
 
 if (!fs.existsSync(backupDir)) {
   console.error(`db-restore-probe failed: backup directory not found at ${backupDir}`);

@@ -1,0 +1,1373 @@
+import { JSDOM } from "jsdom";
+
+import { getPlatformGuide, normalizeSiteUrl, normalizeSupportedPlatform } from "./siteMeta.js";
+
+function slugify(value, fallback = "site-editor-export") {
+  const slug = String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || fallback;
+}
+
+function safeComponentName(value, fallback = "SiteEditorExport") {
+  const cleaned = String(value || "").replace(/[^a-zA-Z0-9]+/g, "");
+  return cleaned || fallback;
+}
+
+function decodeAssetProxyEverywhere(input) {
+  let out = String(input || "");
+  out = out.replace(/\/asset\?url=([^&"' )>]+)/g, (match, enc) => {
+    try {
+      return decodeURIComponent(enc);
+    } catch {
+      return match;
+    }
+  });
+  return out.replace(/&amp;/g, "&");
+}
+
+function uniqueList(values) {
+  return Array.from(new Set((values || []).filter(Boolean)));
+}
+
+function normalizeRemoteUrl(value) {
+  const raw = decodeAssetProxyEverywhere(String(value || "").trim());
+  if (!raw) return "";
+  if (/^\/\//.test(raw)) return `https:${raw}`;
+  if (/^https?:\/\//i.test(raw)) return raw;
+  return "";
+}
+
+function escapeHtmlAttribute(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function escapePhpSingleQuoted(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+function createNowdoc(content, tagBase = "SITE_EDITOR_EXPORT") {
+  const tag = `${String(tagBase || "SITE_EDITOR_EXPORT").replace(/[^A-Z0-9_]/gi, "_").toUpperCase()}_NOWDOC`;
+  return `<<<'${tag}'\n${String(content || "")}\n${tag}`;
+}
+
+function escapeTemplateLiteral(value) {
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/`/g, "\\`")
+    .replace(/\$\{/g, "\\${");
+}
+
+function extractSeoMetadata(html) {
+  const source = String(html || "");
+  const titleMatch = source.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+  const title = (titleMatch?.[1] || "").replace(/\s+/g, " ").trim();
+  const metas = {};
+  const metaRe = /<meta\b([^>]*)>/gi;
+  let match;
+  while ((match = metaRe.exec(source))) {
+    const attrs = match[1] || "";
+    const key =
+      (attrs.match(/\bname=["']([^"']+)["']/i)?.[1] || "").toLowerCase()
+      || (attrs.match(/\bproperty=["']([^"']+)["']/i)?.[1] || "").toLowerCase();
+    const content = attrs.match(/\bcontent=["']([^"']*)["']/i)?.[1];
+    if (key && content !== undefined) metas[key] = content;
+  }
+  return { title, metas };
+}
+
+function injectSeoMetadata(html, seo) {
+  if (!seo) return String(html || "");
+  let out = String(html || "");
+  const title = String(seo?.title || "").trim();
+  const metas = seo?.metas && typeof seo.metas === "object" ? seo.metas : {};
+
+  if (title) {
+    if (/<title\b/i.test(out)) {
+      out = out.replace(/<title[^>]*>[\s\S]*?<\/title>/i, `<title>${escapeHtmlAttribute(title)}</title>`);
+    } else {
+      out = out.replace(/(<head\b[^>]*>)/i, `$1\n  <title>${escapeHtmlAttribute(title)}</title>`);
+    }
+  }
+
+  const description = String(metas.description || "").trim();
+  if (description && !/<meta\b[^>]*\bname=["']description["']/i.test(out)) {
+    out = out.replace(/(<head\b[^>]*>)/i, `$1\n  <meta name="description" content="${escapeHtmlAttribute(description)}">`);
+  }
+
+  const ogTitle = String(metas["og:title"] || title || "").trim();
+  if (ogTitle && !/<meta\b[^>]*\bproperty=["']og:title["']/i.test(out)) {
+    out = out.replace(/(<head\b[^>]*>)/i, `$1\n  <meta property="og:title" content="${escapeHtmlAttribute(ogTitle)}">`);
+  }
+
+  const ogDescription = String(metas["og:description"] || description || "").trim();
+  if (ogDescription && !/<meta\b[^>]*\bproperty=["']og:description["']/i.test(out)) {
+    out = out.replace(/(<head\b[^>]*>)/i, `$1\n  <meta property="og:description" content="${escapeHtmlAttribute(ogDescription)}">`);
+  }
+
+  return out;
+}
+
+function resolveExportAssets(html) {
+  return decodeAssetProxyEverywhere(String(html || "")).replace(
+    /(["'])(\/\/[a-zA-Z0-9\-._~:/?#[\]@!$&'()*+,;=%]+)(["'])/g,
+    (_match, open, url, close) => `${open}https:${url}${close}`
+  );
+}
+
+function rewriteInternalLinks(html, siteRootUrl) {
+  if (!siteRootUrl) return String(html || "");
+  let origin = "";
+  try {
+    origin = new URL(siteRootUrl).origin;
+  } catch {
+    return String(html || "");
+  }
+  if (!origin || origin === "null") return String(html || "");
+
+  return String(html || "").replace(
+    /(\bhref=["'])([^"']+)(["'])/gi,
+    (match, prefix, href, suffix) => {
+      if (/^(mailto:|tel:|javascript:|#|data:)/i.test(href)) return match;
+      try {
+        const resolved = new URL(href, siteRootUrl);
+        if (resolved.origin !== origin) return match;
+        return `${prefix}${resolved.pathname}${resolved.search}${resolved.hash}${suffix}`;
+      } catch {
+        return match;
+      }
+    }
+  );
+}
+
+const PLATFORM_FORM_GUIDANCE = {
+  wordpress: "Wire forms using Contact Form 7, WPForms, or a custom REST endpoint in your WordPress install.",
+  shopify: "Shopify sections route to /contact via {% form 'contact' %}. Verify the Liquid form tag was injected correctly.",
+  static: "Replace placeholder form actions with your preferred form service (for example Formspree, Basin, or a serverless function).",
+  webflow: "Reconnect form submission targets in Webflow's Form Settings panel after import.",
+  wix: "Reconnect form apps or Wix Automations inside the Wix editor before launch.",
+  unknown: "Configure form submission targets for your deployment environment before going live.",
+  other: "Configure form submission targets for your deployment environment before going live.",
+};
+
+function getPlatformFormGuidance(platform) {
+  return PLATFORM_FORM_GUIDANCE[String(platform || "other")] || PLATFORM_FORM_GUIDANCE.other;
+}
+
+function runHtmlStructureChecks(source) {
+  const issues = [];
+  const missingAltCount = (String(source || "").match(/<img\b(?![^>]*\balt=)[^>]*>/gi) || []).length;
+  if (missingAltCount > 0) {
+    issues.push({
+      code: "html-missing-alt",
+      level: "warning",
+      message: `${missingAltCount} image${missingAltCount === 1 ? "" : "s"} missing alt attribute (WCAG 2.1 §1.1.1).`,
+      detail: `${missingAltCount} img element${missingAltCount === 1 ? "" : "s"} affected`,
+    });
+  }
+
+  const idMatches = Array.from(String(source || "").matchAll(/\bid=["']([^"']+)["']/gi)).map((item) => item[1].toLowerCase());
+  const idCounts = {};
+  for (const id of idMatches) idCounts[id] = (idCounts[id] || 0) + 1;
+  const duplicateIds = Object.entries(idCounts).filter(([, count]) => count > 1).map(([id]) => id);
+  if (duplicateIds.length > 0) {
+    issues.push({
+      code: "html-duplicate-ids",
+      level: "warning",
+      message: `Duplicate id values: ${duplicateIds.slice(0, 5).join(", ")}${duplicateIds.length > 5 ? " …" : ""}. Duplicate IDs break DOM queries and assistive technology.`,
+      detail: `${duplicateIds.length} duplicate id${duplicateIds.length === 1 ? "" : "s"}`,
+    });
+  }
+
+  if (/<html\b(?![^>]*\blang=)[^>]*>/i.test(String(source || ""))) {
+    issues.push({
+      code: "html-missing-lang",
+      level: "info",
+      message: 'The <html> element is missing a lang attribute. Add lang="en" (or the appropriate BCP-47 code) for screen-reader compatibility.',
+    });
+  }
+
+  return issues;
+}
+
+function cleanupStyleBlocks(html) {
+  function findMatchingBrace(source, openIndex) {
+    let depth = 0;
+    for (let index = openIndex; index < source.length; index += 1) {
+      const char = source[index];
+      if (char === "{") depth += 1;
+      if (char === "}") {
+        depth -= 1;
+        if (depth === 0) return index;
+      }
+    }
+    return -1;
+  }
+
+  function dedupeDeclarationBlock(source) {
+    const seen = new Map();
+    for (const raw of String(source || "").split(";")) {
+      const declaration = raw.trim();
+      if (!declaration) continue;
+      const colonIndex = declaration.indexOf(":");
+      if (colonIndex < 0) continue;
+      const property = declaration.slice(0, colonIndex).trim();
+      const value = declaration.slice(colonIndex + 1).trim();
+      if (!property || !value) continue;
+      const key = property.startsWith("--") ? property : property.toLowerCase();
+      seen.set(key, { property, value });
+    }
+    return Array.from(seen.values())
+      .map(({ property, value }) => `  ${property}: ${value};`)
+      .join("\n");
+  }
+
+  function cleanupCss(source) {
+    let cursor = 0;
+    let output = "";
+    const css = String(source || "");
+
+    while (cursor < css.length) {
+      const openIndex = css.indexOf("{", cursor);
+      if (openIndex === -1) {
+        output += css.slice(cursor);
+        break;
+      }
+
+      const closeIndex = findMatchingBrace(css, openIndex);
+      if (closeIndex === -1) {
+        output += css.slice(cursor);
+        break;
+      }
+
+      const selector = css.slice(cursor, openIndex);
+      const trimmedSelector = selector.trim();
+      const body = css.slice(openIndex + 1, closeIndex);
+
+      if (!trimmedSelector) {
+        cursor = closeIndex + 1;
+        continue;
+      }
+
+      if (trimmedSelector.startsWith("@")) {
+        const nested = cleanupCss(body);
+        if (nested.trim()) output += `${selector}{${nested}}`;
+      } else {
+        const declarations = dedupeDeclarationBlock(body);
+        if (declarations.trim()) output += `${selector}{\n${declarations}\n}`;
+      }
+
+      cursor = closeIndex + 1;
+    }
+
+    return output.replace(/\n{3,}/g, "\n\n");
+  }
+
+  return String(html || "").replace(
+    /<style(\b[^>]*)>([\s\S]*?)<\/style>/gi,
+    (_match, attrs, css) => `<style${attrs}>${cleanupCss(css)}</style>`
+  );
+}
+
+function addEditabilityHints(html, mode, platform) {
+  const source = String(html || "");
+  if (mode === "wp-theme" || (mode === "wp-placeholder" && platform === "wordpress")) {
+    return source.replace(
+      /(<(?:section|article|div|main|header|footer|aside)\b(?![^>]*\bdata-wp-block)[^>]*)>/gi,
+      '$1 data-wp-block="core/html">'
+    );
+  }
+  return source;
+}
+
+function looksLikeDocumentHtml(html) {
+  return /<!doctype/i.test(String(html || "")) || /<html[\s>]/i.test(String(html || ""));
+}
+
+function normalizeArtifactAlternates(alternates) {
+  const seen = new Set();
+  return Array.from(Array.isArray(alternates) ? alternates : [])
+    .map((item) => ({
+      hreflang: String(item?.hreflang || "").trim(),
+      href: String(item?.href || "").trim(),
+    }))
+    .filter((item) => {
+      if (!item.hreflang || !item.href) return false;
+      const key = `${item.hreflang.toLowerCase()}|${item.href}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function buildAlternateHeadLinks(alternates = [], canonicalUrl = "") {
+  const lines = [];
+  if (canonicalUrl) {
+    lines.push(`<link rel="canonical" href="${escapeHtmlAttribute(canonicalUrl)}">`);
+  }
+  for (const item of normalizeArtifactAlternates(alternates)) {
+    lines.push(
+      `<link rel="alternate" hreflang="${escapeHtmlAttribute(item.hreflang)}" href="${escapeHtmlAttribute(item.href)}">`
+    );
+  }
+  return lines.join("\n");
+}
+
+function injectAlternateLinks(html, alternates = [], canonicalUrl = "") {
+  if (!looksLikeDocumentHtml(html)) return String(html || "");
+  const dom = new JSDOM(String(html || ""));
+  const doc = dom.window.document;
+  const head = doc.head || doc.documentElement.insertBefore(doc.createElement("head"), doc.body || null);
+  Array.from(head.querySelectorAll("link[rel='alternate'][hreflang], link[rel='canonical']")).forEach((node) => node.remove());
+
+  if (canonicalUrl) {
+    const canonical = doc.createElement("link");
+    canonical.setAttribute("rel", "canonical");
+    canonical.setAttribute("href", canonicalUrl);
+    canonical.setAttribute("data-site-editor-generated", "1");
+    head.appendChild(canonical);
+  }
+
+  for (const item of normalizeArtifactAlternates(alternates)) {
+    const link = doc.createElement("link");
+    link.setAttribute("rel", "alternate");
+    link.setAttribute("hreflang", item.hreflang);
+    link.setAttribute("href", item.href);
+    link.setAttribute("data-site-editor-generated", "1");
+    head.appendChild(link);
+  }
+
+  return dom.serialize();
+}
+
+const DEFAULT_FORM_ACTION_URL = process.env.EXPORT_FORM_ACTION_URL || "https://formspree.io/f/your-form-id"
+const DEFAULT_CTA_URL = process.env.EXPORT_CTA_URL || "https://example.com/contact"
+
+function ensurePortableInteractions(doc) {
+  if (!doc?.body) return
+
+  Array.from(doc.querySelectorAll("form")).forEach((form, formIndex) => {
+    const action = (form.getAttribute("action") || "").trim()
+    const method = (form.getAttribute("method") || "").trim()
+    const needsPlaceholderAction = !action || action === "#" || /^javascript:/i.test(action)
+
+    if (needsPlaceholderAction) {
+      form.setAttribute("action", DEFAULT_FORM_ACTION_URL)
+      form.setAttribute("data-site-editor-form-placeholder", "1")
+    }
+    if (!method) form.setAttribute("method", "post")
+
+    Array.from(form.querySelectorAll("input, textarea, select")).forEach((field, index) => {
+      const input = field
+      const tag = input.tagName.toLowerCase()
+      const inputType = String(input.getAttribute("type") || tag).toLowerCase()
+      if (["hidden", "submit", "button", "reset"].includes(inputType)) return
+      if (!input.getAttribute("name")) {
+        const fallbackName = deriveFieldLabel(input, form)
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "_")
+          .replace(/^_+|_+$/g, "")
+        input.setAttribute("name", fallbackName || `field_${formIndex + 1}_${index + 1}`)
+      }
+    })
+  })
+
+  Array.from(doc.querySelectorAll("a")).forEach((anchor) => {
+    const href = (anchor.getAttribute("href") || "").trim()
+    if (!href || href === "#" || /^javascript:/i.test(href)) {
+      anchor.setAttribute("href", DEFAULT_CTA_URL)
+      anchor.setAttribute("data-site-editor-cta-placeholder", "1")
+    }
+  })
+
+  Array.from(doc.querySelectorAll("button")).forEach((button) => {
+    const type = String(button.getAttribute("type") || "").toLowerCase()
+    if (type === "submit" || type === "reset" || button.closest("form")) return
+
+    const href =
+      button.getAttribute("data-site-editor-cta-url")
+      || button.getAttribute("data-cta-url")
+      || button.getAttribute("data-href")
+      || DEFAULT_CTA_URL
+
+    const anchor = doc.createElement("a")
+    anchor.setAttribute("href", href)
+    anchor.setAttribute("role", "button")
+    anchor.setAttribute("data-site-editor-cta-placeholder", "1")
+    anchor.innerHTML = button.innerHTML
+    if (button.className) anchor.className = button.className
+    Array.from(button.attributes).forEach((attribute) => {
+      if (["type", "onclick", "data-cta-url", "data-href", "data-site-editor-cta-url"].includes(attribute.name)) return
+      if (!anchor.hasAttribute(attribute.name)) anchor.setAttribute(attribute.name, attribute.value)
+    })
+    button.replaceWith(anchor)
+  })
+}
+
+function extractPortableDocumentParts(html) {
+  const source = injectResponsiveViewport(decodeAssetProxyEverywhere(String(html || "")));
+  const dom = new JSDOM(source);
+  const doc = dom.window.document;
+  ensurePortableInteractions(doc);
+  const title = (doc.querySelector("title")?.textContent || "").trim();
+  const externalStylesheets = uniqueList(
+    Array.from(doc.querySelectorAll('link[rel~="stylesheet"][href]'))
+      .map((node) => normalizeRemoteUrl(node.getAttribute("href")))
+      .filter(Boolean)
+  );
+  const inlineCss = Array.from(doc.querySelectorAll("style"))
+    .map((node) => node.textContent || "")
+    .join("\n\n")
+    .trim();
+
+  doc.querySelectorAll("script, style, link[rel~='stylesheet'], meta, base, title, noscript").forEach((node) => node.remove());
+  doc.body?.querySelectorAll("script, style, link, meta, base, title, noscript").forEach((node) => node.remove());
+
+  const bodyHtml = (doc.body?.innerHTML || "").trim();
+  return {
+    dom,
+    doc,
+    title,
+    inlineCss,
+    externalStylesheets,
+    bodyHtml,
+  };
+}
+
+function buildExternalStylesheetTags(urls) {
+  return uniqueList(urls)
+    .map((href) => `<link rel="stylesheet" href="${escapeHtmlAttribute(href)}">`)
+    .join("\n");
+}
+
+function wrapPortableFragment({ html, inlineCss = "", externalStylesheets = [], wrapperClass = "" }) {
+  const links = buildExternalStylesheetTags(externalStylesheets);
+  const styleTag = inlineCss ? `<style>${inlineCss}</style>` : "";
+  const classAttr = wrapperClass ? ` class="${escapeHtmlAttribute(wrapperClass)}"` : "";
+  return `${links}${links ? "\n" : ""}${styleTag}${styleTag ? "\n" : ""}<div${classAttr}>${String(html || "")}</div>`;
+}
+
+function buildPortableCss(inlineCss) {
+  const baseCss = [
+    ":root { color-scheme: light; }",
+    "body { margin: 0; }",
+    "img { max-width: 100%; height: auto; }",
+    "iframe { max-width: 100%; }",
+  ].join("\n");
+  return `${baseCss}\n\n${String(inlineCss || "").trim()}`.trim();
+}
+
+function deriveFieldLabel(field, form) {
+  const id = field.getAttribute("id");
+  const explicitLabel = id
+    ? Array.from(form.querySelectorAll("label")).find((label) => label.getAttribute("for") === id) || null
+    : null;
+  const fallback = explicitLabel?.textContent
+    || field.getAttribute("aria-label")
+    || field.getAttribute("placeholder")
+    || field.getAttribute("name")
+    || field.tagName;
+  return String(fallback || "").replace(/\s+/g, " ").trim();
+}
+
+function buildShopifyContactField(field, form, index) {
+  const tag = field.tagName.toLowerCase();
+  const inputType = String(field.getAttribute("type") || tag).toLowerCase();
+  if (["hidden", "submit", "button", "reset", "checkbox", "radio", "file"].includes(inputType)) return "";
+
+  const label = deriveFieldLabel(field, form) || `Field ${index + 1}`;
+  const placeholder = field.getAttribute("placeholder") || "";
+  const required = field.hasAttribute("required") || field.getAttribute("aria-required") === "true";
+  const attr = [
+    placeholder ? ` placeholder="${escapeHtmlAttribute(placeholder)}"` : "",
+    required ? " required" : "",
+  ].join("");
+
+  if (tag === "textarea") {
+    const rows = Number(field.getAttribute("rows") || 5);
+    return `<label>${escapeHtmlAttribute(label)}</label><textarea name="contact[body]" rows="${Number.isFinite(rows) && rows > 0 ? rows : 5}"${attr}></textarea>`;
+  }
+
+  if (tag === "select") {
+    const optionMarkup = Array.from(field.querySelectorAll("option"))
+      .map((option) => `<option value="${escapeHtmlAttribute(option.getAttribute("value") || option.textContent || "")}">${escapeHtmlAttribute(option.textContent || "")}</option>`)
+      .join("");
+    return `<label>${escapeHtmlAttribute(label)}</label><select name="contact[${escapeHtmlAttribute(label)}]"${attr}>${optionMarkup}</select>`;
+  }
+
+  const inputName =
+    inputType === "email"
+      ? "contact[email]"
+      : inputType === "tel"
+      ? "contact[phone]"
+      : `contact[${escapeHtmlAttribute(label)}]`;
+
+  return `<label>${escapeHtmlAttribute(label)}</label><input type="${escapeHtmlAttribute(inputType === "textarea" ? "text" : inputType || "text")}" name="${inputName}"${attr}>`;
+}
+
+function convertFormsToShopifyContact(container) {
+  Array.from(container.querySelectorAll("form")).forEach((form, formIndex) => {
+    const fieldMarkup = Array.from(form.querySelectorAll("input, textarea, select"))
+      .map((field, index) => buildShopifyContactField(field, form, index))
+      .filter(Boolean)
+      .join("\n");
+    if (!fieldMarkup) return;
+
+    const buttonLabel =
+      form.querySelector('button[type="submit"], input[type="submit"], button')?.textContent?.trim()
+      || form.querySelector('input[type="submit"]')?.getAttribute("value")
+      || "Send";
+
+    const replacement = `
+<div class="site-editor-shopify-contact site-editor-shopify-contact-${formIndex + 1}">
+  {% form 'contact', class: 'site-editor-contact-form' %}
+    {% if form.posted_successfully? %}
+      <p class="site-editor-contact-success">Thanks, your message has been sent.</p>
+    {% endif %}
+    {{ form.errors | default_errors }}
+    ${fieldMarkup}
+    <button type="submit">${escapeHtmlAttribute(buttonLabel)}</button>
+  {% endform %}
+</div>`.trim();
+
+    form.outerHTML = replacement;
+  });
+}
+
+export function transformExportHtml(html, mode) {
+  const raw = String(html || "");
+  if (mode === "html-raw") return raw;
+
+  let out = decodeAssetProxyEverywhere(raw);
+
+  if (mode === "wp-placeholder") {
+    out = out.replace(/<img\b([^>]*?)\bsrc=("|\')([^"\']*)\2([^>]*?)>/gi, (match, pre, _quote, src, post) => {
+      const value = String(src || "").trim();
+      if (!value.startsWith("blob:") && value !== "") return match;
+
+      let attrs = `${pre || ""} ${post || ""}`.replace(/\s+/g, " ").trim();
+      attrs = attrs.replace(/\s+\bsrcset=("|\')[^"\']*\1/gi, "");
+      attrs = attrs.replace(/\s+\bsrc=("|\')[^"\']*\1/gi, "");
+      if (!/\balt=("|\')/i.test(attrs)) {
+        attrs += ' alt="PLACEHOLDER: replace image in WordPress"';
+      }
+      if (!/\bdata-bo-placeholder=/i.test(attrs)) {
+        attrs += ' data-bo-placeholder="1"';
+      }
+      return `<img ${attrs} src="" />`;
+    });
+  }
+
+  return out;
+}
+
+export function injectResponsiveViewport(html) {
+  const value = String(html || "");
+  if (!value) return value;
+  if (/<meta[^>]+name=["']viewport["']/i.test(value)) return value;
+  return value.replace(/<head([^>]*)>/i, (match) => `${match}<meta name="viewport" content="width=device-width, initial-scale=1">`);
+}
+
+function findUnresolvedRelativeAssets(html) {
+  const warnings = [];
+  const attrRe = /\b(?:src|href)=["']([^"']+)["']/gi;
+  let match;
+  while ((match = attrRe.exec(html))) {
+    const value = String(match[1] || "").trim();
+    if (!value) continue;
+    if (/^(https?:|mailto:|tel:|data:|blob:|javascript:|#)/i.test(value)) continue;
+    if (/^\/\//.test(value)) continue;
+    warnings.push(value);
+  }
+  return Array.from(new Set(warnings)).slice(0, 8);
+}
+
+export function validateDeliveryArtifact({ html, url, platform, mode }) {
+  const normalizedPlatform = normalizeSupportedPlatform(platform);
+  const normalizedUrl = normalizeSiteUrl(url);
+  const guide = getPlatformGuide(normalizedPlatform);
+  const source = String(html || "");
+  const warnings = [];
+  const push = (code, level, message, detail) => {
+    warnings.push({ code, level, message, detail: detail || "" });
+  };
+
+  const unresolved = findUnresolvedRelativeAssets(source);
+  if (unresolved.length) {
+    push(
+      "relative-assets",
+      "warning",
+      "Some assets still use relative URLs and may need manual review after handoff.",
+      unresolved.join(", ")
+    );
+  }
+
+  if (/\/asset\?url=/i.test(source)) {
+    push("proxied-assets", "warning", "The export still references proxied assets and should be normalized before shipping.");
+  }
+
+  if (/__REPLACE_IN_WORDPRESS__|data-bo-placeholder=["']1["']/i.test(source)) {
+    push("placeholder-assets", "warning", "At least one preview image is still a placeholder and must be replaced in the final CMS.");
+  }
+
+  if (/<iframe\b/i.test(source)) {
+    push("embedded-frames", "info", "Embedded iframes were preserved. Validate third-party embeds after handoff.");
+  }
+
+  if (/<form\b/i.test(source)) {
+    push("forms-present", "info", "Forms are present. Submission handling may require platform-side configuration.");
+  }
+  if (/data-site-editor-form-placeholder=["']1["']/i.test(source)) {
+    push("form-action-placeholder", "warning", "At least one form uses a placeholder action URL and must be wired before launch.");
+  }
+  if (/data-site-editor-cta-placeholder=["']1["']/i.test(source)) {
+    push("cta-placeholder", "info", "At least one CTA uses a placeholder destination URL and should be reviewed before handoff.");
+  }
+
+  if (/<script\b/i.test(source) && normalizedPlatform !== "static") {
+    push("dynamic-scripts", "info", "Dynamic scripts were preserved where possible. Verify runtime behavior on the target platform.");
+  }
+
+  if (normalizedPlatform === "wordpress" && /woocommerce|wp-block-latest|wpforms|shortcode/i.test(source)) {
+    push("wordpress-dynamic", "warning", "WordPress dynamic blocks or plugin markup were detected and may need manual wiring after export.");
+  }
+
+  if (normalizedPlatform === "shopify" && /shopify-payment-button|product-form|cart|shopify-section/i.test(source)) {
+    push("shopify-dynamic", "warning", "Shopify commerce markup was detected. Product/cart interactions remain theme-level work.");
+  }
+
+  if (normalizedPlatform === "webflow" && /(w-dyn-|data-wf-|w-form)/i.test(source)) {
+    push("webflow-dynamic", "warning", "Webflow CMS or interaction markup was detected. Reconnect dynamic behavior after handoff.");
+  }
+
+  if (normalizedPlatform === "wix" && /(wix-|_wix|wix-image)/i.test(source)) {
+    push("wix-dynamic", "warning", "Wix-specific widgets were detected. Expect manual follow-up for apps and dynamic content.");
+  }
+
+  if (/data-site-editor-form-placeholder=["']1["']/i.test(source)) {
+    const count = (source.match(/data-site-editor-form-placeholder=["']1["']/gi) || []).length;
+    push(
+      "form-target-platform",
+      "warning",
+      `${count} form${count === 1 ? "" : "s"} use placeholder submission targets. ${getPlatformFormGuidance(normalizedPlatform)}`,
+      `${count} form${count === 1 ? "" : "s"} need wiring`
+    );
+  }
+
+  warnings.push(...runHtmlStructureChecks(source));
+
+  return {
+    guide,
+    warnings,
+    readiness: warnings.some((item) => item.level === "warning") ? "guarded" : "ready",
+    sourceUrl: normalizedUrl,
+    mode: String(mode || "wp-placeholder"),
+  };
+}
+
+export function buildDeliveryArtifact({ html, url, platform, mode, project, versionId, alternates = [], canonicalUrl = "", language = "" }) {
+  const normalizedPlatform = normalizeSupportedPlatform(platform);
+  const normalizedAlternates = normalizeArtifactAlternates(alternates);
+  const earlyValidation = validateDeliveryArtifact({
+    html: String(html || ""),
+    url,
+    platform: normalizedPlatform,
+    mode,
+  });
+  const seo = extractSeoMetadata(html);
+  const step1 = transformExportHtml(html, mode);
+  const step2 = injectResponsiveViewport(step1);
+  const step3 = injectSeoMetadata(step2, seo);
+  const step4 = resolveExportAssets(step3);
+  const step5 = rewriteInternalLinks(step4, earlyValidation.sourceUrl);
+  const step6 = getModeSpecificHtml(step5, mode);
+  const step7 = cleanupStyleBlocks(step6);
+  const step8 = addEditabilityHints(step7, mode, normalizedPlatform);
+  const transformedHtml = injectAlternateLinks(step8, normalizedAlternates, canonicalUrl);
+  const validation = validateDeliveryArtifact({
+    html: transformedHtml,
+    url,
+    platform: normalizedPlatform,
+    mode,
+  });
+
+  const manifest = {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    mode: String(mode || "wp-placeholder"),
+    platform: normalizedPlatform,
+    language: String(language || ""),
+    project: project ? {
+      id: project.id ?? null,
+      name: project.name ?? "",
+      workflowStage: project.workflowStage ?? project.workflow_status ?? "draft",
+      deliveryStatus: project.deliveryStatus ?? project.delivery_status ?? "not_exported",
+    } : null,
+    source: {
+      url: validation.sourceUrl || "",
+      versionId: versionId ?? null,
+      canonicalUrl: canonicalUrl || "",
+    },
+    readiness: validation.readiness,
+    guide: validation.guide,
+    warnings: validation.warnings,
+    alternates: normalizedAlternates,
+  };
+
+  const notes = [
+    "# Delivery notes",
+    "",
+    `Platform: ${validation.guide.label}`,
+    `Mode: ${manifest.mode}`,
+    `Exported at: ${manifest.exportedAt}`,
+    validation.sourceUrl ? `Source URL: ${validation.sourceUrl}` : "Source URL: not set",
+    versionId ? `Linked version snapshot: ${versionId}` : "Linked version snapshot: none",
+    canonicalUrl ? `Canonical export path: ${canonicalUrl}` : "Canonical export path: index.html",
+    normalizedAlternates.length
+      ? `Alternate language files: ${normalizedAlternates.map((item) => `${item.hreflang} -> ${item.href}`).join(", ")}`
+      : "Alternate language files: none",
+    "",
+    "Safe edit scope:",
+    validation.guide.safeEditScope,
+    "",
+    "Export notes:",
+    validation.guide.exportNotes,
+    "",
+    "Risky areas:",
+    ...validation.guide.riskyAreas.map((item) => `- ${item}`),
+    "",
+    "Validation warnings:",
+    ...(validation.warnings.length
+      ? validation.warnings.map((item) => `- [${item.level}] ${item.message}${item.detail ? ` (${item.detail})` : ""}`)
+      : ["- No blocking warnings detected."]),
+  ].join("\n");
+
+  return {
+    html: transformedHtml,
+    assets: [],
+    manifest,
+    notes,
+    warnings: validation.warnings,
+    readiness: validation.readiness,
+    guide: validation.guide,
+  };
+}
+
+export function generateShopifySection(html) {
+  const { doc, bodyHtml, inlineCss, externalStylesheets, title } = extractPortableDocumentParts(html);
+  const container = doc.createElement("div");
+  container.innerHTML = bodyHtml;
+  convertFormsToShopifyContact(container);
+  const schemaSettings = [];
+  const taggedBlocks = Array.from(container.querySelectorAll("[data-block-id]"));
+  const fallbackBlocks = taggedBlocks.length
+    ? []
+    : Array.from(container.querySelectorAll("h1, h2, h3, h4, p, a, button")).filter((node) => node.textContent?.trim());
+  const editableNodes = taggedBlocks.length ? taggedBlocks : fallbackBlocks.slice(0, 24);
+  let settingCounter = 1;
+
+  for (const node of editableNodes) {
+    const tagName = node.tagName.toUpperCase();
+    const isSimpleText =
+      /^H[1-6]$/.test(tagName) ||
+      (node.children.length === 0 && (node.textContent || "").trim().length <= 180);
+    const settingId = `setting_${settingCounter++}`;
+    const defaultValue = isSimpleText ? (node.textContent || "").trim() : node.innerHTML.trim();
+    schemaSettings.push({
+      type: isSimpleText ? "text" : "richtext",
+      id: settingId,
+      label: node.getAttribute("aria-label") || node.getAttribute("data-block-id") || `${tagName} content`,
+      default: defaultValue,
+    });
+    if (isSimpleText) {
+      node.textContent = `{{ section.settings.${settingId} }}`;
+    } else {
+      node.innerHTML = `{{ section.settings.${settingId} }}`;
+    }
+
+    if (tagName === "A" && node.getAttribute("href")) {
+      const urlSettingId = `setting_${settingCounter++}`;
+      const originalHref = String(node.getAttribute("href") || "").replace(/'/g, "\\'");
+      schemaSettings.push({
+        type: "url",
+        id: urlSettingId,
+        label: `${tagName} link`,
+      });
+      node.setAttribute("href", `{{ section.settings.${urlSettingId} | default: '${originalHref}' }}`);
+    }
+  }
+
+  const schema = {
+    name: title || "Site Editor Section",
+    settings: schemaSettings,
+    presets: [{ name: title || "Site Editor Section" }],
+  };
+
+  const headMarkup = buildExternalStylesheetTags(externalStylesheets);
+  const styleMarkup = inlineCss ? `<style>\n${inlineCss}\n</style>` : "";
+
+  return `
+${headMarkup}
+${styleMarkup}
+<section id="shopify-section-{{ section.id }}" class="site-editor-shopify-section">
+${container.innerHTML.trim()}
+</section>
+
+{% schema %}
+${JSON.stringify(schema, null, 2)}
+{% endschema %}`.trim();
+}
+
+export function prepareWordPressThemeFiles({ html, project, alternates = [], canonicalUrl = "" }) {
+
+  // Restore WordPress PHP tags
+  if (html && html.includes('data-wp-php=')) {
+    html = html.replace(/<template data-wp-php="([^"]+)"><\/template>/g, (m, p1) => `<?php${Buffer.from(p1, 'base64').toString('utf8')}?>`);
+  }
+
+  const themeName = project?.name || "Site Editor Exported Theme";
+  const themeSlug = slugify(themeName, "site-editor-theme");
+  const { bodyHtml, inlineCss, externalStylesheets, title } = extractPortableDocumentParts(html);
+  const alternateHeadLinks = buildAlternateHeadLinks(alternates, canonicalUrl);
+  const externalEnqueues = externalStylesheets
+    .map((href, index) => `  wp_enqueue_style('${themeSlug}-remote-${index + 1}', '${escapePhpSingleQuoted(href)}', ['${themeSlug}-export'], null);`)
+    .join("\n");
+  const styleCss = `/*
+Theme Name: ${themeName}
+Author: Site Editor
+Version: 1.0
+*/
+`;
+  const functionsPhp = `<?php
+if (!defined('ABSPATH')) exit;
+
+add_action('after_setup_theme', function () {
+  add_theme_support('title-tag');
+  add_theme_support('post-thumbnails');
+  add_theme_support('html5', ['search-form', 'gallery', 'caption', 'style', 'script']);
+});
+
+function ${themeSlug}_enqueue_styles() {
+  wp_enqueue_style('${themeSlug}-style', get_stylesheet_uri(), [], '1.0');
+  wp_enqueue_style('${themeSlug}-export', get_template_directory_uri() . '/assets/site-editor-export.css', ['${themeSlug}-style'], '1.0');
+${externalEnqueues || "  // No remote stylesheets were detected in the source export."}
+}
+add_action('wp_enqueue_scripts', '${themeSlug}_enqueue_styles');
+`;
+  const headerPhp = `<?php if (!defined('ABSPATH')) exit; ?><!doctype html>
+<html <?php language_attributes(); ?>>
+<head>
+  <meta charset="<?php bloginfo('charset'); ?>">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <?php wp_head(); ?>
+  ${alternateHeadLinks}
+</head>
+<body <?php body_class(); ?>>
+<?php wp_body_open(); ?>
+`;
+  const footerPhp = `<?php if (!defined('ABSPATH')) exit; ?>
+<?php wp_footer(); ?>
+</body>
+</html>
+`;
+  const indexPhp = `<?php get_header(); ?>
+<?php get_template_part('template-parts/content', 'site-editor'); ?>
+<?php get_footer(); ?>
+`;
+  const frontPagePhp = `<?php
+/* Template Name: Site Editor Front Page */
+get_header();
+get_template_part('template-parts/content', 'site-editor');
+get_footer();
+`;
+  const pagePhp = `<?php get_header(); ?>
+<?php get_template_part('template-parts/content', 'site-editor'); ?>
+<?php get_footer(); ?>
+`;
+  const contentPhp = `<?php if (!defined('ABSPATH')) exit; ?>
+<?php
+$site_editor_export_html = ${createNowdoc(`<div class="site-editor-export site-editor-export--${themeSlug}">\n${bodyHtml}\n</div>`, `${themeSlug}_content`)};
+echo $site_editor_export_html; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+`;
+  const themeJson = {
+    version: 2,
+    settings: {
+      layout: {
+        contentSize: "840px",
+        wideSize: "1240px",
+      },
+    },
+    customTemplates: title ? [{ name: "site-editor-front-page", title }] : [],
+  };
+
+  return [
+    { name: "style.css", content: styleCss },
+    { name: "functions.php", content: functionsPhp },
+    { name: "header.php", content: headerPhp },
+    { name: "footer.php", content: footerPhp },
+    { name: "index.php", content: indexPhp },
+    { name: "front-page.php", content: frontPagePhp },
+    { name: "page.php", content: pagePhp },
+    { name: "theme.json", content: JSON.stringify(themeJson, null, 2) },
+    { name: "assets/site-editor-export.css", content: buildPortableCss(inlineCss) },
+    { name: "template-parts/content-site-editor.php", content: contentPhp },
+  ];
+}
+
+export function prepareWordPressBlockFiles({ html, project }) {
+
+  // Restore WordPress PHP tags
+  if (html && html.includes('data-wp-php=')) {
+    html = html.replace(/<template data-wp-php="([^"]+)"><\/template>/g, (m, p1) => `<?php${Buffer.from(p1, 'base64').toString('utf8')}?>`);
+  }
+
+  const projectName = project?.name || "Site Editor Project";
+  const slug = slugify(projectName, "site-editor-block");
+  const { bodyHtml, inlineCss, externalStylesheets } = extractPortableDocumentParts(html);
+  const blockName = `site-editor/${slug}`;
+  const wrapperClass = `wp-block-site-editor-${slug}`;
+  const previewMarkup = wrapPortableFragment({
+    html: bodyHtml,
+    inlineCss,
+    wrapperClass,
+  });
+  const blockJson = {
+    $schema: "https://schemas.wp.org/trunk/block.json",
+    apiVersion: 3,
+    name: blockName,
+    version: "1.0.0",
+    title: `${projectName} (Exported)`,
+    category: "design",
+    icon: "layout",
+    description: "A portable static block exported from Site Editor.",
+    supports: { html: false, anchor: true, align: ["wide", "full"] },
+    textdomain: slug,
+    editorScript: "file:./editor.js",
+    style: "file:./style.css",
+  };
+  const remoteStyleEnqueues = externalStylesheets
+    .map((href, index) => `  wp_enqueue_style('${slug}-remote-${index + 1}', '${escapePhpSingleQuoted(href)}', ['${slug}-style'], null);`)
+    .join("\n");
+  const pluginPhp = `<?php
+/**
+ * Plugin Name: Site Editor - ${projectName}
+ * Description: Portable block export generated by Site Editor.
+ * Version: 1.0.0
+ */
+if (!defined('ABSPATH')) exit;
+add_action('init', function () {
+  register_block_type(__DIR__);
+});
+
+add_action('enqueue_block_assets', function () {
+${remoteStyleEnqueues || "  // No remote stylesheets were detected in the source export."}
+});
+`;
+  const editorJs = `(function (blocks, element, blockEditor) {
+  const el = element.createElement;
+  const RawHTML = element.RawHTML;
+  const useBlockProps = blockEditor.useBlockProps;
+  const previewMarkup = \`${escapeTemplateLiteral(previewMarkup)}\`;
+
+  blocks.registerBlockType(${JSON.stringify(blockName)}, {
+    edit: function () {
+      return el("div", useBlockProps({ className: "site-editor-export-editor" }), el(RawHTML, null, previewMarkup));
+    },
+    save: function () {
+      return el(RawHTML, null, previewMarkup);
+    },
+  });
+})(window.wp.blocks, window.wp.element, window.wp.blockEditor);
+`;
+
+  return [
+    { name: `${slug}.php`, content: pluginPhp },
+    { name: "block.json", content: JSON.stringify(blockJson, null, 2) },
+    { name: "editor.js", content: editorJs },
+    { name: "style.css", content: buildPortableCss(inlineCss) },
+    { name: "README.md", content: `Install this plugin ZIP in WordPress, activate it, then insert the "${projectName} (Exported)" block.` },
+  ];
+}
+
+export function prepareWebComponentFile({ html, project, alternates = [], canonicalUrl = "" }) {
+  const { bodyHtml, inlineCss, externalStylesheets } = extractPortableDocumentParts(html);
+  const componentName = `site-editor-${slugify(project?.name || "embed", "embed")}`;
+  const bodyContent = wrapPortableFragment({
+    html: bodyHtml,
+    inlineCss,
+    externalStylesheets,
+    wrapperClass: "site-editor-web-component",
+  });
+  const alternateHeadLinks = buildAlternateHeadLinks(alternates, canonicalUrl);
+  const jsContent = `class SiteEditorEmbed extends HTMLElement {
+  constructor() {
+    super();
+    const root = this.attachShadow({ mode: "open" });
+    const template = document.createElement("template");
+    template.innerHTML = \`${escapeTemplateLiteral(bodyContent)}\`;
+    root.appendChild(template.content.cloneNode(true));
+  }
+}
+
+if (!customElements.get(${JSON.stringify(componentName)})) {
+  customElements.define(${JSON.stringify(componentName)}, SiteEditorEmbed);
+}
+`;
+  const demoHtml = `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${project?.name || "Site Editor Embed"}</title>
+    ${alternateHeadLinks}
+    <script type="module" src="./embed.js"></script>
+  </head>
+  <body style="margin:0;background:#0b0f14">
+    <${componentName}></${componentName}>
+  </body>
+</html>`;
+  const readme = `Usage:
+
+<script type="module" src="./embed.js"></script>
+<${componentName}></${componentName}>
+`;
+
+  return {
+    jsFile: { name: "embed.js", content: jsContent },
+    demoFile: { name: "demo.html", content: demoHtml },
+    readmeFile: { name: "README.md", content: readme },
+  };
+}
+
+export function prepareReactComponentFile({ html, project }) {
+  const { bodyHtml, inlineCss, externalStylesheets, title } = extractPortableDocumentParts(html);
+  const componentName = getExportComponentName(project);
+  const slug = getExportSlug(project);
+  const cssContent = buildPortableCss(inlineCss);
+  const remoteImports = externalStylesheets
+    .map((href, index) => `// Remote stylesheet ${index + 1}: ${href}\nimport "./${slug}-remote-${index + 1}.css";`)
+    .join("\n");
+
+  const files = [
+    {
+      name: `${componentName}.jsx`,
+      content: `import React from "react";
+import "./${slug}.css";
+${remoteImports}
+
+/**
+ * ${componentName}
+ * Exported from Site Editor. Edit the JSX or CSS to customise.
+ */
+export default function ${componentName}() {
+  return (
+    <div
+      className="site-editor-export site-editor-export--${slug}"
+      dangerouslySetInnerHTML={{ __html: \`${escapeTemplateLiteral(bodyHtml)}\` }}
+    />
+  );
+}
+`,
+    },
+    { name: `${slug}.css`, content: cssContent },
+    {
+      name: "demo.jsx",
+      content: `import React from "react";
+import { createRoot } from "react-dom/client";
+import ${componentName} from "./${componentName}";
+
+createRoot(document.getElementById("root")).render(<${componentName} />);
+`,
+    },
+    {
+      name: "demo.html",
+      content: `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${escapeHtmlAttribute(title || project?.name || "Site Editor Export")}</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./demo.jsx"></script>
+  </body>
+</html>`,
+    },
+    {
+      name: "README.md",
+      content: `# ${project?.name || componentName}
+
+React component exported from Site Editor.
+
+## Usage
+
+\`\`\`jsx
+import ${componentName} from "./${componentName}";
+
+export default function App() {
+  return <${componentName} />;
+}
+\`\`\`
+
+## Notes
+- HTML is rendered via \`dangerouslySetInnerHTML\`. Review content before production use.
+- Peer deps: \`react >= 17\`, \`react-dom >= 17\`
+- For strict CSP environments, convert the JSX to static markup manually.
+`,
+    },
+  ];
+
+  for (let index = 0; index < externalStylesheets.length; index += 1) {
+    files.push({
+      name: `${slug}-remote-${index + 1}.css`,
+      content: `/* Remote stylesheet placeholder. Fetch and paste content here for offline use:\n   ${externalStylesheets[index]}\n*/\n`,
+    });
+  }
+
+  return files;
+}
+
+export function prepareWebflowJsonFile({ html, project }) {
+  const { bodyHtml, inlineCss, title } = extractPortableDocumentParts(html);
+  const dom = new JSDOM(`<body>${bodyHtml}</body>`);
+  const doc = dom.window.document;
+  const slug = getExportSlug(project);
+  let nodeCounter = 1;
+
+  function nextId() {
+    const hex = (nodeCounter++).toString(16).padStart(6, "0");
+    return `se-${hex}-${Math.random().toString(16).slice(2, 8)}`;
+  }
+
+  function domNodeToWebflow(node) {
+    if (node.nodeType === 3) {
+      const text = (node.textContent || "").trim();
+      return text ? { _id: nextId(), tag: "span", children: [], data: { xattr: [] }, text } : null;
+    }
+    if (node.nodeType !== 1) return null;
+    const tag = node.tagName.toLowerCase();
+    if (["script", "style", "noscript", "template"].includes(tag)) return null;
+
+    const children = Array.from(node.childNodes).map(domNodeToWebflow).filter(Boolean);
+    const classes = (node.getAttribute("class") || "").split(/\s+/).filter(Boolean);
+    const dataAttrs = {};
+    for (const attr of Array.from(node.attributes)) {
+      if (attr.name !== "class" && attr.name !== "id") dataAttrs[attr.name] = attr.value;
+    }
+
+    return {
+      _id: nextId(),
+      tag,
+      classes,
+      children,
+      data: { attr: dataAttrs, xattr: [] },
+    };
+  }
+
+  const bodyChildren = Array.from(doc.body.childNodes).map(domNodeToWebflow).filter(Boolean);
+  const payload = {
+    type: "page",
+    name: title || project?.name || "Exported Page",
+    slug,
+    createdOn: new Date().toISOString(),
+    publishedOn: null,
+    updatedOn: new Date().toISOString(),
+    _id: nextId(),
+    body: {
+      _id: nextId(),
+      tag: "body",
+      classes: [],
+      children: bodyChildren,
+      data: { xattr: [] },
+    },
+    styles: inlineCss
+      ? [{
+          _id: nextId(),
+          fake: false,
+          type: "class",
+          name: "site-editor-inline",
+          styleLess: inlineCss,
+          comb: "",
+          namespace: "",
+          origin: null,
+          selector: null,
+        }]
+      : [],
+    assets: [],
+    ix1: [],
+    ix2: { interactions: [], events: [], actionLists: [] },
+  };
+
+  return {
+    jsonFile: {
+      name: `${slug}.webflow.json`,
+      content: JSON.stringify(payload, null, 2),
+    },
+    readmeFile: {
+      name: "README.md",
+      content: `# Webflow Import - ${project?.name || "Exported Page"}
+
+## Import steps
+1. Open your Webflow project.
+2. Go to Project Settings -> Backups -> Import.
+3. Upload \`${slug}.webflow.json\`.
+4. Review the imported page and reconnect any CMS bindings.
+
+## Notes
+- Dynamic CMS content, IX2 interactions, and commerce bindings are not transferred.
+- Inline styles are preserved as a single Webflow class named \`site-editor-inline\`.
+- Replace \`data:\` URI image sources with hosted asset URLs before publishing.
+`,
+    },
+  };
+}
+
+export async function prepareEmailHtml(html) {
+  let processed = String(html || "");
+  try {
+    const imported = await import("juice");
+    const juice = imported.default || imported;
+    processed = juice(processed, { removeStyleTags: true, preserveMediaQueries: true });
+  } catch {
+    // `juice` is optional; fall back to a cleaned HTML export if it is not installed.
+  }
+
+  const { bodyHtml } = extractPortableDocumentParts(processed);
+  const wrappedBody = `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="width:100%;border-collapse:collapse;background:#ffffff;">
+  <tr>
+    <td align="center" style="padding:24px;">
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="640" style="width:640px;max-width:100%;border-collapse:collapse;">
+        <tr>
+          <td style="font-family:Arial, Helvetica, sans-serif;color:#111827;font-size:16px;line-height:1.6;">
+            ${bodyHtml}
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>`;
+  return `<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email export</title>
+  </head>
+  <body style="margin:0;padding:0;background:#f5f5f5;">
+    ${wrappedBody}
+  </body>
+</html>`;
+}
+
+export function preparePlainTextEmail({ html, project }) {
+  const markdown = prepareMarkdownFile({ html, project });
+  return {
+    name: "plain.txt",
+    content: markdown.content
+      .replace(/^#{1,6}\s+/gm, "")
+      .replace(/\[(.*?)\]\((.*?)\)/g, "$1: $2")
+      .replace(/^\s*[-*]\s+/gm, "")
+      .replace(/^>\s?/gm, "")
+      .replace(/[*_`]/g, "")
+      .trim(),
+  };
+}
+
+export function prepareMarkdownFile({ html, project }) {
+  const dom = new JSDOM(String(html || ""));
+  const doc = dom.window.document;
+
+  function walk(node) {
+    if (node.nodeType === 3) return node.textContent || "";
+    if (node.nodeType !== 1) return "";
+    const tag = node.tagName.toLowerCase();
+    const children = Array.from(node.childNodes).map(walk).join("");
+
+    switch (tag) {
+      case "h1":
+        return `# ${children.trim()}\n\n`;
+      case "h2":
+        return `## ${children.trim()}\n\n`;
+      case "h3":
+        return `### ${children.trim()}\n\n`;
+      case "p":
+        return `${children.trim()}\n\n`;
+      case "a":
+        return `[${children.trim()}](${node.getAttribute("href") || "#"})`;
+      case "img":
+        return `![${node.getAttribute("alt") || ""}](${node.getAttribute("src") || "#"})`;
+      case "li":
+        return `- ${children.trim()}\n`;
+      case "ul":
+      case "ol":
+        return `${children}\n`;
+      case "strong":
+      case "b":
+        return `**${children}**`;
+      case "em":
+      case "i":
+        return `*${children}*`;
+      case "blockquote":
+        return `> ${children.trim()}\n\n`;
+      case "hr":
+        return `\n---\n\n`;
+      case "br":
+        return `  \n`;
+      default:
+        return children;
+    }
+  }
+
+  const raw = walk(doc.body).replace(/\n{3,}/g, "\n\n").trim();
+  return {
+    name: `${slugify(project?.name || "content", "content")}.md`,
+    content: raw,
+  };
+}
+
+export async function preparePdfFile({ html }) {
+  const imported = await import("puppeteer");
+  const puppeteer = imported.default || imported;
+  const browser = await puppeteer.launch({ headless: "new", args: ["--no-sandbox"] });
+
+  try {
+    const page = await browser.newPage();
+    await page.setContent(String(html || ""), { waitUntil: "domcontentloaded" });
+    await page.addStyleTag({
+      content: "@page { margin: 0; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }",
+    });
+    const pdfBuffer = await page.pdf({ format: "A4", printBackground: true });
+    return { name: "design-preview.pdf", content: pdfBuffer };
+  } finally {
+    await browser.close();
+  }
+}
+
+export function getModeSpecificHtml(html, mode) {
+  if (mode === "shopify-section") {
+    return generateShopifySection(html);
+  }
+  
+  // Restore Shopify Liquid tags
+  if (html && html.includes('data-shopify-liquid=')) {
+    html = html.replace(/<template data-shopify-liquid="([^"]+)"><\/template>/g, (m, p1) => 
+      Buffer.from(p1, 'base64').toString('utf8')
+    );
+  }
+
+  return html;
+}
+
+export function getExportSlug(project) {
+  return slugify(project?.name || "site-editor-export", "site-editor-export");
+}
+
+export function getExportComponentName(project) {
+  return safeComponentName(project?.name || "SiteEditorExport", "SiteEditorExport");
+}

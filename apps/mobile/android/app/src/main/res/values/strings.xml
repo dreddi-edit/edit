@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Edit App</string>
+    <string name="title_activity_main">Edit App</string>
+    <string name="package_name">com.dreddi.edit</string>
+    <string name="custom_url_scheme">com.dreddi.edit</string>
+</resources>

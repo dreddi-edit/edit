@@ -32,7 +32,7 @@ function checkFileSyntax(filePath) {
 }
 
 async function main() {
-  const files = await collectJsFiles(join(process.cwd(), "server"))
+  const files = await collectJsFiles(join(process.cwd(), "apps", "web", "server"))
   for (const file of files) {
     await checkFileSyntax(file)
   }

@@ -70,7 +70,7 @@ function csrfHeaders(jar) {
 }
 
 async function run() {
-  const server = spawn(process.execPath, ["server/index.js"], {
+  const server = spawn(process.execPath, ["apps/web/server/index.js"], {
     cwd: process.cwd(),
     env: {
       ...process.env,

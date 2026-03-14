@@ -1,0 +1,24 @@
+{
+  "name": "edit-mobile",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build:web": "npm --prefix ../web/dashboard run build",
+    "sync": "npm run build:web && npx cap sync",
+    "doctor": "npx cap doctor",
+    "ios:open": "npx cap open ios",
+    "android:open": "npx cap open android",
+    "ios:prepare": "npm run sync && npm run ios:open",
+    "android:prepare": "npm run sync && npm run android:open"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.2.0",
+    "@capacitor/cli": "^8.2.0",
+    "@capacitor/core": "^8.2.0",
+    "@capacitor/ios": "^8.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
