@@ -1,7 +1,7 @@
 import React from 'react';
 
 import { useState, useEffect, useRef, useMemo } from "react"
-import { useRuntimeTranslations, useTranslation } from "../i18n/useTranslation"
+import { AVAILABLE_UI_LANGUAGES, useRuntimeTranslations, useTranslation } from "../i18n/useTranslation"
 import { applyThemeToDocument, persistThemeChoice } from "../utils/theme"
 import "./landing.css"
 
@@ -559,6 +559,7 @@ const LANDING_RUNTIME_STRINGS = Array.from(new Set([
   "Comparison",
   "60s demo",
   "Guided walkthrough",
+  "Language",
   "Menu",
   "Light",
   "Dark",
@@ -569,10 +570,16 @@ const LANDING_RUNTIME_STRINGS = Array.from(new Set([
 
 export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggleTheme }: LandingPageProps) {
   const [menuOpen, setMenuOpen] = useState(false)
-  const { t, lang } = useTranslation()
+  const { t, lang, setLang } = useTranslation()
   const rt = useRuntimeTranslations(lang, LANDING_RUNTIME_STRINGS, t)
 
   const currencyData = useMemo(() => getCurrencyData(lang), [lang])
+  const languageOptions = useMemo(() => AVAILABLE_UI_LANGUAGES, [])
+
+  const handleLanguageChange = (nextLang: string) => {
+    if (!nextLang || nextLang === lang) return
+    void setLang(nextLang)
+  }
 
   const toggleTheme = () => {
     const next = theme === "dark" ? "light" : "dark"
@@ -609,6 +616,14 @@ export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggle
             <button onClick={() => scrollTo("early-access")} className="lp-nav__cta-link">{rt("Early access")}</button>
           </div>
           <div className="lp-nav__actions">
+            <label className="lp-lang" aria-label={rt("Language")}>
+              <span>{rt("Language")}</span>
+              <select value={lang} onChange={(e) => handleLanguageChange(e.target.value)}>
+                {languageOptions.map((option) => (
+                  <option key={option.code} value={option.code}>{option.label}</option>
+                ))}
+              </select>
+            </label>
             <button className="lp-btn lp-btn--ghost" onClick={toggleTheme}>{theme === "dark" ? rt("Light") : rt("Dark")}</button>
             <button className="lp-btn lp-btn--ghost" onClick={onEnter}>{rt("Sign in")}</button>
             <button className="lp-btn lp-btn--ghost" onClick={() => onLearn?.()}>{rt("Learn")}</button>
