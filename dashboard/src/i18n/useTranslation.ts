@@ -86,8 +86,15 @@ export function useTranslation() {
   }
 
   useEffect(() => {
-    setDynamicPack(getCachedPack(lang) || {})
-    pendingRef.current.clear()
+    let cancelled = false
+    queueMicrotask(() => {
+      if (cancelled) return
+      setDynamicPack(getCachedPack(lang) || {})
+      pendingRef.current.clear()
+    })
+    return () => {
+      cancelled = true
+    }
   }, [lang])
 
   useEffect(() => {
@@ -147,11 +154,16 @@ export function useRuntimeTranslations(
   fallback: (key: string) => string = (key) => key,
 ) {
   const [runtimePack, setRuntimePack] = useState<Record<string, string>>(() => getCachedRuntimePack(lang))
+  const fallbackRef = useRef(fallback)
   const normalizedTexts = useMemo(
     () => Array.from(new Set(texts.map(text => String(text || "").trim()).filter(Boolean))),
     [texts],
   )
   const textSignature = normalizedTexts.join("\u0000")
+
+  useEffect(() => {
+    fallbackRef.current = fallback
+  }, [fallback])
 
   useEffect(() => {
     setRuntimePack(getCachedRuntimePack(lang))
@@ -160,7 +172,7 @@ export function useRuntimeTranslations(
   useEffect(() => {
     if (lang === "en" || !normalizedTexts.length) return
     const cached = getCachedRuntimePack(lang)
-    const missing = normalizedTexts.filter(text => !cached[text] && fallback(text) === text)
+    const missing = normalizedTexts.filter(text => !cached[text] && fallbackRef.current(text) === text)
     if (!missing.length) return
 
     let cancelled = false

@@ -26,8 +26,69 @@ type LearnPageProps = {
 type LearnContentMode = "reference" | "tutorials"
 
 type LearnProgressState = Record<string, string[]>
+type LearnListState = string[]
+type LearnAreaVisibilityState = Record<LearnFeatureArea, number>
+type LearnAreaExpandedState = Record<LearnFeatureArea, boolean>
 
 const PROGRESS_STORAGE_KEY = "learn-progress-v2"
+const FEATURE_BOOKMARKS_STORAGE_KEY = "learn-feature-bookmarks-v1"
+const FEATURE_VIEWED_STORAGE_KEY = "learn-feature-viewed-v1"
+
+const DEFAULT_FEATURES_PER_AREA = 8
+
+const FEATURE_JOURNEYS: Array<{ id: string; label: string; areas: LearnFeatureArea[]; description: string }> = [
+  {
+    id: "ship-fast",
+    label: "Ship your first client delivery",
+    areas: ["core", "projects", "editor-basics", "publishing"],
+    description: "Core workspace -> import -> editing basics -> publish/export flow for first production delivery.",
+  },
+  {
+    id: "ai-power",
+    label: "AI-first production workflow",
+    areas: ["ai", "editor-advanced", "seo"],
+    description: "Move from prompt-based edits to controlled AI workflows with approvals, quality checks and SEO guardrails.",
+  },
+  {
+    id: "ops-scale",
+    label: "Scale with team operations",
+    areas: ["team-security", "settings-admin", "publishing"],
+    description: "Set up team permissions, admin controls, deploy governance, and client-safe operational defaults.",
+  },
+]
+
+function loadStringList(storageKey: string): LearnListState {
+  try {
+    const raw = localStorage.getItem(storageKey)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.map((item) => String(item)) : []
+  } catch {
+    return []
+  }
+}
+
+function saveStringList(storageKey: string, value: LearnListState) {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(value))
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
+function buildInitialAreaVisibility(): LearnAreaVisibilityState {
+  return LEARN_FEATURE_AREAS.reduce((acc, area) => {
+    acc[area.id] = DEFAULT_FEATURES_PER_AREA
+    return acc
+  }, {} as LearnAreaVisibilityState)
+}
+
+function buildInitialAreaExpanded(): LearnAreaExpandedState {
+  return LEARN_FEATURE_AREAS.reduce((acc, area, index) => {
+    acc[area.id] = index < 3
+    return acc
+  }, {} as LearnAreaExpandedState)
+}
 
 function loadProgress(): LearnProgressState {
   try {
@@ -95,6 +156,31 @@ const LEARN_UI_STRINGS = [
   "Area",
   "Real UI reference",
   "Use the reference when you want to understand a specific control, panel or workflow without watching a video.",
+  "Structured feature explorer",
+  "Learning journeys",
+  "Start a journey",
+  "Journey focus",
+  "Bookmarked",
+  "Recent",
+  "Mastered",
+  "Mark as mastered",
+  "Remove mastered mark",
+  "Bookmark feature",
+  "Remove bookmark",
+  "Recently viewed features",
+  "Bookmarked features",
+  "Area progress",
+  "features viewed",
+  "Open area",
+  "Collapse area",
+  "Show more",
+  "Show less",
+  "Next suggested feature",
+  "Smart suggestion",
+  "Use this panel to follow curated paths instead of browsing all 200 features at once.",
+  "Follow this journey",
+  "No bookmarks yet. Bookmark important controls so your team can reuse them.",
+  "No recently viewed features yet. Open a feature to build your activity trail.",
 ]
 
 export default function LearnPage({ onBack }: LearnPageProps) {
@@ -123,10 +209,22 @@ export default function LearnPage({ onBack }: LearnPageProps) {
   const [selectedFeatureId, setSelectedFeatureId] = useState<string>(LEARN_FEATURE_REFERENCES[0]?.id || "")
   const [query, setQuery] = useState("")
   const [progress, setProgress] = useState<LearnProgressState>(loadProgress)
+  const [bookmarkedFeatures, setBookmarkedFeatures] = useState<LearnListState>(() => loadStringList(FEATURE_BOOKMARKS_STORAGE_KEY))
+  const [recentFeatures, setRecentFeatures] = useState<LearnListState>(() => loadStringList(FEATURE_VIEWED_STORAGE_KEY))
+  const [areaVisibility, setAreaVisibility] = useState<LearnAreaVisibilityState>(buildInitialAreaVisibility)
+  const [areaExpanded, setAreaExpanded] = useState<LearnAreaExpandedState>(buildInitialAreaExpanded)
 
   useEffect(() => {
     saveProgress(progress)
   }, [progress])
+
+  useEffect(() => {
+    saveStringList(FEATURE_BOOKMARKS_STORAGE_KEY, bookmarkedFeatures)
+  }, [bookmarkedFeatures])
+
+  useEffect(() => {
+    saveStringList(FEATURE_VIEWED_STORAGE_KEY, recentFeatures)
+  }, [recentFeatures])
 
   const subcategoryItems = useMemo(
     () => LEARN_VIDEO_SUBCATEGORIES.filter((item) => item.category === activeCategory).sort((a, b) => a.order - b.order),
@@ -184,6 +282,45 @@ export default function LearnPage({ onBack }: LearnPageProps) {
   const progressPercent = selectedVideo.steps.length ? Math.round((progressCount / selectedVideo.steps.length) * 100) : 0
   const totalTutorials = LEARN_VIDEOS.length
   const totalFeatures = LEARN_FEATURE_REFERENCES.length
+  const featureById = useMemo(
+    () => LEARN_FEATURE_REFERENCES.reduce((acc, item) => {
+      acc[item.id] = item
+      return acc
+    }, {} as Record<string, (typeof LEARN_FEATURE_REFERENCES)[number]>),
+    [],
+  )
+  const featuresByArea = useMemo(
+    () =>
+      LEARN_FEATURE_AREAS.reduce((acc, area) => {
+        acc[area.id] = LEARN_FEATURE_REFERENCES.filter((item) => item.area === area.id)
+        return acc
+      }, {} as Record<LearnFeatureArea, typeof LEARN_FEATURE_REFERENCES>),
+    [],
+  )
+  const viewedSet = useMemo(() => new Set(recentFeatures), [recentFeatures])
+  const bookmarkSet = useMemo(() => new Set(bookmarkedFeatures), [bookmarkedFeatures])
+  const bookmarkedList = useMemo(
+    () => bookmarkedFeatures.map((id) => featureById[id]).filter(Boolean),
+    [bookmarkedFeatures, featureById],
+  )
+  const recentList = useMemo(
+    () => recentFeatures.map((id) => featureById[id]).filter(Boolean),
+    [featureById, recentFeatures],
+  )
+  const selectedJourney = useMemo(
+    () => FEATURE_JOURNEYS.find((journey) => journey.areas.includes(selectedFeature.area)) || FEATURE_JOURNEYS[0],
+    [selectedFeature.area],
+  )
+  const nextSuggestedFeature = useMemo(() => {
+    const sameAreaUnseen = featuresByArea[selectedFeature.area].find((item) => !viewedSet.has(item.id) && item.id !== selectedFeature.id)
+    if (sameAreaUnseen) return sameAreaUnseen
+    return LEARN_FEATURE_REFERENCES.find((item) => !viewedSet.has(item.id) && item.id !== selectedFeature.id) || null
+  }, [featuresByArea, selectedFeature.area, selectedFeature.id, viewedSet])
+
+  const openFeature = (featureId: string) => {
+    setSelectedFeatureId(featureId)
+    setRecentFeatures((previous) => [featureId, ...previous.filter((id) => id !== featureId)].slice(0, 28))
+  }
 
   const jumpToCategory = (category: LearnVideoCategory) => {
     setActiveCategory(category)
@@ -212,6 +349,43 @@ export default function LearnPage({ onBack }: LearnPageProps) {
 
   const resetTutorialProgress = () => {
     setProgress((previous) => ({ ...previous, [selectedVideo.id]: [] }))
+  }
+
+  const toggleBookmark = (featureId: string) => {
+    setBookmarkedFeatures((previous) =>
+      previous.includes(featureId)
+        ? previous.filter((id) => id !== featureId)
+        : [featureId, ...previous.filter((id) => id !== featureId)].slice(0, 64),
+    )
+  }
+
+  const toggleViewed = (featureId: string) => {
+    setRecentFeatures((previous) =>
+      previous.includes(featureId)
+        ? previous.filter((id) => id !== featureId)
+        : [featureId, ...previous.filter((id) => id !== featureId)].slice(0, 28),
+    )
+  }
+
+  const toggleAreaExpanded = (area: LearnFeatureArea) => {
+    setAreaExpanded((previous) => ({ ...previous, [area]: !previous[area] }))
+  }
+
+  const showMoreAreaItems = (area: LearnFeatureArea) => {
+    setAreaVisibility((previous) => ({ ...previous, [area]: previous[area] + DEFAULT_FEATURES_PER_AREA }))
+  }
+
+  const showLessAreaItems = (area: LearnFeatureArea) => {
+    setAreaVisibility((previous) => ({ ...previous, [area]: DEFAULT_FEATURES_PER_AREA }))
+  }
+
+  const startJourney = (journeyAreas: LearnFeatureArea[]) => {
+    const firstArea = journeyAreas[0] || "all"
+    setFeatureArea(firstArea)
+    if (firstArea !== "all") {
+      const candidate = featuresByArea[firstArea][0]
+      if (candidate) openFeature(candidate.id)
+    }
   }
 
   const openTutorialPrimaryAction = () => {
@@ -469,6 +643,8 @@ export default function LearnPage({ onBack }: LearnPageProps) {
                   {featureAreaItems.map((area) => {
                     const count = LEARN_FEATURE_REFERENCES.filter((item) => item.area === area.id).length
                     const isActive = featureArea === area.id
+                    const seen = featuresByArea[area.id].filter((item) => viewedSet.has(item.id)).length
+                    const seenPercent = count ? Math.round((seen / count) * 100) : 0
                     return (
                       <button
                         key={area.id}
@@ -478,9 +654,29 @@ export default function LearnPage({ onBack }: LearnPageProps) {
                       >
                         <strong>{rt(area.label)}</strong>
                         <span>{count} {rt("explained functions")}</span>
+                        <span>{seenPercent}% {rt("features viewed")}</span>
                       </button>
                     )
                   })}
+                </div>
+              </section>
+
+              <section className="learn-page__panel">
+                <h2>{rt("Learning journeys")}</h2>
+                <p className="learn-page__plain-copy">{rt("Use this panel to follow curated paths instead of browsing all 200 features at once.")}</p>
+                <div className="learn-page__stack">
+                  {FEATURE_JOURNEYS.map((journey) => (
+                    <button
+                      key={journey.id}
+                      type="button"
+                      className={`learn-page__nav-btn${selectedJourney.id === journey.id ? " is-active is-alt" : ""}`}
+                      onClick={() => startJourney(journey.areas)}
+                    >
+                      <strong>{rt(journey.label)}</strong>
+                      <span>{rt(journey.description)}</span>
+                      <span>{rt("Journey focus")}: {journey.areas.map((area) => rt(getLearnFeatureAreaLabel(area))).join(" • ")}</span>
+                    </button>
+                  ))}
                 </div>
               </section>
             </aside>
@@ -495,10 +691,40 @@ export default function LearnPage({ onBack }: LearnPageProps) {
                   </div>
                   <div className="learn-page__viewer-actions">
                     <span className="learn-page__meta-chip">{rt("Area")}: {rt(getLearnFeatureAreaLabel(selectedFeature.area))}</span>
-                    <span className="learn-page__meta-chip">{rt("200+ explained functions")}</span>
+                    <button
+                      type="button"
+                      className="learn-page__secondary"
+                      onClick={() => toggleViewed(selectedFeature.id)}
+                    >
+                      {viewedSet.has(selectedFeature.id) ? rt("Remove mastered mark") : rt("Mark as mastered")}
+                    </button>
+                    <button
+                      type="button"
+                      className="learn-page__secondary"
+                      onClick={() => toggleBookmark(selectedFeature.id)}
+                    >
+                      {bookmarkSet.has(selectedFeature.id) ? rt("Remove bookmark") : rt("Bookmark feature")}
+                    </button>
+                    {nextSuggestedFeature ? (
+                      <button
+                        type="button"
+                        className="learn-page__primary"
+                        onClick={() => openFeature(nextSuggestedFeature.id)}
+                      >
+                        {rt("Next suggested feature")}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
                 <div className="learn-page__grid learn-page__grid--summary">
+                  <section className="learn-page__panel">
+                    <h3>{rt("Smart suggestion")}</h3>
+                    <p className="learn-page__plain-copy">
+                      {nextSuggestedFeature
+                        ? `${rt(nextSuggestedFeature.title)} - ${rt(nextSuggestedFeature.summary)}`
+                        : rt("Use the reference when you want to understand a specific control, panel or workflow without watching a video.")}
+                    </p>
+                  </section>
                   <section className="learn-page__panel">
                     <h3>{rt("Feature reference")}</h3>
                     <p className="learn-page__plain-copy">{rt("Use the reference when you want to understand a specific control, panel or workflow without watching a video.")}</p>
@@ -512,35 +738,115 @@ export default function LearnPage({ onBack }: LearnPageProps) {
 
               <section className="learn-page__panel">
                 <div className="learn-page__section-head">
-                  <h3>{rt("Explained functions in this area")}</h3>
+                  <h3>{rt("Structured feature explorer")}</h3>
                   <span>{filteredFeatures.length} {rt("Matching entries")}</span>
                 </div>
-                {filteredFeatures.length ? (
-                  <div className="learn-page__cards">
-                    {filteredFeatures.map((item) => {
-                      const isActive = item.id === selectedFeature.id
-                      return (
+                {featureAreaItems
+                  .filter((area) => featureArea === "all" || area.id === featureArea)
+                  .map((area) => {
+                    const areaItems = filteredFeatures.filter((item) => item.area === area.id)
+                    const visibleCount = areaVisibility[area.id] || DEFAULT_FEATURES_PER_AREA
+                    const isExpanded = areaExpanded[area.id]
+                    const areaSeen = areaItems.filter((item) => viewedSet.has(item.id)).length
+                    const seenPercent = areaItems.length ? Math.round((areaSeen / areaItems.length) * 100) : 0
+
+                    return (
+                      <section key={area.id} className="learn-page__group">
                         <button
-                          key={item.id}
                           type="button"
-                          className={`learn-page__card${isActive ? " is-active" : ""}`}
-                          onClick={() => setSelectedFeatureId(item.id)}
+                          className="learn-page__group-head"
+                          onClick={() => toggleAreaExpanded(area.id)}
                         >
-                          <div className="learn-page__card-top">
-                            <span className="learn-page__meta-chip">{rt(getLearnFeatureAreaLabel(item.area))}</span>
+                          <div>
+                            <strong>{rt(area.label)}</strong>
+                            <span>{areaItems.length} {rt("explained functions")} · {seenPercent}% {rt("features viewed")}</span>
                           </div>
-                          <strong>{rt(item.title)}</strong>
-                          <p>{rt(item.summary)}</p>
+                          <span>{isExpanded ? rt("Collapse area") : rt("Open area")}</span>
                         </button>
-                      )
-                    })}
-                  </div>
-                ) : (
-                  <div className="learn-page__empty">
-                    <strong>{rt("No explained functions match this filter yet.")}</strong>
-                    <span>{rt("Try a different search or area.")}</span>
-                  </div>
-                )}
+
+                        {isExpanded ? (
+                          areaItems.length ? (
+                            <div className="learn-page__cards">
+                              {areaItems.slice(0, visibleCount).map((item) => {
+                                const isActive = item.id === selectedFeature.id
+                                const isBookmarked = bookmarkSet.has(item.id)
+                                return (
+                                  <button
+                                    key={item.id}
+                                    type="button"
+                                    className={`learn-page__card${isActive ? " is-active" : ""}`}
+                                    onClick={() => openFeature(item.id)}
+                                  >
+                                    <div className="learn-page__card-top">
+                                      <span className="learn-page__meta-chip">{rt(getLearnFeatureAreaLabel(item.area))}</span>
+                                      <span className="learn-page__status-pill">{isBookmarked ? rt("Bookmarked") : viewedSet.has(item.id) ? rt("Mastered") : rt("Recent")}</span>
+                                    </div>
+                                    <strong>{rt(item.title)}</strong>
+                                    <p>{rt(item.summary)}</p>
+                                    <div className="learn-page__card-foot">
+                                      <span>{rt("Area progress")}: {seenPercent}%</span>
+                                      <span>{isBookmarked ? rt("Bookmarked") : rt("Mark as mastered")}</span>
+                                    </div>
+                                  </button>
+                                )
+                              })}
+                              {areaItems.length > DEFAULT_FEATURES_PER_AREA ? (
+                                <div className="learn-page__group-actions">
+                                  {visibleCount < areaItems.length ? (
+                                    <button type="button" className="learn-page__secondary" onClick={() => showMoreAreaItems(area.id)}>
+                                      {rt("Show more")}
+                                    </button>
+                                  ) : (
+                                    <button type="button" className="learn-page__secondary" onClick={() => showLessAreaItems(area.id)}>
+                                      {rt("Show less")}
+                                    </button>
+                                  )}
+                                </div>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <div className="learn-page__empty">
+                              <strong>{rt("No explained functions match this filter yet.")}</strong>
+                              <span>{rt("Try a different search or area.")}</span>
+                            </div>
+                          )
+                        ) : null}
+                      </section>
+                    )
+                  })}
+              </section>
+
+              <section className="learn-page__grid learn-page__grid--summary">
+                <section className="learn-page__panel">
+                  <h3>{rt("Bookmarked features")}</h3>
+                  {bookmarkedList.length ? (
+                    <div className="learn-page__stack">
+                      {bookmarkedList.slice(0, 8).map((item) => (
+                        <button key={item.id} type="button" className="learn-page__nav-btn" onClick={() => openFeature(item.id)}>
+                          <strong>{rt(item.title)}</strong>
+                          <span>{rt(getLearnFeatureAreaLabel(item.area))}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="learn-page__plain-copy">{rt("No bookmarks yet. Bookmark important controls so your team can reuse them.")}</p>
+                  )}
+                </section>
+                <section className="learn-page__panel">
+                  <h3>{rt("Recently viewed features")}</h3>
+                  {recentList.length ? (
+                    <div className="learn-page__stack">
+                      {recentList.slice(0, 8).map((item) => (
+                        <button key={item.id} type="button" className="learn-page__nav-btn" onClick={() => openFeature(item.id)}>
+                          <strong>{rt(item.title)}</strong>
+                          <span>{rt(getLearnFeatureAreaLabel(item.area))}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="learn-page__plain-copy">{rt("No recently viewed features yet. Open a feature to build your activity trail.")}</p>
+                  )}
+                </section>
               </section>
             </section>
           </div>
