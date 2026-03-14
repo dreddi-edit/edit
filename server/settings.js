@@ -1,6 +1,7 @@
 import db from "./db.js"
 import { authMiddleware } from "./auth.js"
 import { canInviteWithRole, normalizeAgencyRole } from "./accessControl.js"
+import { getVertexRuntimeConfig } from "./vertex.js"
 
 export function registerSettingsRoutes(app) {
 
@@ -21,13 +22,16 @@ export function registerSettingsRoutes(app) {
         has_anthropic_key: !!s.anthropic_key,
         has_gemini_key: !!s.gemini_key,
         has_groq_key: !!s.groq_key,
+        vertex_project_id: s.vertex_project_id || "",
+        vertex_location: s.vertex_location || "us-central1",
+        has_vertex_credentials: getVertexRuntimeConfig({ userId: req.user.id }).hasCredentials,
       }
     })
   })
 
   // Settings speichern
   app.put("/api/settings", authMiddleware, (req, res) => {
-    const { theme, disabled_models, anthropic_key, gemini_key, groq_key } = req.body
+    const { theme, disabled_models, anthropic_key, gemini_key, groq_key, vertex_project_id, vertex_location } = req.body
     db.prepare("INSERT OR IGNORE INTO user_settings (user_id) VALUES (?)").run(req.user.id)
 
     if (theme) db.prepare("UPDATE user_settings SET theme = ?, theme_explicit = 1 WHERE user_id = ?").run(theme, req.user.id)
@@ -35,6 +39,8 @@ export function registerSettingsRoutes(app) {
     if (anthropic_key !== undefined) db.prepare("UPDATE user_settings SET anthropic_key = ? WHERE user_id = ?").run(anthropic_key, req.user.id)
     if (gemini_key !== undefined) db.prepare("UPDATE user_settings SET gemini_key = ? WHERE user_id = ?").run(gemini_key, req.user.id)
     if (groq_key !== undefined) db.prepare("UPDATE user_settings SET groq_key = ? WHERE user_id = ?").run(groq_key, req.user.id)
+    if (vertex_project_id !== undefined) db.prepare("UPDATE user_settings SET vertex_project_id = ? WHERE user_id = ?").run(vertex_project_id, req.user.id)
+    if (vertex_location !== undefined) db.prepare("UPDATE user_settings SET vertex_location = ? WHERE user_id = ?").run(vertex_location, req.user.id)
 
     res.json({ ok: true })
   })

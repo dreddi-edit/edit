@@ -14,6 +14,7 @@ import { registerOrgRoutes } from "./organisations.js"
 import { registerStripeRoutes } from "./stripe.js"
 import { registerScreenshotRoutes } from "./screenshot.js"
 import { registerGoogleServiceRoutes } from "./googleServices.js"
+import { registerVertexRoutes } from "./vertex.js"
 import { registerPublishRoutes } from "./publish.js"
 import { uploadExportZip } from "./cloudStorage.js"
 import { createProjectVersion, registerProjectRoutes } from "./projects.js"
@@ -183,7 +184,7 @@ app.use((req, res, next) => {
   }
   next();
 })
-const API_BODY_LIMIT = process.env.API_BODY_LIMIT || "20mb"
+const API_BODY_LIMIT = process.env.API_BODY_LIMIT || "80mb"
 app.use(express.urlencoded({ extended: true, limit: API_BODY_LIMIT }))
 const jsonBodyParser = express.json({ limit: API_BODY_LIMIT })
 const rawStripeBodyParser = express.raw({ type: "application/json", limit: API_BODY_LIMIT })
@@ -1631,6 +1632,7 @@ app.get("/api/admin/metrics", authMiddleware, ownerOnly, (req, res) => {
 registerStripeRoutes(app)
 registerScreenshotRoutes(app)
 registerGoogleServiceRoutes(app)
+registerVertexRoutes(app)
 registerPublishRoutes(app)
 
 

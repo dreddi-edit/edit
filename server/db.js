@@ -92,6 +92,8 @@ db.exec(`
     anthropic_key TEXT DEFAULT '',
     gemini_key TEXT DEFAULT '',
     groq_key TEXT DEFAULT '',
+    vertex_project_id TEXT DEFAULT '',
+    vertex_location TEXT DEFAULT '',
     credits INTEGER DEFAULT 0,
     FOREIGN KEY (user_id) REFERENCES users(id)
   );
@@ -722,6 +724,11 @@ runMigration("20260314_projects_seo_keywords", () => {
   execMigrationSql(`ALTER TABLE projects ADD COLUMN seo_keywords TEXT DEFAULT '[]'`)
   execMigrationSql(`ALTER TABLE projects ADD COLUMN seo_meta_title TEXT DEFAULT ''`)
   execMigrationSql(`ALTER TABLE projects ADD COLUMN seo_meta_description TEXT DEFAULT ''`)
+})
+runMigration("20260314_vertex_settings", () => {
+  execMigrationSql(`ALTER TABLE user_settings ADD COLUMN vertex_project_id TEXT DEFAULT ''`)
+  execMigrationSql(`ALTER TABLE user_settings ADD COLUMN vertex_location TEXT DEFAULT ''`)
+  execMigrationSql(`UPDATE user_settings SET vertex_location = COALESCE(NULLIF(vertex_location, ''), 'us-central1')`)
 })
 
 export default db

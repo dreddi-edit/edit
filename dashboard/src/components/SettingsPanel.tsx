@@ -32,7 +32,14 @@ import {
 const BASE = ""
 
 type TabId = "general" | "profile" | "apikeys" | "org"
-type Settings = { theme: string; disabled_models: string[]; theme_explicit?: boolean }
+type Settings = {
+  theme: string
+  disabled_models: string[]
+  theme_explicit?: boolean
+  vertex_project_id?: string
+  vertex_location?: string
+  has_vertex_credentials?: boolean
+}
 type NotificationPrefs = { email_updates: boolean; team_mentions: boolean }
 type ApiKey = {
   id: number
@@ -56,6 +63,27 @@ type DetectedKey = {
   provider: string
   providerLabel: string
   models: Array<{ value: string; label: string }>
+}
+type VertexStatus = {
+  configured: boolean
+  auth_ok: boolean
+  auth_error?: string | null
+  project_id: string
+  location: string
+  has_credentials: boolean
+  auth_mode: string
+  models?: {
+    byFamily?: Record<string, number>
+    byModality?: Record<string, number>
+    total?: number
+  }
+}
+type VertexModel = {
+  id: string
+  label: string
+  family: string
+  modality: string
+  stage: string
 }
 type CurrentUser = {
   id: number
@@ -193,6 +221,11 @@ export default function SettingsPanel({
   const [detected, setDetected] = useState<DetectedKey | null>(null)
   const [selectedModels, setSelectedModels] = useState<string[]>([])
   const [useAllModels, setUseAllModels] = useState(true)
+  const [vertexProjectIdInput, setVertexProjectIdInput] = useState("")
+  const [vertexLocationInput, setVertexLocationInput] = useState("us-central1")
+  const [vertexStatus, setVertexStatus] = useState<VertexStatus | null>(null)
+  const [vertexModels, setVertexModels] = useState<VertexModel[]>([])
+  const [vertexTesting, setVertexTesting] = useState(false)
 
   const [ownedOrg, setOwnedOrg] = useState<Org | null>(null)
   const [memberOrgs, setMemberOrgs] = useState<Org[]>([])
@@ -296,6 +329,11 @@ export default function SettingsPanel({
     void load()
   }, [])
 
+  useEffect(() => {
+    setVertexProjectIdInput(String(settings?.vertex_project_id || ""))
+    setVertexLocationInput(String(settings?.vertex_location || "us-central1"))
+  }, [settings?.vertex_project_id, settings?.vertex_location])
+
   const applyCurrentUser = (user: CurrentUser | null) => {
     setCurrentUser(user)
     setAvatarDraft(user?.avatar_url || "")
@@ -310,7 +348,7 @@ export default function SettingsPanel({
     try {
       const acceptInviteData = await request("/api/orgs/accept-invite", { method: "POST" }).catch(() => null)
 
-      const [settingsDataResult, keysDataResult, orgsDataResult, meDataResult, billingDataResult, invoicesDataResult, balanceDataResult, transactionsDataResult] =
+      const [settingsDataResult, keysDataResult, orgsDataResult, meDataResult, billingDataResult, invoicesDataResult, balanceDataResult, transactionsDataResult, vertexStatusResult, vertexModelsResult] =
         await Promise.allSettled([
         request("/api/settings"),
         request("/api/keys"),
@@ -320,6 +358,8 @@ export default function SettingsPanel({
         apiGetStripeInvoices(),
         apiGetBalance(),
         apiGetCreditsTransactions(),
+        request("/api/vertex/status"),
+        request("/api/vertex/models"),
       ])
 
       if (settingsDataResult.status === "rejected") throw settingsDataResult.reason
@@ -338,6 +378,16 @@ export default function SettingsPanel({
 
       setSettings(settingsData.settings as Settings)
       setMyKeys((keysData.keys || []) as ApiKey[])
+      setVertexStatus(
+        vertexStatusResult.status === "fulfilled"
+          ? ((vertexStatusResult.value.status || null) as VertexStatus | null)
+          : null
+      )
+      setVertexModels(
+        vertexModelsResult.status === "fulfilled"
+          ? ((vertexModelsResult.value.models || []) as VertexModel[])
+          : []
+      )
       setOwnedOrg((orgsData.owned?.[0] || null) as Org | null)
       setMemberOrgs((orgsData.member || []) as Org[])
       const me = (meData.user || null) as CurrentUser | null
@@ -639,6 +689,42 @@ export default function SettingsPanel({
       toast.error(errMsg(error))
     } finally {
       setSaving(false)
+    }
+  }
+
+  const refreshVertexStatus = async () => {
+    try {
+      const [statusResponse, modelsResponse] = await Promise.all([
+        request("/api/vertex/status"),
+        request("/api/vertex/models"),
+      ])
+      setVertexStatus((statusResponse?.status || null) as VertexStatus | null)
+      setVertexModels((modelsResponse?.models || []) as VertexModel[])
+      return statusResponse
+    } catch (error) {
+      toast.error(errMsg(error))
+      return null
+    }
+  }
+
+  const saveVertexSettings = async () => {
+    await saveSettings({
+      vertex_project_id: vertexProjectIdInput.trim(),
+      vertex_location: vertexLocationInput.trim() || "us-central1",
+    })
+    await refreshVertexStatus()
+  }
+
+  const testVertexAuth = async () => {
+    setVertexTesting(true)
+    try {
+      const response = await request("/api/vertex/test-auth", { method: "POST" })
+      await refreshVertexStatus()
+      toast.success(`Vertex bereit: ${String(response?.status?.project_id || "Projekt")}`)
+    } catch (error) {
+      toast.error(errMsg(error))
+    } finally {
+      setVertexTesting(false)
     }
   }
 
@@ -1527,6 +1613,95 @@ export default function SettingsPanel({
                     </button>
                   </div>
                 ) : null}
+              </Section>
+
+              <Section label="Vertex AI">
+                <p className="draft-settings-description">
+                  Vertex ist jetzt als Google-Cloud-Laufzeit vorbereitet. Gemini, Imagen, Chirp und Veo sind als
+                  Katalog-, Status- und Auth-Schicht eingebaut; konkrete Workflows koennen spaeter darauf aufsetzen.
+                </p>
+
+                <div className="draft-settings-input-row">
+                  <input
+                    className="draft-settings-text-input draft-settings-text-input--mono"
+                    value={vertexProjectIdInput}
+                    onChange={event => setVertexProjectIdInput(event.target.value)}
+                    placeholder="Vertex Project ID"
+                  />
+                  <input
+                    className="draft-settings-text-input draft-settings-text-input--mono"
+                    value={vertexLocationInput}
+                    onChange={event => setVertexLocationInput(event.target.value)}
+                    placeholder="us-central1"
+                  />
+                </div>
+
+                <div className="draft-settings-input-row">
+                  <button
+                    type="button"
+                    className="draft-settings-action-button"
+                    onClick={() => void saveVertexSettings()}
+                    disabled={saving}
+                  >
+                    Vertex speichern
+                  </button>
+                  <button
+                    type="button"
+                    className="draft-settings-action-button"
+                    onClick={() => void testVertexAuth()}
+                    disabled={vertexTesting}
+                  >
+                    {vertexTesting ? "Pruefe..." : "Vertex testen"}
+                  </button>
+                </div>
+
+                <div className="draft-settings-list">
+                  <div className="draft-settings-list-card">
+                    <div className="draft-settings-list-main">
+                      <div className="draft-settings-inline">
+                        <strong>Runtime Status</strong>
+                        <span className="draft-settings-pill">vertex</span>
+                      </div>
+                      <div className="draft-settings-list-meta">
+                        Projekt: {vertexStatus?.project_id || vertexProjectIdInput || "nicht gesetzt"} · Region: {vertexStatus?.location || vertexLocationInput || "us-central1"}
+                      </div>
+                      <div className="draft-settings-list-meta">
+                        Credentials: {vertexStatus?.has_credentials || effectiveSettings.has_vertex_credentials ? "vorhanden" : "fehlen"} · Auth: {vertexStatus?.auth_ok ? "ok" : vertexStatus?.configured ? "noch nicht getestet" : "nicht konfiguriert"}
+                      </div>
+                      {vertexStatus?.models?.total ? (
+                        <div className="draft-settings-list-meta">
+                          Katalog: {vertexStatus.models.total} Modelle · Gemini {vertexStatus.models.byFamily?.gemini || 0} · Imagen {vertexStatus.models.byFamily?.imagen || 0} · Chirp {vertexStatus.models.byFamily?.chirp || 0} · Veo {vertexStatus.models.byFamily?.veo || 0}
+                        </div>
+                      ) : null}
+                      {vertexStatus?.auth_error ? <div className="draft-settings-list-meta">Fehler: {vertexStatus.auth_error}</div> : null}
+                    </div>
+                  </div>
+
+                  <div className="draft-settings-list-card">
+                    <div className="draft-settings-list-main">
+                      <div className="draft-settings-inline">
+                        <strong>Aktive Vertex-Modelle</strong>
+                        <span className="draft-settings-pill">{vertexModels.length}</span>
+                      </div>
+                      <div className="draft-settings-list-meta">
+                        Es werden nur die aktuell nutzbaren Modelle aus dem Server-Katalog angezeigt.
+                      </div>
+                      {vertexModels.length ? (
+                        <div className="draft-settings-model-list" style={{ marginTop: 10 }}>
+                          {vertexModels.map(model => (
+                            <span key={model.id} className="draft-settings-model-chip active" title={`${model.family} · ${model.modality} · ${model.stage}`}>
+                              {model.label}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="draft-settings-list-meta" style={{ marginTop: 8 }}>
+                          Keine aktiven Modelle geladen.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
               </Section>
 
               {myKeys.length ? (
