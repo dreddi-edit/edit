@@ -680,5 +680,48 @@ runMigration("20260313_lane3_invoices", () => {
   execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_user_invoices_user ON user_invoices(user_id, created_at)`)
   execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_user_invoices_stripe ON user_invoices(stripe_invoice_id)`)
 })
+runMigration("20260314_translation_memory", () => {
+  execMigrationSql(`
+    CREATE TABLE IF NOT EXISTS translation_memory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      project_id INTEGER,
+      source_lang TEXT NOT NULL DEFAULT 'en',
+      target_lang TEXT NOT NULL,
+      source_text TEXT NOT NULL,
+      translation TEXT NOT NULL,
+      context_hash TEXT,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `)
+  execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_translation_memory_user_lang ON translation_memory(user_id, source_lang, target_lang)`)
+  execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_translation_memory_hash ON translation_memory(user_id, context_hash)`)
+})
+runMigration("20260314_ai_presets", () => {
+  execMigrationSql(`
+    CREATE TABLE IF NOT EXISTS ai_presets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      system_hint TEXT DEFAULT '',
+      category TEXT DEFAULT 'custom',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `)
+  execMigrationSql(`CREATE INDEX IF NOT EXISTS idx_ai_presets_user ON ai_presets(user_id, created_at)`)
+})
+runMigration("20260314_audit_logs_ip", () => {
+  execMigrationSql(`ALTER TABLE audit_logs ADD COLUMN ip_address TEXT`)
+  execMigrationSql(`ALTER TABLE audit_logs ADD COLUMN user_agent TEXT`)
+})
+runMigration("20260314_projects_seo_keywords", () => {
+  execMigrationSql(`ALTER TABLE projects ADD COLUMN seo_keywords TEXT DEFAULT '[]'`)
+  execMigrationSql(`ALTER TABLE projects ADD COLUMN seo_meta_title TEXT DEFAULT ''`)
+  execMigrationSql(`ALTER TABLE projects ADD COLUMN seo_meta_description TEXT DEFAULT ''`)
+})
 
 export default db

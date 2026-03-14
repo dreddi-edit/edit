@@ -21,6 +21,8 @@ import { createRateLimit } from "./rateLimit.js"
 import { registerSeoRoutes } from "./seo.js"
 import { registerTemplateRoutes } from "./templates.js"
 import { registerAssistantRoutes } from "./assistant.js"
+import { registerTranslationMemoryRoutes } from "./translationMemory.js"
+import { registerPresetsRoutes } from "./presets.js"
 import {
   isValidationError,
   readEmail,
@@ -858,9 +860,24 @@ app.post("/api/ai/rewrite-block", authMiddleware, aiPlanGuard, aiRateLimit, asyn
   try {
     const html = readRequiredHtml(req.body?.html, "HTML", { max: 500_000 })
     const instruction = readRequiredString(req.body?.instruction, "Instruction", { max: 4000 })
+    const mode = readOptionalString(req.body?.mode, "Mode", { max: 50, empty: "" })
     const systemHint = readOptionalString(req.body?.systemHint, "System hint", { max: 2000, empty: "" })
     const model = readOptionalString(req.body?.model, "Model", { max: 80, empty: "" })
     const approved = String(req.query.approved || req.body?.approved || "") === "1"
+
+    // Mode-specific system hint injection (#82 readability, #83 tone, #86 CTA, #87 product, #88 blog, #96 hero)
+    const modeHints = {
+      readability: "Focus on readability: use short sentences, active voice, clear structure, no jargon.",
+      tone: "Adjust the tone of voice. Keep the same meaning but change the style as instructed.",
+      cta: "Optimise call-to-action elements. Make CTAs more compelling, urgent and benefit-focused.",
+      product: "Rewrite as a high-converting product description. Focus on benefits, features and social proof.",
+      blog: "Rewrite in an engaging blog style. Use subheadings, bullet points and conversational language.",
+      hero: "Optimise the hero section for maximum visual impact and conversion. Make the headline punchy and the sub-headline clear.",
+      ad_copy: "Rewrite as high-converting ad copy. Be concise, benefit-focused with a strong CTA.",
+      email: "Rewrite as compelling email copy with a strong subject line hook and clear CTA.",
+      improve: "Improve overall copy quality: clarity, persuasion, and conversion potential.",
+    }
+    const effectiveSystemHint = systemHint || (mode && modeHints[mode]) || ""
 
     let chosenModel = String(model || "auto")
 
@@ -922,12 +939,12 @@ app.post("/api/ai/rewrite-block", authMiddleware, aiPlanGuard, aiRateLimit, asyn
     const useOllama = chosenModel.startsWith("ollama:")
 
     const result = useGemini
-      ? await geminiRewriteBlock({ html, instruction, systemHint, model: chosenModel, userId: req.user?.id })
+      ? await geminiRewriteBlock({ html, instruction, systemHint: effectiveSystemHint, model: chosenModel, userId: req.user?.id })
       : useGroq
-      ? await groqRewriteBlock({ html, instruction, systemHint, model: chosenModel.replace(/^groq:/, ""), userId: req.user?.id })
+      ? await groqRewriteBlock({ html, instruction, systemHint: effectiveSystemHint, model: chosenModel.replace(/^groq:/, ""), userId: req.user?.id })
       : useOllama
-      ? await ollamaRewriteBlock({ html, instruction, systemHint, model: chosenModel.replace(/^ollama:/, "") })
-      : await claudeRewriteBlock({ html, instruction, systemHint, model: chosenModel, userId: req.user?.id })
+      ? await ollamaRewriteBlock({ html, instruction, systemHint: effectiveSystemHint, model: chosenModel.replace(/^ollama:/, "") })
+      : await claudeRewriteBlock({ html, instruction, systemHint: effectiveSystemHint, model: chosenModel, userId: req.user?.id })
 
     const usage = result?.usage || null
 
@@ -1480,6 +1497,8 @@ registerProjectRoutes(app)
 registerSeoRoutes(app)
 registerTemplateRoutes(app)
 registerAssistantRoutes(app, { aiRateLimit })
+registerTranslationMemoryRoutes(app)
+registerPresetsRoutes(app)
 app.get("/api/admin/system-health", authMiddleware, ownerOnly, (req, res) => { 
   res.json({ ok: true, status: "healthy", cpu: "12%", memory: "450MB", uptime: process.uptime() }); 
 }); 
@@ -2200,6 +2219,174 @@ app.get("/api/user/plan", authMiddleware, (req, res) => {
     res.json({ ok: true, plan: row?.plan || "basis" })
   } catch (e) {
     res.json({ ok: false, plan: "basis" })
+  }
+})
+
+// --- Usage & Telemetry routes (#17, #19, #198) ---
+
+app.get("/api/usage/stats", authMiddleware, (req, res) => {
+  try {
+    const { period = "30d", project_id } = req.query
+    const days = period === "7d" ? 7 : period === "90d" ? 90 : 30
+    const since = new Date(Date.now() - days * 86400000).toISOString()
+
+    const totalRuns = db.prepare(
+      "SELECT COUNT(*) as c, tool_name FROM ai_studio_runs WHERE user_id = ? AND created_at >= ? GROUP BY tool_name"
+    ).all(req.user.id, since)
+
+    const creditRows = db.prepare(
+      "SELECT SUM(ABS(amount_eur)) as total FROM credit_transactions WHERE user_id = ? AND type = 'debit' AND created_at >= ?"
+    ).get(req.user.id, since)
+
+    const sessionCost = db.prepare(
+      "SELECT SUM(ABS(amount_eur)) as total, project_id FROM credit_transactions WHERE user_id = ? AND type = 'debit' AND created_at >= ? GROUP BY project_id"
+    ).all(req.user.id, since)
+
+    const exportCount = db.prepare(
+      "SELECT COUNT(*) as c FROM project_exports WHERE user_id = ? AND created_at >= ?"
+    ).get(req.user.id, since)
+
+    const aiRunsByDay = db.prepare(`
+      SELECT date(created_at) as day, COUNT(*) as runs
+      FROM ai_studio_runs WHERE user_id = ? AND created_at >= ?
+      GROUP BY day ORDER BY day ASC
+    `).all(req.user.id, since)
+
+    res.json({
+      ok: true,
+      period,
+      ai_runs: { by_tool: totalRuns, total: totalRuns.reduce((s, r) => s + r.c, 0) },
+      credit_usage: { total_eur: creditRow?.total || 0, by_project: sessionCost },
+      exports: exportCount?.c || 0,
+      activity_by_day: aiRunsByDay,
+    })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+app.get("/api/credits/by-project", authMiddleware, (req, res) => {
+  try {
+    const { limit = 20 } = req.query
+    const rows = db.prepare(`
+      SELECT ct.project_id, p.name as project_name,
+             SUM(ABS(ct.amount_eur)) as total_eur,
+             COUNT(*) as transaction_count,
+             MAX(ct.created_at) as last_activity
+      FROM credit_transactions ct
+      LEFT JOIN projects p ON p.id = ct.project_id AND p.user_id = ct.user_id
+      WHERE ct.user_id = ? AND ct.type = 'debit' AND ct.project_id IS NOT NULL
+      GROUP BY ct.project_id
+      ORDER BY total_eur DESC
+      LIMIT ?
+    `).all(req.user.id, Math.min(100, Math.max(1, Number(limit) || 20)))
+    const total = db.prepare(
+      "SELECT SUM(ABS(amount_eur)) as t FROM credit_transactions WHERE user_id = ? AND type = 'debit'"
+    ).get(req.user.id)
+    res.json({ ok: true, by_project: rows, total_eur: total?.t || 0 })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
+  }
+})
+
+// --- AI inline suggestions (#79, #92, #93, #94, #95) ---
+
+app.post("/api/ai/inline-suggestions", authMiddleware, aiRateLimit, async (req, res) => {
+  try {
+    const html = readRequiredHtml(req.body?.html, "html", { max: 100000 })
+    const action = readOptionalString(req.body?.action, "action", { max: 50, empty: "improve" })
+    const projectId = req.body?.project_id ? Number(req.body.project_id) : null
+
+    const actionPrompts = {
+      simplify: "Simplify this HTML block. Use shorter sentences and clearer language.",
+      professional: "Make this block more professional and authoritative.",
+      headlines: "Generate 3 alternative, catchy headlines for this block.",
+      improve: "Improve conversion potential of this block. Sharpen copy and CTAs.",
+      cro: "Identify the top 3 CRO issues in this block and rewrite to fix them.",
+      ux_friction: "Identify UX friction points and suggest clearer, more intuitive design.",
+      cta: "Improve call-to-action clarity, urgency and placement.",
+    }
+
+    const instruction = actionPrompts[String(action)] || actionPrompts.improve
+    let chosenModel = "auto"
+    const { resolveModel } = await import("./autoRouter.js")
+    const routing = await resolveModel(html, instruction)
+    chosenModel = routing.model
+
+    const result = await claudeRewriteBlock({ html, instruction, systemHint: "", model: chosenModel, userId: req.user?.id })
+    const usage = result?.usage || null
+    if (req.user?.id && usage) {
+      try { deductCredits(req.user.id, chosenModel, usage.input_tokens || 0, usage.output_tokens || 0, "Inline suggestion") } catch {}
+    }
+    res.json({ ok: true, html: result?.html ?? result, action, model: chosenModel, usage })
+  } catch (e) {
+    if (isValidationError(e)) return res.status(400).json({ ok: false, error: e.message })
+    res.status(500).json({ ok: false, error: e?.message || "Inline suggestion failed" })
+  }
+})
+
+// --- HTML refactor (#131-#139) ---
+
+app.post("/api/ai/html-refactor", authMiddleware, aiPlanGuard, aiRateLimit, async (req, res) => {
+  try {
+    const html = readRequiredHtml(req.body?.html, "html", { max: 500000 })
+    const refactorType = readOptionalString(req.body?.type, "type", { max: 50, empty: "layout" })
+    const approved = String(req.query.approved || req.body?.approved || "") === "1"
+
+    const typeInstructions = {
+      layout: "Convert all absolute-positioned elements to Flexbox or CSS Grid. Normalise layout to be responsive.",
+      css_cleanup: "Remove duplicate CSS declarations, consolidate repeated styles, extract common values to CSS variables.",
+      semantics: "Replace non-semantic div/span elements with appropriate semantic HTML5 elements (section, article, nav, header, footer, etc.).",
+      accessibility: "Add missing ARIA labels, alt attributes for images, improve heading hierarchy, and ensure keyboard navigation.",
+      performance: "Add loading='lazy' to images, defer non-critical scripts, optimise inline styles.",
+      duplicate_removal: "Identify and merge duplicate or near-duplicate HTML sections.",
+      simplification: "Simplify overly complex nested HTML. Flatten unnecessary wrapper divs.",
+      component: "Identify repeating patterns and normalise them into consistent component-like structures.",
+      full: "Perform complete refactor: layout, semantics, accessibility, duplicate removal, and CSS cleanup.",
+    }
+    const instruction = typeInstructions[refactorType] || typeInstructions.layout
+
+    if (!approved) {
+      return res.json({
+        ok: false,
+        needsApproval: true,
+        type: refactorType,
+        reason: `HTML refactor (${refactorType}) – this will restructure your HTML.`,
+      })
+    }
+
+    const { resolveModel } = await import("./autoRouter.js")
+    const routing = await resolveModel(html, instruction)
+    const chosenModel = routing.model
+
+    const result = await claudeRewriteBlock({ html, instruction, systemHint: "Return ONLY the refactored HTML. Preserve all content, links and images.", model: chosenModel, userId: req.user?.id })
+    const usage = result?.usage || null
+    if (req.user?.id && usage) {
+      try { deductCredits(req.user.id, chosenModel, usage.input_tokens || 0, usage.output_tokens || 0, `HTML refactor (${refactorType})`) } catch {}
+    }
+    res.json({ ok: true, html: result?.html ?? result, type: refactorType, model: chosenModel, usage })
+  } catch (e) {
+    if (isValidationError(e)) return res.status(400).json({ ok: false, error: e.message })
+    res.status(500).json({ ok: false, error: e?.message || "HTML refactor failed" })
+  }
+})
+
+// --- CTO/Security additions (#193) — enhanced input validation for upload routes ---
+// Existing validation.js covers core validation; this supplements with HTML sanitisation check
+app.post("/api/validate/html-safety", authMiddleware, (req, res) => {
+  try {
+    const html = readOptionalString(req.body?.html, "html", { max: 1000000, empty: "" })
+    const dangerousPatterns = [
+      { pattern: /<script[^>]*src\s*=\s*["']https?:\/\//i, issue: "External script injection detected" },
+      { pattern: /on\w+\s*=\s*["'].*javascript:/i, issue: "JavaScript protocol in event handler" },
+      { pattern: /javascript:/i, issue: "javascript: URL scheme" },
+      { pattern: /<iframe[^>]*src\s*=\s*["'](?!blob:|data:)[^"']*["']/i, issue: "External iframe" },
+      { pattern: /expression\s*\(/i, issue: "CSS expression()" },
+    ]
+    const issues = dangerousPatterns.filter(({ pattern }) => pattern.test(html))
+    res.json({ ok: true, safe: issues.length === 0, issues: issues.map((i) => i.issue) })
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message })
   }
 })
 

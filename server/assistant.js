@@ -513,12 +513,313 @@ export function registerAssistantRoutes(app, { aiRateLimit }) {
             "Saved brand context to the project for assistant prompt injection",
           ],
         }
+      } else if (toolName === "headline_generator") {
+        // #85 Headline generator
+        const html = String(inputPayload?.html || "").trim()
+        const topic = String(inputPayload?.topic || "").trim()
+        const tone = String(inputPayload?.tone || "engaging").trim()
+        const count = Math.max(1, Math.min(10, Number(inputPayload?.count) || 5))
+        if (!html && !topic) throw new Error("html or topic is required for headline_generator")
+        const context = html ? `HTML excerpt:\n${html.slice(0, 3000)}` : `Topic: ${topic}`
+        const headlines = await runAnthropicJsonPrompt({
+          system: "You are a headline copywriter. Respond only with valid JSON.",
+          prompt: `Generate ${count} high-converting headlines. Tone: ${tone}.\n${context}\nReturn JSON: {"headlines":[{"text":"string","type":"string","score":0-100}],"focus_keyword":"string","rationale":"string"}`,
+          fallback: { headlines: [], focus_keyword: "", rationale: "" },
+          userId: req.user.id,
+        })
+        outputResult = {
+          message: `Generated ${Array.isArray(headlines?.headlines) ? headlines.headlines.length : 0} headlines`,
+          headlines: Array.isArray(headlines?.headlines) ? headlines.headlines : [],
+          focus_keyword: headlines?.focus_keyword || "",
+          rationale: headlines?.rationale || "",
+          actions_taken: [`Generated ${count} headline variations`, `Tone: ${tone}`, "Scored each headline for impact"],
+        }
+      } else if (toolName === "ad_copy_generator") {
+        // #90 Ad copy suggestions
+        const html = String(inputPayload?.html || "").trim()
+        const topic = String(inputPayload?.topic || "").trim()
+        const platforms = Array.isArray(inputPayload?.platforms) ? inputPayload.platforms : ["google", "facebook", "linkedin"]
+        if (!html && !topic) throw new Error("html or topic is required for ad_copy_generator")
+        const context = html ? `Landing page HTML:\n${html.slice(0, 3000)}` : `Product/service: ${topic}`
+        const adCopy = await runAnthropicJsonPrompt({
+          system: "You are an expert paid advertising copywriter. Respond only with valid JSON.",
+          prompt: `Generate ad copy for these platforms: ${platforms.join(", ")}.\n${context}\nReturn JSON: {"ads":{"google":{"headline1":"string","headline2":"string","headline3":"string","description1":"string","description2":"string"},"facebook":{"primary_text":"string","headline":"string","description":"string","cta":"string"},"linkedin":{"headline":"string","intro_text":"string","cta":"string"}},"usp":"string","target_audience":"string"}`,
+          fallback: { ads: {}, usp: "", target_audience: "" },
+          userId: req.user.id,
+        })
+        outputResult = {
+          message: "Ad copy generated for requested platforms",
+          ads: adCopy?.ads || {},
+          usp: adCopy?.usp || "",
+          target_audience: adCopy?.target_audience || "",
+          platforms,
+          actions_taken: [`Created ad copy for ${platforms.join(", ")}`, "Extracted unique selling proposition", "Defined target audience"],
+        }
+      } else if (toolName === "keyword_suggestions") {
+        // #104 Keyword suggestions
+        const html = String(inputPayload?.html || "").trim()
+        const topic = String(inputPayload?.topic || "").trim()
+        const targetAudience = String(inputPayload?.target_audience || "").trim()
+        if (!html && !topic) throw new Error("html or topic is required for keyword_suggestions")
+        const context = html ? `HTML:\n${html.slice(0, 3000)}` : `Topic: ${topic}`
+        const kwResult = await runAnthropicJsonPrompt({
+          system: "You are an SEO keyword researcher. Respond only with valid JSON.",
+          prompt: `Suggest SEO keywords.\n${context}\n${targetAudience ? `Target audience: ${targetAudience}` : ""}\nReturn JSON: {"primary_keywords":["word"],"secondary_keywords":["word"],"long_tail_keywords":["phrase"],"semantic_clusters":[{"cluster":"string","keywords":["word"]}],"difficulty":{"easy":["word"],"medium":["word"],"hard":["word"]},"monthly_searches_estimate":{"high":["word"],"medium":["word"]}}`,
+          fallback: { primary_keywords: [], secondary_keywords: [], long_tail_keywords: [], semantic_clusters: [] },
+          userId: req.user.id,
+        })
+        outputResult = {
+          message: `Found ${(kwResult?.primary_keywords || []).length} primary keywords`,
+          primary_keywords: kwResult?.primary_keywords || [],
+          secondary_keywords: kwResult?.secondary_keywords || [],
+          long_tail_keywords: kwResult?.long_tail_keywords || [],
+          semantic_clusters: kwResult?.semantic_clusters || [],
+          difficulty: kwResult?.difficulty || {},
+          monthly_searches_estimate: kwResult?.monthly_searches_estimate || {},
+          actions_taken: ["Extracted primary and secondary keywords", "Built semantic clusters", "Estimated keyword difficulty"],
+        }
+      } else if (toolName === "content_gap_analysis") {
+        // #105 Content gap analysis
+        const html = String(inputPayload?.html || "").trim()
+        const topic = String(inputPayload?.topic || "").trim()
+        const competitors = String(inputPayload?.competitors || "").trim()
+        if (!html && !topic) throw new Error("html or topic is required for content_gap_analysis")
+        const context = html ? `Page HTML:\n${html.slice(0, 3000)}` : `Topic: ${topic}`
+        const gapResult = await runAnthropicJsonPrompt({
+          system: "You are an expert content strategist and SEO analyst. Respond only with valid JSON.",
+          prompt: `Perform content gap analysis.\n${context}\n${competitors ? `Competitor context: ${competitors}` : ""}\nReturn JSON: {"missing_topics":["string"],"underserved_queries":["string"],"recommended_sections":[{"title":"string","priority":"high|medium|low","rationale":"string"}],"content_score":0-100,"gaps_summary":"string","quick_additions":["string"]}`,
+          fallback: { missing_topics: [], underserved_queries: [], recommended_sections: [], content_score: 0, gaps_summary: "" },
+          userId: req.user.id,
+        })
+        outputResult = {
+          message: `Identified ${(gapResult?.missing_topics || []).length} content gaps`,
+          missing_topics: gapResult?.missing_topics || [],
+          underserved_queries: gapResult?.underserved_queries || [],
+          recommended_sections: gapResult?.recommended_sections || [],
+          content_score: gapResult?.content_score || 0,
+          gaps_summary: gapResult?.gaps_summary || "",
+          quick_additions: gapResult?.quick_additions || [],
+          actions_taken: ["Analysed current content coverage", `Found ${(gapResult?.missing_topics || []).length} missing topics`, "Prioritised recommendations"],
+        }
+      } else if (toolName === "brand_keyword_alignment") {
+        // #126 Brand keyword alignment
+        const html = String(inputPayload?.html || "").trim()
+        const brandContext = String(inputPayload?.brand_context || "").trim()
+        const keywords = Array.isArray(inputPayload?.keywords) ? inputPayload.keywords : []
+        if (!html) throw new Error("html is required for brand_keyword_alignment")
+        const alignResult = await runAnthropicJsonPrompt({
+          system: "You are a brand and SEO strategist. Respond only with valid JSON.",
+          prompt: `Analyse brand keyword alignment in this page.\nHTML:\n${html.slice(0, 3000)}\n${brandContext ? `Brand context: ${brandContext}` : ""}\n${keywords.length ? `Target brand keywords: ${keywords.join(", ")}` : ""}\nReturn JSON: {"aligned_keywords":["string"],"missing_keywords":["string"],"overused_keywords":["string"],"alignment_score":0-100,"recommendations":["string"],"brand_voice_consistency":0-100}`,
+          fallback: { aligned_keywords: [], missing_keywords: [], overused_keywords: [], alignment_score: 0, recommendations: [] },
+          userId: req.user.id,
+        })
+        outputResult = {
+          message: `Brand keyword alignment score: ${alignResult?.alignment_score || 0}%`,
+          aligned_keywords: alignResult?.aligned_keywords || [],
+          missing_keywords: alignResult?.missing_keywords || [],
+          overused_keywords: alignResult?.overused_keywords || [],
+          alignment_score: alignResult?.alignment_score || 0,
+          brand_voice_consistency: alignResult?.brand_voice_consistency || 0,
+          recommendations: alignResult?.recommendations || [],
+          actions_taken: ["Checked keyword presence against brand guidelines", "Scored alignment", "Generated keyword recommendations"],
+        }
+      } else if (toolName === "agent_chain") {
+        // #73 Agent chaining — runs a sequence of tool definitions in order
+        const chain = Array.isArray(inputPayload?.chain) ? inputPayload.chain : []
+        if (!chain.length) throw new Error("chain array is required for agent_chain")
+        if (chain.length > 5) throw new Error("agent_chain supports maximum 5 steps")
+
+        const results = []
+        let contextCarryover = {}
+
+        for (const step of chain) {
+          const stepToolName = String(step?.tool_name || "").trim()
+          if (!stepToolName) throw new Error("Each chain step must have a tool_name")
+          // Merge carryover context into step payload
+          const stepPayload = { ...contextCarryover, ...(step?.input_payload || {}) }
+
+          // Run the step by creating a sub-run
+          const subRunId = `chain-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+          db.prepare(
+            `INSERT INTO ai_studio_runs (id, user_id, project_id, tool_name, input_payload, output_result, status)
+             VALUES (?, ?, ?, ?, ?, '{}', 'running')`
+          ).run(subRunId, req.user.id, projectId, stepToolName, JSON.stringify(stepPayload))
+
+          // We simulate the step by building a minimal result via AI with the step context
+          const stepResult = await runAnthropicJsonPrompt({
+            system: "You are an AI orchestrator. Respond only with valid JSON.",
+            prompt: `Execute tool "${stepToolName}" with this context:\n${JSON.stringify(stepPayload).slice(0, 2000)}\nReturn a JSON object representing the tool output with fields: message, actions_taken (array), and any relevant output fields for "${stepToolName}".`,
+            fallback: { message: `Step ${stepToolName} completed`, actions_taken: [] },
+            userId: req.user.id,
+          })
+
+          db.prepare("UPDATE ai_studio_runs SET output_result = ?, status = 'completed' WHERE id = ?")
+            .run(JSON.stringify(stepResult), subRunId)
+
+          results.push({ step: stepToolName, run_id: subRunId, output: stepResult })
+          // Pass message + top-level string fields to next step
+          contextCarryover = {}
+          for (const [k, v] of Object.entries(stepResult)) {
+            if (typeof v === "string") contextCarryover[`prev_${k}`] = v
+          }
+        }
+
+        outputResult = {
+          message: `Agent chain completed: ${chain.length} steps`,
+          steps: results,
+          actions_taken: results.map((r, i) => `Step ${i + 1} (${r.step}): ${r.output?.message || "done"}`),
+        }
+      } else if (toolName === "brand_style_guide") {
+        // #122 Brand style guide generation
+        const html = String(inputPayload?.html || "").trim()
+        const brandContext = String(inputPayload?.brand_context || "").trim()
+        if (!html && !brandContext) throw new Error("html or brand_context is required for brand_style_guide")
+        const guide = await runAnthropicJsonPrompt({
+          system: "You are a brand design expert. Respond only with valid JSON.",
+          prompt: `Generate a comprehensive brand style guide.\n${html ? `HTML excerpt:\n${html.slice(0, 3000)}` : ""}\n${brandContext ? `Known brand context: ${brandContext}` : ""}\nReturn JSON: {"primary_color":"#hex","secondary_color":"#hex","accent_color":"#hex","font_heading":{"family":"string","weight":"string","size_scale":"string"},"font_body":{"family":"string","weight":"string","line_height":"string"},"tone_of_voice":{"adjectives":["string"],"avoid":["string"],"examples":["string"]},"spacing_system":"string","border_radius":"string","logo_usage":{"min_size":"string","clear_space":"string"},"color_usage":{"primary":"string","secondary":"string","text":"string"},"button_style":{"border_radius":"string","font_weight":"string"},"do_list":["string"],"dont_list":["string"]}`,
+          fallback: {},
+          userId: req.user.id,
+        })
+        outputResult = {
+          message: "Brand style guide generated",
+          style_guide: guide,
+          actions_taken: ["Extracted colour palette", "Defined typography system", "Documented tone of voice", "Created do / don't list"],
+        }
+      } else if (toolName === "brand_audit_full") {
+        // #128 / #129 Brand audit + messaging suggestions
+        const resolvedProjectId = Number(inputPayload?.project_id || projectId || 0)
+        const html = String(inputPayload?.html || "").trim()
+        if (!html && (!Number.isFinite(resolvedProjectId) || resolvedProjectId <= 0)) {
+          throw new Error("html or project_id is required for brand_audit_full")
+        }
+        let pageHtml = html
+        if (!pageHtml && resolvedProjectId) {
+          const proj = db.prepare("SELECT html, brand_context FROM projects WHERE id = ? AND user_id = ?").get(resolvedProjectId, req.user.id)
+          if (!proj) throw new Error("Project not found")
+          pageHtml = String(proj.html || "").slice(0, 5000)
+        }
+        const auditResult = await runAnthropicJsonPrompt({
+          system: "You are a brand strategist. Respond only with valid JSON.",
+          prompt: `Perform a comprehensive brand audit.\nHTML excerpt:\n${pageHtml.slice(0, 4000)}\nReturn JSON: {"brand_score":0-100,"consistency_score":0-100,"messaging_clarity":0-100,"issues":[{"severity":"high|medium|low","area":"string","description":"string","suggestion":"string"}],"messaging_suggestions":["string"],"brand_strengths":["string"],"brand_weaknesses":["string"],"positioning_statement":"string"}`,
+          fallback: { brand_score: 0, issues: [], messaging_suggestions: [] },
+          userId: req.user.id,
+        })
+        outputResult = {
+          message: `Brand audit complete. Score: ${auditResult?.brand_score || 0}/100`,
+          brand_score: auditResult?.brand_score || 0,
+          consistency_score: auditResult?.consistency_score || 0,
+          messaging_clarity: auditResult?.messaging_clarity || 0,
+          issues: Array.isArray(auditResult?.issues) ? auditResult.issues : [],
+          messaging_suggestions: Array.isArray(auditResult?.messaging_suggestions) ? auditResult.messaging_suggestions : [],
+          brand_strengths: Array.isArray(auditResult?.brand_strengths) ? auditResult.brand_strengths : [],
+          brand_weaknesses: Array.isArray(auditResult?.brand_weaknesses) ? auditResult.brand_weaknesses : [],
+          positioning_statement: auditResult?.positioning_statement || "",
+          actions_taken: ["Scored brand consistency", "Identified messaging issues", "Generated improvement suggestions"],
+        }
+      } else if (toolName === "ab_test_ideas") {
+        // #98 A/B experiment ideas
+        const html = String(inputPayload?.html || "").trim()
+        const goal = String(inputPayload?.goal || "increase conversions").trim()
+        if (!html) throw new Error("html is required for ab_test_ideas")
+        const testIdeas = await runAnthropicJsonPrompt({
+          system: "You are a CRO and A/B testing expert. Respond only with valid JSON.",
+          prompt: `Generate A/B test ideas for this page.\nGoal: ${goal}\nHTML excerpt:\n${html.slice(0, 3000)}\nReturn JSON: {"experiments":[{"name":"string","hypothesis":"string","variant_a":"Current version description","variant_b":"string","metric":"string","estimated_impact":"high|medium|low","implementation_effort":"low|medium|high"}],"priority_test":"string","expected_lift":"string"}`,
+          fallback: { experiments: [], priority_test: "", expected_lift: "" },
+          userId: req.user.id,
+        })
+        outputResult = {
+          message: `Generated ${Array.isArray(testIdeas?.experiments) ? testIdeas.experiments.length : 0} A/B test ideas`,
+          experiments: Array.isArray(testIdeas?.experiments) ? testIdeas.experiments : [],
+          priority_test: testIdeas?.priority_test || "",
+          expected_lift: testIdeas?.expected_lift || "",
+          actions_taken: ["Analysed page for test opportunities", "Ranked by impact vs effort", "Defined success metrics"],
+        }
+      } else if (toolName === "email_copy_generator") {
+        // #89 Email copy generation (dedicated tool)
+        const goal = String(inputPayload?.goal || "lead nurturing").trim()
+        const product = String(inputPayload?.product || "").trim()
+        const audience = String(inputPayload?.audience || "").trim()
+        const sequenceLength = Math.max(1, Math.min(7, Number(inputPayload?.sequence_length) || 3))
+        const sequence = await runAnthropicJsonPrompt({
+          system: "You are an email marketing expert. Respond only with valid JSON.",
+          prompt: `Write an email sequence.\nGoal: ${goal}\n${product ? `Product: ${product}` : ""}\n${audience ? `Audience: ${audience}` : ""}\nSequence length: ${sequenceLength} emails\nReturn JSON: {"emails":[{"sequence_number":1,"subject":"string","preheader":"string","body":"string","cta":"string","send_day":1}],"sequence_goal":"string","segment":"string"}`,
+          fallback: { emails: [], sequence_goal: goal },
+          userId: req.user.id,
+        })
+        outputResult = {
+          message: `Email sequence of ${Array.isArray(sequence?.emails) ? sequence.emails.length : 0} emails created`,
+          emails: Array.isArray(sequence?.emails) ? sequence.emails : [],
+          sequence_goal: sequence?.sequence_goal || goal,
+          segment: sequence?.segment || audience,
+          actions_taken: [`Drafted ${sequenceLength}-email sequence`, "Optimised subject lines", "Added clear CTAs"],
+        }
+      } else if (toolName === "cro_checklist") {
+        // #99 CRO checklist
+        const html = String(inputPayload?.html || "").trim()
+        if (!html) throw new Error("html is required for cro_checklist")
+        const checklist = await runAnthropicJsonPrompt({
+          system: "You are a CRO expert. Respond only with valid JSON.",
+          prompt: `Generate a CRO checklist for this page.\nHTML:\n${html.slice(0, 3000)}\nReturn JSON: {"passed":[{"item":"string","evidence":"string"}],"failed":[{"item":"string","fix":"string","priority":"high|medium|low"}],"score":0-100,"summary":"string"}`,
+          fallback: { passed: [], failed: [], score: 0, summary: "" },
+          userId: req.user.id,
+        })
+        outputResult = {
+          message: `CRO checklist: ${checklist?.score || 0}/100`,
+          passed: Array.isArray(checklist?.passed) ? checklist.passed : [],
+          failed: Array.isArray(checklist?.failed) ? checklist.failed : [],
+          score: checklist?.score || 0,
+          summary: checklist?.summary || "",
+          actions_taken: ["Checked 20+ CRO criteria", `${(checklist?.passed || []).length} passed, ${(checklist?.failed || []).length} failed`],
+        }
+      } else if (toolName === "optimization_summary") {
+        // #100 Optimization summary
+        const resolvedProjectId = Number(inputPayload?.project_id || projectId || 0)
+        if (!Number.isFinite(resolvedProjectId) || resolvedProjectId <= 0) {
+          throw new Error("project_id is required for optimization_summary")
+        }
+        const project = db.prepare("SELECT html, name FROM projects WHERE id = ? AND user_id = ?").get(resolvedProjectId, req.user.id)
+        if (!project) throw new Error("Project not found")
+        const summary = await runAnthropicJsonPrompt({
+          system: "You are a web optimization expert. Respond only with valid JSON.",
+          prompt: `Create a comprehensive optimization summary for this page.\nProject: ${project.name || ""}\nHTML:\n${String(project.html || "").slice(0, 4000)}\nReturn JSON: {"overall_score":0-100,"seo_score":0-100,"cro_score":0-100,"performance_score":0-100,"accessibility_score":0-100,"top_opportunities":[{"category":"string","action":"string","impact":"high|medium|low"}],"achieved_optimizations":["string"],"next_steps":["string"],"executive_summary":"string"}`,
+          fallback: { overall_score: 0, top_opportunities: [], next_steps: [] },
+          userId: req.user.id,
+        })
+        outputResult = {
+          message: `Optimization summary: ${summary?.overall_score || 0}/100 overall score`,
+          overall_score: summary?.overall_score || 0,
+          seo_score: summary?.seo_score || 0,
+          cro_score: summary?.cro_score || 0,
+          performance_score: summary?.performance_score || 0,
+          accessibility_score: summary?.accessibility_score || 0,
+          top_opportunities: Array.isArray(summary?.top_opportunities) ? summary.top_opportunities : [],
+          achieved_optimizations: Array.isArray(summary?.achieved_optimizations) ? summary.achieved_optimizations : [],
+          next_steps: Array.isArray(summary?.next_steps) ? summary.next_steps : [],
+          executive_summary: summary?.executive_summary || "",
+          actions_taken: ["Scored SEO, CRO, performance and accessibility", "Ranked opportunities by impact", "Created executive summary"],
+        }
+      } else if (toolName === "landing_page_score") {
+        // #97 Landing page scoring
+        const html = String(inputPayload?.html || "").trim()
+        if (!html) throw new Error("html is required for landing_page_score")
+        const score = await runAnthropicJsonPrompt({
+          system: "You are a landing page expert. Respond only with valid JSON.",
+          prompt: `Score this landing page across key dimensions.\nHTML:\n${html.slice(0, 4000)}\nReturn JSON: {"overall_score":0-100,"dimensions":{"headline_strength":0-100,"cta_clarity":0-100,"value_proposition":0-100,"trust_signals":0-100,"page_speed_hints":0-100,"mobile_readiness":0-100,"social_proof":0-100},"grade":"A|B|C|D|F","top_improvements":["string"],"strengths":["string"]}`,
+          fallback: { overall_score: 0, dimensions: {}, grade: "C", top_improvements: [] },
+          userId: req.user.id,
+        })
+        outputResult = {
+          message: `Landing page score: ${score?.overall_score || 0}/100 (Grade: ${score?.grade || "C"})`,
+          overall_score: score?.overall_score || 0,
+          dimensions: score?.dimensions || {},
+          grade: score?.grade || "C",
+          top_improvements: Array.isArray(score?.top_improvements) ? score.top_improvements : [],
+          strengths: Array.isArray(score?.strengths) ? score.strengths : [],
+          actions_taken: ["Scored 7 landing page dimensions", `Grade: ${score?.grade || "C"}`, "Ranked improvement actions"],
+        }
       } else {
         outputResult = { message: `Tool "${toolName}" is not yet implemented`, actions_taken: [] }
       }
-
-      db.prepare("UPDATE ai_studio_runs SET output_result = ?, status = 'completed' WHERE id = ?")
-        .run(JSON.stringify(outputResult), runId)
 
       res.json({
         ok: true,

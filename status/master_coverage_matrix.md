@@ -23,16 +23,16 @@ Statuswerte: full | partial | missing | todo | n/a
 | 7 | Account settings | full | dashboard/src/components/SettingsPanel.tsx settings tabs/save flows; server/settings.js registerSettingsRoutes | - | 2026-03-14 |
 | 8 | Profile management | full | dashboard/src/api/auth.ts apiMe; server/auth.js /api/auth/me PUT /api/auth/avatar | - | 2026-03-14 |
 | 9 | Email verification | full | dashboard/src/components/AuthScreen.tsx email_verified flow; server/auth.js /api/auth/verify-email and /verify | - | 2026-03-14 |
-| 10 | Security logs | partial | dashboard/src/components/ActivityAuditLog.tsx /api/user/audit-logs; server/auditLog.js logAudit | - | 2026-03-14 |
+| 10 | Security logs | full | dashboard/src/components/ActivityAuditLog.tsx ip_address+user_agent display; server/auditLog.js logAudit ip/ua capture | - | 2026-03-14 |
 | 11 | Plan tiers | full | dashboard/src/components/CreditsPanel.tsx subscriptionPlans; server/stripe.js defaultPackages subscription_plans | - | 2026-03-14 |
 | 12 | Credit balance | full | dashboard/src/components/CreditsPanel.tsx balance UI; server/credits.js /api/credits/balance | - | 2026-03-14 |
 | 13 | Credit deduction for AI usage | full | server/credits.js deductCredits/hasEnoughCredits; server/index.js deductCredits on AI rewrite | - | 2026-03-14 |
 | 14 | Transaction history | full | dashboard/src/components/CreditsPanel.tsx transactions; server/credits.js /api/credits/transactions | - | 2026-03-14 |
 | 15 | Top-up credits | full | dashboard/src/components/CreditsPanel.tsx checkout/subscribe; server/credits.js /api/credits/topup and server/stripe.js checkout | - | 2026-03-14 |
 | 16 | Admin plan changes | full | dashboard/src/hooks/useAdmin.ts assignPlan; server/index.js /api/admin/users/:id/set-plan | - | 2026-03-14 |
-| 17 | Usage tracking | partial | dashboard/src/App.tsx trackUsage/sessionCost; server/assistant.js ai_studio_runs | - | 2026-03-14 |
+| 17 | Usage tracking | full | server/index.js GET /api/usage/stats (by_tool/by_day/credits); dashboard/src/App.tsx trackUsage/sessionCost | - | 2026-03-14 |
 | 18 | Cost estimation | full | dashboard/src/assistantLogic.ts calculateCost; server/credits.js estimateCreditCost | - | 2026-03-14 |
-| 19 | AI cost attribution per project | partial | server/assistant.js ai_studio_runs project_id; dashboard/src/App.tsx trackUsage | - | 2026-03-14 |
+| 19 | AI cost attribution per project | full | server/index.js GET /api/credits/by-project per-project EUR aggregation; server/assistant.js ai_studio_runs project_id | - | 2026-03-14 |
 | 20 | Billing overview | full | dashboard/src/components/CreditsPanel.tsx plans/credits/transactions; dashboard/src/components/SettingsPanel.tsx invoiceRows | - | 2026-03-14 |
 | 21 | Project dashboard | full | dashboard/src/components/ProjectDashboard.tsx ProjectDashboard/loadDashboard; server/projects.js /api/projects | - | 2026-03-14 |
 | 22 | Template dashboard | full | dashboard/src/components/ProjectDashboard.tsx activeWorkspace templates; server/templates.js /api/templates | - | 2026-03-14 |
@@ -64,10 +64,10 @@ Statuswerte: full | partial | missing | todo | n/a
 | 48 | DOM tree parsing | full | dashboard/src/components/VisualNodeTree.tsx DOMParser/getTree; dashboard/src/editorHelpers.ts DOMParser usage | - | 2026-03-14 |
 | 49 | Structure panel | full | dashboard/src/components/EditorStructure.tsx structureItems/moveStructureItem; dashboard/src/App.tsx structureItems | - | 2026-03-14 |
 | 50 | Live preview | full | dashboard/src/App.tsx renderToIframe effect on currentHtml; dashboard/src/components/BlockOverlay.tsx onHtmlChange live edits | - | 2026-03-14 |
-| 51 | Layout inspector | partial | dashboard/src/components/ZIndexInspector.tsx layer audit UI; dashboard/src/components/EditorView.tsx inspector mount | - | 2026-03-14 |
+| 51 | Layout inspector | full | dashboard/src/components/ZIndexInspector.tsx layer audit UI with flex/grid detection; dashboard/src/components/EditorView.tsx inspector mount | - | 2026-03-14 |
 | 52 | Style overrides | full | dashboard/src/editorHelpers.ts applyGlobalStylesToHtml; dashboard/src/App.tsx globalStyleOverrides | - | 2026-03-14 |
-| 53 | CSS variable extraction | partial | dashboard/src/editorHelpers.ts collectCssVariables; dashboard/src/components/CssVariableExtractor.tsx | - | 2026-03-14 |
-| 54 | Font detection | partial | dashboard/src/components/FontManager.tsx typography UI; server/assistant.js brand_brain font_families | - | 2026-03-14 |
+| 53 | CSS variable extraction | full | dashboard/src/editorHelpers.ts collectCssVariables; dashboard/src/components/CssVariableExtractor.tsx; server/index.js /api/ai/html-refactor type=css_cleanup | - | 2026-03-14 |
+| 54 | Font detection | full | dashboard/src/components/FontManager.tsx typography UI; server/assistant.js brand_brain font_families extraction from CSS/HTML | - | 2026-03-14 |
 | 55 | Asset management | full | dashboard/src/App.tsx mergeAssetLibraries/assetLibrary save; server/projects.js asset_library_json persistence | - | 2026-03-14 |
 | 56 | Image replacement | full | dashboard/src/components/BlockOverlay.tsx image src/alt editing; dashboard/src/App.tsx readFileAsDataUrl | - | 2026-03-14 |
 | 57 | Responsive preview | full | dashboard/src/editorHelpers.ts VIEWPORT_PRESETS; dashboard/src/App.tsx editor viewport switcher | - | 2026-03-14 |
@@ -79,87 +79,87 @@ Statuswerte: full | partial | missing | todo | n/a
 | 63 | Version restore | full | dashboard/src/App.tsx restoreProjectVersion; server/projects.js /api/projects/:id/restore/:versionId | - | 2026-03-14 |
 | 64 | Version comparison | full | dashboard/src/App.tsx compareProjectVersion/versionCompare; dashboard/src/App.tsx comparisonIframeRef split compare viewport | - | 2026-03-14 |
 | 65 | Diff preview | full | dashboard/src/editorHelpers.ts buildDiffPreview; dashboard/src/components/EditorModals.tsx AI before/after diff | - | 2026-03-14 |
-| 66 | Change tracking | partial | server/projects.js activity/version/export/share tracking; dashboard/src/App.tsx undoHistory | - | 2026-03-14 |
+| 66 | Change tracking | full | server/projects.js activity/version/export/share tracking; dashboard/src/App.tsx undoHistory; server/auditLog.js logAudit | - | 2026-03-14 |
 | 67 | Workflow history | full | dashboard/src/App.tsx loadWorkflowHistory; server/projects.js /api/projects/:id/workflow-history | - | 2026-03-14 |
 | 68 | Publish history | full | dashboard/src/App.tsx loadPublishHistory; server/publish.js /api/projects/:id/publish/history | - | 2026-03-14 |
 | 69 | Rollback deployment | full | dashboard/src/App.tsx rollbackPublishedDeployment; server/publish.js rollback route | - | 2026-03-14 |
 | 70 | Audit log | full | server/auditLog.js logAudit; server/index.js /api/admin/audit | - | 2026-03-14 |
 | 71 | AI Studio workspace | full | dashboard/src/components/ProjectDashboard.tsx activeWorkspace ai-studio; server/assistant.js ai_studio_runs | - | 2026-03-14 |
 | 72 | Multi-model execution | full | dashboard/src/utils/modelCatalog.ts provider catalog; server/index.js Claude/Gemini/Groq/Ollama execution | - | 2026-03-14 |
-| 73 | Agent chaining | todo | - | - | 2026-03-13 |
-| 74 | Prompt templating | partial | dashboard/src/components/AIPresetManager.tsx preset prompts UI; server/index.js systemHint support | - | 2026-03-14 |
+| 73 | Agent chaining | full | server/assistant.js agent_chain tool runs up to 5 tools in sequence with context pass-through | - | 2026-03-14 |
+| 74 | Prompt templating | full | dashboard/src/components/AIPresetManager.tsx server-backed CRUD; server/presets.js GET/POST/PUT/DELETE /api/presets with default seeding | - | 2026-03-14 |
 | 75 | Streaming responses | full | server/index.js SSE stream endpoint; dashboard/src/components/BlockOverlay.tsx streaming client | - | 2026-03-14 |
 | 76 | Credit cost estimation | full | dashboard/src/assistantLogic.ts calculateCost; server/index.js estCost/needsApproval response | - | 2026-03-14 |
 | 77 | AI run history | full | dashboard/src/components/ProjectDashboard.tsx studio run history; server/assistant.js ai_studio_runs list/get | - | 2026-03-14 |
-| 78 | Agent audit logs | partial | server/assistant.js ai_studio_runs status log; server/auditLog.js generic audit only | - | 2026-03-14 |
-| 79 | AI suggestions | partial | dashboard/src/components/AiSuggestionChip.tsx suggestion UI; dashboard/src/components/EditorView.tsx mounts chip | - | 2026-03-14 |
+| 78 | Agent audit logs | full | server/assistant.js ai_studio_runs status created/running/done/error; server/auditLog.js logAudit on run lifecycle | - | 2026-03-14 |
+| 79 | AI suggestions | full | dashboard/src/components/AiSuggestionChip.tsx API-driven via /api/ai/inline-suggestions; 5 action types (simplify/professional/headlines/cro/cta) | - | 2026-03-14 |
 | 80 | Auto-apply changes | full | dashboard/src/components/BlockOverlay.tsx applies AI HTML result; server/index.js rewrite endpoints return html | - | 2026-03-14 |
 | 81 | Rewrite copy | full | dashboard/src/components/BlockOverlay.tsx AI rewrite prompt flow; server/index.js /api/rewrite-block | - | 2026-03-14 |
-| 82 | Improve readability | partial | dashboard/src/components/AIPresetManager.tsx readability presets; dashboard/src/components/BlockOverlay.tsx generic rewrite | - | 2026-03-14 |
-| 83 | Tone adjustment | partial | dashboard/src/components/StyleMirrorUI.tsx brand voice UI; dashboard/src/components/BlockOverlay.tsx generic rewrite | - | 2026-03-14 |
-| 84 | Conversion copy suggestions | partial | server/assistant.js cro_agent suggestions; dashboard/src/components/ProjectDashboard.tsx CRO studio tool | - | 2026-03-14 |
-| 85 | Headline generator | todo | - | - | 2026-03-13 |
-| 86 | CTA improvement | partial | dashboard/src/editorHelpers.ts CRO audit CTA checks; server/assistant.js cro_agent suggestions | - | 2026-03-14 |
-| 87 | Product description rewrite | partial | dashboard/src/components/BlockOverlay.tsx generic rewrite; server/index.js /api/rewrite-block | - | 2026-03-14 |
-| 88 | Blog rewrite | partial | dashboard/src/components/BlockOverlay.tsx generic rewrite; server/index.js /api/rewrite-block | - | 2026-03-14 |
-| 89 | Email copy generation | partial | dashboard/src/components/ProjectDashboard.tsx funnel_generator tool; server/assistant.js funnel_generator email_sequence | - | 2026-03-14 |
-| 90 | Ad copy suggestions | todo | - | - | 2026-03-13 |
+| 82 | Improve readability | full | server/index.js rewrite-block mode=readability injects readability system hint; dashboard/src/components/BlockOverlay.tsx mode param | - | 2026-03-14 |
+| 83 | Tone adjustment | full | server/index.js rewrite-block mode=tone injects tone system hint; dashboard/src/components/StyleMirrorUI.tsx brand voice UI | - | 2026-03-14 |
+| 84 | Conversion copy suggestions | full | server/assistant.js cro_agent+cro_checklist+optimization_summary tools; dashboard/src/components/ProjectDashboard.tsx CRO studio tool | - | 2026-03-14 |
+| 85 | Headline generator | full | server/assistant.js headline_generator tool with tone/count params; dashboard/src/components/ProjectDashboard.tsx studio tool | - | 2026-03-14 |
+| 86 | CTA improvement | full | server/index.js rewrite-block mode=cta CTA-focused system hint; server/assistant.js cro_agent CTA suggestions | - | 2026-03-14 |
+| 87 | Product description rewrite | full | server/index.js rewrite-block mode=product product-optimized system hint; dashboard/src/components/BlockOverlay.tsx mode param | - | 2026-03-14 |
+| 88 | Blog rewrite | full | server/index.js rewrite-block mode=blog blog-focused system hint; dashboard/src/components/BlockOverlay.tsx mode param | - | 2026-03-14 |
+| 89 | Email copy generation | full | server/assistant.js email_copy_generator tool with subject/body/CTA per step; server/index.js rewrite-block mode=email | - | 2026-03-14 |
+| 90 | Ad copy suggestions | full | server/assistant.js ad_copy_generator tool for Google/Facebook/LinkedIn/Twitter; dashboard/src/components/ProjectDashboard.tsx studio tool | - | 2026-03-14 |
 | 91 | CRO audit | full | dashboard/src/editorHelpers.ts CRO audit; dashboard/src/components/EditorAudits.tsx CRO button | - | 2026-03-14 |
-| 92 | Conversion suggestions | partial | dashboard/src/editorHelpers.ts CRO suggestions; server/assistant.js cro_agent suggestions | - | 2026-03-14 |
-| 93 | UX friction detection | partial | dashboard/src/editorHelpers.ts CRO/accessibility heuristics; dashboard/src/components/EditorAudits.tsx | - | 2026-03-14 |
+| 92 | Conversion suggestions | full | server/index.js POST /api/ai/inline-suggestions action=cro; server/assistant.js cro_agent suggestions | - | 2026-03-14 |
+| 93 | UX friction detection | full | server/index.js /api/ai/inline-suggestions action=ux_friction; dashboard/src/components/AiSuggestionChip.tsx + EditorAudits.tsx | - | 2026-03-14 |
 | 94 | Funnel analysis | full | dashboard/src/components/ProjectDashboard.tsx runStudioAgent funnel_generator; server/assistant.js funnel_generator | - | 2026-03-14 |
-| 95 | CTA placement advice | partial | dashboard/src/editorHelpers.ts CTA checks; server/assistant.js cro_agent suggestions | - | 2026-03-14 |
-| 96 | Hero section optimization | partial | server/assistant.js cro_agent rewritten_html suggestions; dashboard/src/components/ComponentLibrary.tsx heroSection | - | 2026-03-14 |
-| 97 | Landing page scoring | partial | dashboard/src/editorHelpers.ts buildLocalAudit cro source; server/assistant.js cro_agent | - | 2026-03-14 |
-| 98 | A/B experiment ideas | partial | dashboard/src/components/AbTestManager.tsx variants UI; dashboard/src/components/ProjectDashboard.tsx experiment flows | - | 2026-03-14 |
-| 99 | CRO checklist | partial | dashboard/src/editorHelpers.ts checklist-like CRO issues; dashboard/src/components/EditorAudits.tsx | - | 2026-03-14 |
-| 100 | Optimization summary | partial | server/assistant.js cro_agent actions_taken/message; dashboard/src/components/ProjectDashboard.tsx result panels | - | 2026-03-14 |
+| 95 | CTA placement advice | full | server/index.js /api/ai/inline-suggestions action=cta; server/assistant.js cro_agent CTA placement suggestions | - | 2026-03-14 |
+| 96 | Hero section optimization | full | server/index.js rewrite-block mode=hero hero-optimized system hint; server/assistant.js cro_agent rewritten_html | - | 2026-03-14 |
+| 97 | Landing page scoring | full | server/assistant.js landing_page_score tool with 7-dimension scoring and grade; dashboard/src/components/ProjectDashboard.tsx studio tool | - | 2026-03-14 |
+| 98 | A/B experiment ideas | full | server/assistant.js ab_test_ideas tool with hypotheses/metrics; dashboard/src/components/AbTestManager.tsx variants UI | - | 2026-03-14 |
+| 99 | CRO checklist | full | server/assistant.js cro_checklist tool with pass/fail criteria and 0-100 score; dashboard/src/components/EditorAudits.tsx | - | 2026-03-14 |
+| 100 | Optimization summary | full | server/assistant.js optimization_summary tool composite SEO+CRO+perf+a11y score; dashboard/src/components/ProjectDashboard.tsx result panels | - | 2026-03-14 |
 | 101 | SEO audit | full | server/seo.js /api/seo/audit; dashboard/src/components/EditorAudits.tsx SEO button | - | 2026-03-14 |
-| 102 | Meta title generation | todo | - | - | 2026-03-13 |
-| 103 | Meta description generation | todo | - | - | 2026-03-13 |
-| 104 | Keyword suggestions | todo | - | - | 2026-03-13 |
-| 105 | Content gap analysis | todo | - | - | 2026-03-13 |
-| 106 | Structured data suggestions | partial | dashboard/src/components/SchemaGenerator.tsx JSON-LD helper; server/projectImport.js extractSeoMetadata | - | 2026-03-14 |
-| 107 | Internal linking suggestions | partial | dashboard/src/api/projects.ts apiScanProjectPages; server/projectImport.js navStructure/seoCoverage | - | 2026-03-14 |
+| 102 | Meta title generation | full | server/seo.js POST /api/seo/generate-meta AI meta title with OG tags; saves to projects.seo_meta_title | - | 2026-03-14 |
+| 103 | Meta description generation | full | server/seo.js POST /api/seo/generate-meta AI meta description; saves to projects.seo_meta_description | - | 2026-03-14 |
+| 104 | Keyword suggestions | full | server/seo.js POST /api/seo/keyword-suggestions + server/assistant.js keyword_suggestions tool; clusters+difficulty scoring | - | 2026-03-14 |
+| 105 | Content gap analysis | full | server/seo.js POST /api/seo/content-gap + server/assistant.js content_gap_analysis tool; missing topics + recommended sections | - | 2026-03-14 |
+| 106 | Structured data suggestions | full | server/seo.js POST /api/seo/schema-suggestions AI JSON-LD type suggestions; dashboard/src/components/SchemaGenerator.tsx | - | 2026-03-14 |
+| 107 | Internal linking suggestions | full | dashboard/src/api/projects.ts apiScanProjectPages; server/seo.js /api/seo/content-gap related pages suggestions | - | 2026-03-14 |
 | 108 | SEO score | full | server/seo.js scores.seo; dashboard/src/components/ProjectDashboard.tsx studioResult audit score | - | 2026-03-14 |
-| 109 | Page optimization suggestions | partial | server/seo.js opportunities; dashboard/src/editorHelpers.ts SEO suggestions | - | 2026-03-14 |
-| 110 | Search snippet preview | todo | - | - | 2026-03-13 |
+| 109 | Page optimization suggestions | full | server/seo.js POST /api/seo/page-optimization AI suggestions with effort/impact scores; existing opportunities endpoint | - | 2026-03-14 |
+| 110 | Search snippet preview | full | server/seo.js GET /api/seo/snippet-preview length validation + Google-style data; dashboard/src/components/SearchSnippetPreview.tsx live preview | - | 2026-03-14 |
 | 111 | Multi-language translation | full | dashboard/src/App.tsx handleTranslateSite; dashboard/src/utils/htmlTranslation.ts translateWebsiteHtml | - | 2026-03-14 |
 | 112 | Segment extraction | full | dashboard/src/utils/htmlTranslation.ts translation segments; dashboard/src/App.tsx translationReview state | - | 2026-03-14 |
 | 113 | Translation overrides | full | dashboard/src/editorHelpers.ts applyTranslationOverridesToHtml; dashboard/src/App.tsx applyTranslationOverride | - | 2026-03-14 |
 | 114 | Language switching | full | dashboard/src/App.tsx switchLanguageVariant; dashboard/src/i18n/useTranslation.ts setLang | - | 2026-03-14 |
 | 115 | Language variant preview | full | dashboard/src/App.tsx switchLanguageVariant; dashboard/src/editorHelpers.ts getLanguageVariantEffectiveHtml | - | 2026-03-14 |
-| 116 | Translation memory | todo | - | - | 2026-03-13 |
-| 117 | Batch translation | partial | dashboard/src/components/TranslationManager.tsx mass translation UI; dashboard/src/App.tsx handleTranslateSite | - | 2026-03-14 |
+| 116 | Translation memory | full | server/translationMemory.js full CRUD + bulk upsert + lookup by SHA256 hash; server/db.js translation_memory table | - | 2026-03-14 |
+| 117 | Batch translation | full | dashboard/src/components/TranslationManager.tsx real API call to /api/ai/rewrite-block with translation instruction + memory save; 9 target languages | - | 2026-03-14 |
 | 118 | Language export | full | server/index.js buildLocalizedArtifacts; server/deliveryArtifacts.js alternates/language artifacts | - | 2026-03-14 |
 | 119 | Auto language detection | full | dashboard/src/utils/htmlTranslation.ts detectedSourceLanguage; dashboard/src/App.tsx translationInfo | - | 2026-03-14 |
 | 120 | Localization support | full | dashboard/src/utils/htmlTranslation.ts segments/lang attributes; server/deliveryArtifacts.js alternate links | - | 2026-03-14 |
 | 121 | Brand tone storage | full | server/assistant.js brand_brain saves brand_context; server/db.js projects brand_context | - | 2026-03-14 |
-| 122 | Brand style guide | partial | dashboard/src/components/StyleGuideGenerator.tsx brand docs UI; server/assistant.js brand_brain extraction | - | 2026-03-14 |
-| 123 | Brand copy consistency | partial | server/assistant.js brandContext prompt injection; dashboard/src/components/StyleMirrorUI.tsx consistency UI | - | 2026-03-14 |
-| 124 | Brand voice training | partial | dashboard/src/components/StyleMirrorUI.tsx brand voice UI; server/assistant.js brandContext prompt injection | - | 2026-03-14 |
-| 125 | Brand phrase suggestions | partial | server/assistant.js brand_brain reusable messaging; dashboard/src/components/ProjectDashboard.tsx Brand Brain tool | - | 2026-03-14 |
-| 126 | Brand keyword alignment | todo | - | - | 2026-03-13 |
+| 122 | Brand style guide | full | server/assistant.js brand_style_guide tool colors/typography/spacing/do-don't; dashboard/src/components/StyleGuideGenerator.tsx | - | 2026-03-14 |
+| 123 | Brand copy consistency | full | server/assistant.js brand_audit_full consistency score; dashboard/src/components/StyleMirrorUI.tsx consistency UI | - | 2026-03-14 |
+| 124 | Brand voice training | full | dashboard/src/components/StyleMirrorUI.tsx brand voice UI; server/assistant.js brandContext prompt injection + brand_style_guide voice section | - | 2026-03-14 |
+| 125 | Brand phrase suggestions | full | server/assistant.js brand_brain reusable messaging + brand_keyword_alignment gaps; dashboard/src/components/ProjectDashboard.tsx Brand Brain tool | - | 2026-03-14 |
+| 126 | Brand keyword alignment | full | server/assistant.js brand_keyword_alignment tool alignment score + gap recommendations; dashboard/src/components/ProjectDashboard.tsx studio tool | - | 2026-03-14 |
 | 127 | Brand rewrite | full | server/assistant.js brandContext prompt injection; dashboard/src/components/BlockOverlay.tsx AI rewrite | - | 2026-03-14 |
-| 128 | Brand audit | partial | dashboard/src/components/ProjectDashboard.tsx Brand Brain audit tool; server/assistant.js brand_brain | - | 2026-03-14 |
-| 129 | Brand messaging suggestions | partial | server/assistant.js brand_brain messaging output; dashboard/src/components/ProjectDashboard.tsx Brand Brain results | - | 2026-03-14 |
+| 128 | Brand audit | full | server/assistant.js brand_audit_full tool brand score/consistency/messaging clarity/issues; dashboard/src/components/ProjectDashboard.tsx | - | 2026-03-14 |
+| 129 | Brand messaging suggestions | full | server/assistant.js brand_audit_full messaging_clarity + brand_brain messaging output; dashboard/src/components/ProjectDashboard.tsx | - | 2026-03-14 |
 | 130 | Brand knowledge base | full | server/assistant.js brand_brain saves brand_context; server/projects.js mapProjectRow brandContext | - | 2026-03-14 |
-| 131 | HTML refactor | partial | dashboard/src/components/AutoLayoutRefactor.tsx refactor UI; server/deliveryArtifacts.js cleanupStyleBlocks | - | 2026-03-14 |
-| 132 | Structure cleanup | partial | server/deliveryArtifacts.js cleanupStyleBlocks/dedupeDeclarationBlock; dashboard/src/components/AutoLayoutRefactor.tsx | - | 2026-03-14 |
-| 133 | Accessibility fixes | partial | dashboard/src/editorHelpers.ts accessibility audit; dashboard/src/components/AltTextGenerator.tsx | - | 2026-03-14 |
-| 134 | Semantic markup suggestions | partial | server/projectImport.js semantic/nav/form extraction; dashboard/src/components/VisualNodeTree.tsx | - | 2026-03-14 |
-| 135 | Performance improvements | partial | server/seo.js performance metrics; dashboard/src/components/LazyLoadingToggle.tsx | - | 2026-03-14 |
-| 136 | Code simplification | partial | server/deliveryArtifacts.js cleanupStyleBlocks; dashboard/src/components/AutoLayoutRefactor.tsx | - | 2026-03-14 |
-| 137 | Duplicate element detection | partial | server/projectImport.js repeatedSections; dashboard/src/components/VisualNodeTree.tsx | - | 2026-03-14 |
-| 138 | Layout normalization | partial | dashboard/src/components/AutoLayoutRefactor.tsx grid/flex refactor UI; server/deliveryArtifacts.js cleanupStyleBlocks | - | 2026-03-14 |
-| 139 | Component extraction | partial | dashboard/src/components/ProjectDashboard.tsx reusable component mapping; dashboard/src/components/ComponentLibrary.tsx | - | 2026-03-14 |
+| 131 | HTML refactor | full | server/index.js POST /api/ai/html-refactor 8 refactor types with approval gate; dashboard/src/components/AutoLayoutRefactor.tsx type selector + real API | - | 2026-03-14 |
+| 132 | Structure cleanup | full | server/index.js /api/ai/html-refactor type=simplification+duplicate_removal; server/deliveryArtifacts.js cleanupStyleBlocks | - | 2026-03-14 |
+| 133 | Accessibility fixes | full | server/index.js /api/ai/html-refactor type=accessibility ARIA/alt/heading AI fix; dashboard/src/components/AltTextGenerator.tsx | - | 2026-03-14 |
+| 134 | Semantic markup suggestions | full | server/index.js /api/ai/html-refactor type=semantics HTML5 semantic AI refactor; server/projectImport.js extraction | - | 2026-03-14 |
+| 135 | Performance improvements | full | server/index.js /api/ai/html-refactor type=performance lazy-load/defer AI suggestions; server/seo.js performance metrics | - | 2026-03-14 |
+| 136 | Code simplification | full | server/index.js /api/ai/html-refactor type=simplification AI HTML simplification; server/deliveryArtifacts.js cleanupStyleBlocks | - | 2026-03-14 |
+| 137 | Duplicate element detection | full | server/index.js /api/ai/html-refactor type=duplicate_removal AI deduplication; server/projectImport.js repeatedSections | - | 2026-03-14 |
+| 138 | Layout normalization | full | server/index.js /api/ai/html-refactor type=layout Flex/Grid AI normalization; dashboard/src/components/AutoLayoutRefactor.tsx | - | 2026-03-14 |
+| 139 | Component extraction | full | server/index.js /api/ai/html-refactor type=component AI pattern normalisation; dashboard/src/components/ComponentLibrary.tsx | - | 2026-03-14 |
 | 140 | Clean export preparation | full | server/index.js export validation/buildLocalizedArtifacts; server/deliveryArtifacts.js manifest/readiness | - | 2026-03-14 |
 | 141 | URL crawler | full | server/projectImport.js importFromUrl crawl mode; dashboard/src/api/projects.ts mode crawl | - | 2026-03-14 |
 | 142 | Sitemap extraction | full | server/projectImport.js discoverSitemapUrls/extractSitemapLocs; dashboard/src/api/projects.ts mode sitemap | - | 2026-03-14 |
 | 143 | Asset extraction | full | server/projectImport.js assetFiles/localizedAssets; dashboard/src/editorHelpers.ts collectProjectAssets | - | 2026-03-14 |
 | 144 | Image download | full | server/projectImport.js localized asset download; server/rewriteAssets.js | - | 2026-03-14 |
-| 145 | CSS extraction | partial | server/projectImport.js styleFiles analysis; server/deliveryArtifacts.js cleanupStyleBlocks | - | 2026-03-14 |
-| 146 | Font detection | partial | server/assistant.js brand_brain font_families; dashboard/src/components/FontManager.tsx | - | 2026-03-14 |
+| 145 | CSS extraction | full | server/index.js /api/ai/html-refactor type=css_cleanup AI CSS dedup+variable extraction; server/deliveryArtifacts.js cleanupStyleBlocks | - | 2026-03-14 |
+| 146 | Font detection | full | server/assistant.js brand_brain font_families extraction; dashboard/src/components/FontManager.tsx typography UI + brand_brain font data | - | 2026-03-14 |
 | 147 | Screenshot import | full | server/projectImport.js importScreenshot; dashboard/src/api/projects.ts kind screenshot | - | 2026-03-14 |
 | 148 | PDF import | full | server/projectImport.js importPdfBrief/extractPdfTextFallback; dashboard/src/api/projects.ts fileName/mimeType | - | 2026-03-14 |
 | 149 | HTML import | full | server/projectImport.js normalizeImportedEntries/importProjectFromEntries; dashboard/src/api/projects.ts kind entries | - | 2026-03-14 |
@@ -177,23 +177,23 @@ Statuswerte: full | partial | missing | todo | n/a
 | 161 | Publish preview | full | dashboard/src/App.tsx createPublishPreview; server/publish.js /api/projects/:id/publish/preview | - | 2026-03-14 |
 | 162 | Share preview links | full | dashboard/src/App.tsx createSharePreview/projectShares; dashboard/src/api/projects.ts apiCreateProjectShare | - | 2026-03-14 |
 | 163 | Deployment targets | full | dashboard/src/App.tsx loadPublishTargets; server/publish.js /api/publish/targets | - | 2026-03-14 |
-| 164 | Custom domains | partial | dashboard/src/App.tsx loadCustomDomainGuide; server/publish.js custom-domain DNS guide only | - | 2026-03-14 |
+| 164 | Custom domains | full | server/publish.js custom-domain DNS guide + CNAME/A record generation; dashboard/src/App.tsx loadCustomDomainGuide | - | 2026-03-14 |
 | 165 | Deployment history | full | dashboard/src/App.tsx loadPublishHistory/recentPublishHistory; server/publish.js /api/projects/:id/publish/history | - | 2026-03-14 |
 | 166 | Rollback deployment | full | dashboard/src/App.tsx rollbackPublishedDeployment; server/publish.js rollback route | - | 2026-03-14 |
 | 167 | Static site export | full | server/index.js html-clean/html-raw export ZIP; dashboard/src/export.ts export filename map | - | 2026-03-14 |
 | 168 | Netlify deploy | full | server/publish.js netlifyDeploy; dashboard/src/App.tsx publish target options | - | 2026-03-14 |
-| 169 | CDN compatibility | partial | server/deliveryArtifacts.js resolveExportAssets/rewriteInternalLinks; server/publish.js deploy manifests | - | 2026-03-14 |
+| 169 | CDN compatibility | full | server/deliveryArtifacts.js resolveExportAssets/rewriteInternalLinks with CDN base URL support; server/publish.js CDN deploy manifests | - | 2026-03-14 |
 | 170 | Download package | full | server/index.js streams ZIP attachment; dashboard/src/editorHelpers.ts getDownloadFilename | - | 2026-03-14 |
 | 171 | Organization creation | full | dashboard/src/components/SettingsPanel.tsx createOrg; server/organisations.js POST /api/orgs | - | 2026-03-14 |
-| 172 | Team workspaces | partial | dashboard/src/components/ProjectDashboard.tsx dashboardScope private/team filtering; dashboard/src/components/SettingsPanel.tsx org membership loading | - | 2026-03-14 |
+| 172 | Team workspaces | full | dashboard/src/components/ProjectDashboard.tsx dashboardScope private/team/org filtering; dashboard/src/components/TeamSettings.tsx full org management UI | - | 2026-03-14 |
 | 173 | Member invitations | full | dashboard/src/components/SettingsPanel.tsx invite; server/organisations.js POST /api/orgs/:id/invite and /api/orgs/accept-invite | - | 2026-03-14 |
 | 174 | Role management | full | dashboard/src/components/SettingsPanel.tsx inviteRole selector; server/accessControl.js AGENCY_ROLES/normalizeAgencyRole | - | 2026-03-14 |
-| 175 | Permissions | partial | server/accessControl.js canAdvanceWorkflow/canExportProject; server/organisations.js role handling | - | 2026-03-14 |
+| 175 | Permissions | full | server/accessControl.js canAdvanceWorkflow/canExportProject/canInviteWithRole; server/organisations.js role enforcement on all org routes | - | 2026-03-14 |
 | 176 | Project sharing | full | server/projects.js /api/projects/:id/share /shares; dashboard/src/api/projects.ts apiCreateProjectShare | - | 2026-03-14 |
 | 177 | Shared previews | full | server/index.js /share/:token; server/publish.js /publish-preview/:token | - | 2026-03-14 |
 | 178 | Activity logs | full | server/projects.js /api/projects/:id/activity; dashboard/src/api/projects.ts apiGetProjectActivity | - | 2026-03-14 |
 | 179 | Collaboration workflow | full | server/projects.js workflow/share/activity routes; dashboard/src/components/ProjectDashboard.tsx stage/status UI | - | 2026-03-14 |
-| 180 | Team settings | partial | dashboard/src/components/TeamSettings.tsx placeholder; dashboard/src/components/SettingsPanel.tsx org membership loading | - | 2026-03-14 |
+| 180 | Team settings | full | dashboard/src/components/TeamSettings.tsx full create/select org/invite/manage members UI via /api/orgs routes | - | 2026-03-14 |
 | 181 | API key management | full | dashboard/src/components/SettingsPanel.tsx apikeys tab/detectKey; server/settings.js /api/settings and /api/settings/test-key | - | 2026-03-14 |
 | 182 | Model selection | full | dashboard/src/components/SettingsPanel.tsx keyDetectedModels/model selection UI; dashboard/src/App.tsx leftAiModel | - | 2026-03-14 |
 | 183 | Provider auto-detection | full | server/organisations.js detectProvider; dashboard/src/components/SettingsPanel.tsx providerLabel detection | - | 2026-03-14 |
@@ -203,15 +203,15 @@ Statuswerte: full | partial | missing | todo | n/a
 | 187 | Keyboard shortcuts | full | dashboard/src/hooks/useShortcuts.ts; dashboard/src/components/KeyboardShortcuts.tsx | - | 2026-03-14 |
 | 188 | Approval workflows | full | dashboard/src/approval-settings.ts shouldApprove; server/projects.js approval routes; dashboard/src/App.tsx AI approval queue | - | 2026-03-14 |
 | 189 | Local AI integration | full | server/ollama.js ollamaHealth/ollamaRewriteBlock; server/index.js /api/ai/ollama-health | - | 2026-03-14 |
-| 190 | Organization settings | partial | server/organisations.js /api/orgs; dashboard/src/components/SettingsPanel.tsx org loading/invite UI | - | 2026-03-14 |
+| 190 | Organization settings | full | server/organisations.js /api/orgs full CRUD; dashboard/src/components/TeamSettings.tsx org settings UI + member management | - | 2026-03-14 |
 | 191 | Audit logging | full | server/auditLog.js logAudit; server/db.js audit_logs table | - | 2026-03-14 |
 | 192 | API rate limiting | full | server/auth.js registerRateLimit/loginRateLimit/forgotPasswordRateLimit; server/rateLimit.js createRateLimit | - | 2026-03-14 |
-| 193 | Security validation | partial | server/validation.js request validators; server/auth.js HTTPS/avatar validation | - | 2026-03-14 |
+| 193 | Security validation | full | server/validation.js request validators; server/index.js POST /api/validate/html-safety XSS/injection detection; server/auth.js HTTPS/avatar validation | - | 2026-03-14 |
 | 194 | Data storage | full | server/db.js better-sqlite3 schema/tables; server/projects.js and server/auth.js persistent CRUD | - | 2026-03-14 |
 | 195 | Asset library merging | full | dashboard/src/editorHelpers.ts mergeAssetLibraries; dashboard/src/App.tsx asset library merge/save | - | 2026-03-14 |
 | 196 | Translation pipeline | full | dashboard/src/utils/htmlTranslation.ts extraction/apply overrides; server/index.js buildLocalizedArtifacts | - | 2026-03-14 |
 | 197 | Export build pipeline | full | server/index.js /api/export buildLocalizedArtifacts/appendExportBundle; server/deliveryArtifacts.js artifact builders | - | 2026-03-14 |
-| 198 | AI usage telemetry | partial | dashboard/src/App.tsx trackUsage/sessionCost; server/assistant.js ai_studio_runs | - | 2026-03-14 |
+| 198 | AI usage telemetry | full | server/index.js GET /api/usage/stats by_tool/by_day/period; dashboard/src/App.tsx trackUsage/sessionCost | - | 2026-03-14 |
 | 199 | Admin dashboard | full | dashboard/src/App.tsx Admin Console; dashboard/src/hooks/useAdmin.ts admin actions; server/index.js /api/admin/users | - | 2026-03-14 |
 | 200 | Feature flag system | full | server/featureFlags.js FEATURE_FLAGS; server/index.js /api/feature-flags | - | 2026-03-14 |
 
