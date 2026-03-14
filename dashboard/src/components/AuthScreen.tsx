@@ -13,7 +13,7 @@ import {
 import { toast } from "./Toast"
 import { errMsg } from "../utils/errMsg"
 
-export default function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
+export default function AuthScreen({ onAuth, onBack }: { onAuth: (u: User) => void; onBack?: () => void }) {
   const [mode, setMode] = useState<"login" | "register" | "forgot">("login")
   const [resetSent, setResetSent] = useState(false)
   const [email, setEmail] = useState("")
@@ -129,6 +129,11 @@ export default function AuthScreen({ onAuth }: { onAuth: (u: User) => void }) {
     <div className="draft-auth-screen">
       <div className="draft-auth-glow" />
       <div className="draft-auth-card">
+        {onBack ? (
+          <button className="draft-auth-back" type="button" onClick={onBack}>
+            ← Back to landing
+          </button>
+        ) : null}
         <div className="draft-auth-logo-wrap">
           <div className="draft-auth-logo-mark">
             <svg width="18" height="18" viewBox="0 0 12 12" fill="none" aria-hidden="true">

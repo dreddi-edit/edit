@@ -59,6 +59,7 @@ import { COMPONENT_LIBRARY } from './components/ComponentLibrary';
 import { useShortcuts } from "./hooks/useShortcuts"
 import { useTranslation } from "./i18n/useTranslation"
 import { detectSitePlatform, getPlatformMeta, normalizePlatform, type SitePlatform } from "./utils/sitePlatform"
+import { buildAvailableExecutableModels } from "./utils/modelCatalog"
 import {
   TOP_TRANSLATION_LANGUAGES,
   translateWebsiteHtml,
@@ -137,6 +138,10 @@ type GlobalStyleOverrides = {
 }
 
 export default function App() {
+  const defaultAiModels = [
+    { value: "auto", label: "Auto" },
+    ...buildAvailableExecutableModels().map((model) => ({ value: model.id, label: model.label })),
+  ]
   const {
     adminUsers,
     adminUserPlans,
@@ -156,18 +161,7 @@ export default function App() {
     const normalized = normalizePlatform(platform)
     return normalized !== "unknown" ? normalized : detectSitePlatform(pageUrl, html)
   }
-  const AI_MODELS = [
-    { value: "auto", label: "Auto" },
-    { value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
-    { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5" },
-    { value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5" },
-    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-    { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-    { value: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite" },
-    { value: "groq:llama-3.1-8b-instant", label: "Groq Llama 3.1 8B Instant" },
-    { value: "groq:llama-3.3-70b-versatile", label: "Groq Llama 3.3 70B Versatile" },
-    { value: "ollama:qwen2.5-coder:7b", label: "Ollama Qwen 2.5 Coder 7B" },
-  ]
+  const [availableAiModels, setAvailableAiModels] = useState(defaultAiModels)
 
   const iframeRef = useRef<HTMLIFrameElement | null>(null)
   const comparisonIframeRef = useRef<HTMLIFrameElement | null>(null)
@@ -231,6 +225,39 @@ export default function App() {
       else { setAuthUser(null); setView("landing") }
     })
   }, [])
+
+  useEffect(() => {
+    if (!authUser || authUser === "loading") {
+      setAvailableAiModels(defaultAiModels)
+      return
+    }
+
+    let cancelled = false
+
+    void apiFetch<{ ok?: boolean; keys?: Array<{ provider: string; detected_models: Array<{ value: string; label: string }> }> }>("/api/keys")
+      .then((data) => {
+        if (cancelled) return
+        const merged = buildAvailableExecutableModels(
+          (data?.keys || []).flatMap((key) =>
+            Array.isArray(key.detected_models)
+              ? key.detected_models.map((model) => ({
+                  value: String(model.value || "").trim(),
+                  label: String(model.label || "").trim(),
+                  provider: key.provider,
+                }))
+              : [],
+          ),
+        )
+        setAvailableAiModels([{ value: "auto", label: "Auto" }, ...merged.map((model) => ({ value: model.id, label: model.label }))])
+      })
+      .catch(() => {
+        if (!cancelled) setAvailableAiModels(defaultAiModels)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [authUser])
 
   const trackUsage = (payload: unknown) => {
     if (!payload || typeof payload !== "object") return;
@@ -2719,7 +2746,7 @@ useEffect(() => {
   // Auth screen
   if (view === "auth") return (
     <>
-      <AuthScreen onAuth={user => { setAuthUser(user); setView("dashboard") }} />
+      <AuthScreen onAuth={user => { setAuthUser(user); setView("dashboard") }} onBack={() => setView("landing")} />
 
 <ToastContainer />
     </>
@@ -3188,7 +3215,7 @@ useEffect(() => {
           setLeftAiTone={setLeftAiTone}
           leftAiPrompt={leftAiPrompt}
           setLeftAiPrompt={setLeftAiPrompt}
-          AI_MODELS={AI_MODELS}
+          AI_MODELS={availableAiModels}
           leftAiRunning={leftAiRunning}
           batchAiRunning={batchAiRunning}
           runLeftAiPrompt={runLeftAiPrompt}

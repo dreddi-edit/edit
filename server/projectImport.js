@@ -78,6 +78,29 @@ const BLOCKED_IMPORT_HEADERS = new Set([
 ])
 const FIGMA_FRAME_HINT_PATTERN = /(figma|frame|desktop|mobile|tablet|screen|artboard|variant)/i
 const IMPORT_ANALYSIS_MODEL = "claude-sonnet-4-6"
+const IMPORT_ANALYSIS_LADDER = [
+  {
+    tier: "weak",
+    candidates: [
+      { provider: "gemini", model: "gemini-2.5-flash-lite" },
+      { provider: "anthropic", model: "claude-haiku-4-5-20251001" },
+    ],
+  },
+  {
+    tier: "standard",
+    candidates: [
+      { provider: "gemini", model: "gemini-2.5-flash" },
+      { provider: "anthropic", model: "claude-sonnet-4-5-20250929" },
+    ],
+  },
+  {
+    tier: "strong",
+    candidates: [
+      { provider: "anthropic", model: "claude-sonnet-4-6" },
+      { provider: "gemini", model: "gemini-2.5-pro" },
+    ],
+  },
+]
 
 function cleanText(value) {
   return String(value || "").replace(/\s+/g, " ").trim()
@@ -2482,6 +2505,99 @@ async function callImportAnalysisModel({ prompt, userId = null, model = IMPORT_A
   throw new Error("No AI provider key configured for import analysis (Anthropic or Gemini required)")
 }
 
+function hasImportProviderKey(provider, userId = null) {
+  if (provider === "anthropic") return Boolean(getProviderApiKey("anthropic", { userId }))
+  if (provider === "gemini") return Boolean(getProviderApiKey("gemini", { userId }))
+  return false
+}
+
+async function callImportAnalysisTier({ prompt, userId = null, maxTokens = 900, temperature = 0.1, tierIndex = 0 }) {
+  const tier = IMPORT_ANALYSIS_LADDER[Math.max(0, Math.min(IMPORT_ANALYSIS_LADDER.length - 1, Number(tierIndex) || 0))]
+  const errors = []
+
+  for (const candidate of tier.candidates) {
+    if (!hasImportProviderKey(candidate.provider, userId)) continue
+    try {
+      const text = await callImportAnalysisModel({
+        prompt,
+        userId,
+        model: candidate.model,
+        maxTokens,
+        temperature,
+      })
+      if (!cleanText(text)) throw new Error("Model returned empty output")
+      return {
+        text,
+        provider: candidate.provider,
+        model: candidate.model,
+        tier: tier.tier,
+        tierIndex: Math.max(0, Math.min(IMPORT_ANALYSIS_LADDER.length - 1, Number(tierIndex) || 0)),
+      }
+    } catch (error) {
+      errors.push(`${candidate.provider}:${candidate.model}:${cleanText(error?.message || "error") || "error"}`)
+    }
+  }
+
+  throw new Error(errors.length ? errors.join(" | ") : `No ${tier.tier} import-analysis model available`)
+}
+
+function isUniversalAnalysisGoodEnough(parsed, preview) {
+  if (!parsed || typeof parsed !== "object") return { ok: false, reason: "invalid_json" }
+
+  const projectType = cleanText(parsed.projectType || "")
+  const platform = cleanText(parsed.platform || "").toLowerCase()
+  const confidence = cleanText(parsed.confidence || "").toLowerCase()
+  const overview = cleanText(parsed.overview || "")
+  const homepagePath = cleanText(parsed.homepagePath || "")
+  const keyFindings = dedupeCleanList(parsed.keyFindings || [], 8)
+  const contentSources = dedupeCleanList(parsed.contentSources || [], 12)
+  const supportFiles = dedupeCleanList(parsed.supportFiles || [], 12)
+  const warnings = dedupeCleanList(parsed.warnings || [], 12)
+
+  let score = 0
+  if (projectType.length >= 3) score += 1
+  if (["wordpress", "shopify", "static", "other"].includes(platform)) score += 1
+  if (["low", "medium", "high"].includes(confidence)) score += 1
+  if (overview.length >= 24) score += 1
+  if (homepagePath.startsWith("/")) score += 1
+  if (keyFindings.length || contentSources.length || supportFiles.length || warnings.length) score += 1
+
+  const previewPages = Array.isArray(preview?.pages) ? preview.pages.length : Number(preview?.analysis?.pageCount || 0)
+  if (previewPages > 1 && !homepagePath.startsWith("/")) {
+    return { ok: false, reason: "missing_homepage" }
+  }
+
+  if (score >= 4) return { ok: true, reason: "good_enough" }
+  return { ok: false, reason: `low_score_${score}` }
+}
+
+async function runUniversalImportAnalysisWithUpgrade({ prompt, userId = null, maxEscalationSteps = 1 }) {
+  const cappedEscalation = Math.max(0, Math.min(2, Number(maxEscalationSteps) || 0))
+  const attempts = []
+  let tierIndex = 0
+  let lastError = null
+
+  for (let step = 0; step <= cappedEscalation; step += 1) {
+    try {
+      const result = await callImportAnalysisTier({
+        prompt,
+        userId,
+        maxTokens: 900,
+        temperature: tierIndex === 0 ? 0.12 : 0.08,
+        tierIndex,
+      })
+      attempts.push(result)
+      return { attempts, final: result }
+    } catch (error) {
+      lastError = error
+      if (tierIndex >= IMPORT_ANALYSIS_LADDER.length - 1) break
+      tierIndex += 1
+    }
+  }
+
+  throw lastError || new Error("Import analysis failed")
+}
+
 function dedupeCleanList(values, max = 20) {
   if (!Array.isArray(values)) return []
   return Array.from(
@@ -2539,13 +2655,38 @@ async function maybeApplyUniversalImportAnalysis(preview, payload = {}, options 
   if (!options.userId && !options.forceAiAnalysis) return preview
   const prompt = buildUniversalImportAnalysisPrompt(preview, payload)
   try {
-    const generated = await callImportAnalysisModel({
+    const maxEscalationSteps = options.importAnalysisMaxEscalation == null ? 1 : options.importAnalysisMaxEscalation
+    const attempts = []
+
+    let parsed = null
+    let used = null
+    let upgradeReason = ""
+
+    const firstPass = await runUniversalImportAnalysisWithUpgrade({
       prompt,
       userId: options.userId,
-      maxTokens: 900,
-      temperature: 0.1,
+      maxEscalationSteps: 0,
     })
-    const parsed = parseJsonObjectCandidate(generated)
+    used = firstPass.final
+    attempts.push(...firstPass.attempts)
+    parsed = parseJsonObjectCandidate(firstPass.final.text)
+
+    const quality = isUniversalAnalysisGoodEnough(parsed, preview)
+
+    if (!quality.ok && Number(maxEscalationSteps || 0) > 0 && used.tierIndex < IMPORT_ANALYSIS_LADDER.length - 1) {
+      const upgraded = await callImportAnalysisTier({
+        prompt,
+        userId: options.userId,
+        maxTokens: 900,
+        temperature: 0.08,
+        tierIndex: used.tierIndex + 1,
+      })
+      used = upgraded
+      attempts.push(upgraded)
+      parsed = parseJsonObjectCandidate(upgraded.text)
+      upgradeReason = quality.reason
+    }
+
     if (!parsed || typeof parsed !== "object") return preview
 
     const normalizedPlatform = cleanText(parsed.platform || "").toLowerCase()
@@ -2570,7 +2711,12 @@ async function maybeApplyUniversalImportAnalysis(preview, payload = {}, options 
     if (supportFiles.length) nextAnalysis.supportFiles = supportFiles
 
     nextAnalysis.importClassifier = {
-      model: IMPORT_ANALYSIS_MODEL,
+      model: cleanText(used?.model || IMPORT_ANALYSIS_MODEL) || IMPORT_ANALYSIS_MODEL,
+      provider: cleanText(used?.provider || "") || undefined,
+      tier: cleanText(used?.tier || "") || undefined,
+      attempts: attempts.length,
+      upgraded: attempts.length > 1,
+      upgradeReason: cleanText(upgradeReason || "") || undefined,
       uploadKind: cleanText(parsed.uploadKind || payload.kind || "unknown") || "unknown",
       keyFindings: dedupeCleanList(parsed.keyFindings || [], 8),
       analyzedAt: new Date().toISOString(),

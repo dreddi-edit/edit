@@ -11,7 +11,12 @@ import { fetchWithAuth } from "../api/client"
 import type { StripeSubscriptionPlan, UserInvoice } from "../api/types"
 import { getRequireApproval, getApprovalThreshold, setRequireApproval, setApprovalThreshold } from "../approval-settings"
 import { AVAILABLE_UI_LANGUAGES, useTranslation, type Language } from "../i18n/useTranslation"
-import { MODEL_CATEGORIES, getCategoryModels, type ModelCategoryId } from "../utils/modelCatalog"
+import {
+  MODEL_CATEGORIES,
+  buildAvailableModels,
+  getActiveModelsByCategory,
+  type ModelCategoryId,
+} from "../utils/modelCatalog"
 import { persistThemeChoice, resolveThemePreference } from "../utils/theme"
 import {
   analyzePageSpeed,
@@ -201,7 +206,11 @@ export default function SettingsPanel({
     return Array.from(map.values())
   }, [myKeys])
 
-  const keyDetectedModelSet = useMemo(() => new Set(keyDetectedModels.map((model) => model.value)), [keyDetectedModels])
+  const availableModels = useMemo(() => buildAvailableModels(keyDetectedModels), [keyDetectedModels])
+  const availableModelGroups = useMemo(
+    () => getActiveModelsByCategory(availableModels, effectiveSettings.disabled_models),
+    [availableModels, effectiveSettings.disabled_models],
+  )
 
   useEffect(() => {
     setLanguageChoice(lang)
@@ -838,9 +847,9 @@ export default function SettingsPanel({
                 <div className="draft-settings-model-browser">
                   {keyDetectedModels.length ? (
                     <div className="draft-settings-model-availability">
-                      <strong>{keyDetectedModels.length} models detected from your API keys</strong>
+                      <strong>{availableModels.length} executable models available right now</strong>
                       <span>
-                        The list below prioritizes models your saved keys can actually call, plus curated fallbacks.
+                        The list below merges working models from your saved keys with the app's executable model catalog.
                       </span>
                     </div>
                   ) : null}
@@ -860,14 +869,8 @@ export default function SettingsPanel({
 
                   {modelBrowserOpen ? (
                     <div className="draft-settings-model-browser-body">
-                      {MODEL_CATEGORIES.map(category => {
-                        const categoryModels = getCategoryModels(category.id).filter((model) => {
-                          if (!keyDetectedModelSet.size) return true
-                          return keyDetectedModelSet.has(model.id) || model.provider === "ollama"
-                        })
-                        const activeCount = categoryModels.filter(
-                          model => !effectiveSettings.disabled_models.includes(model.id)
-                        ).length
+                      {availableModelGroups.map(category => {
+                        const categoryModels = availableModels.filter((model) => model.category === category.id)
 
                         return (
                           <div key={category.id} className="draft-settings-model-category">
@@ -881,7 +884,7 @@ export default function SettingsPanel({
                                 <span className="draft-settings-model-category-sub">{t(category.description)}</span>
                               </span>
                               <span className="draft-settings-model-category-meta">
-                                {activeCount}/{categoryModels.length}
+                                {category.models.length}/{category.activeCount}
                               </span>
                             </button>
 

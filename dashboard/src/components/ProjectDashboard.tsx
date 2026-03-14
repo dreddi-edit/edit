@@ -33,7 +33,11 @@ import {
   hasStudioAccess,
   type StudioToolId,
 } from "../utils/planAccess"
-import { getTopActiveModelsByCategory } from "../utils/modelCatalog"
+import {
+  buildAvailableModels,
+  getActiveModelsByCategory,
+  type Model,
+} from "../utils/modelCatalog"
 import { buildAutoImportPayload, collectDroppedUploadItems, summarizeImportPreview } from "../utils/projectImport"
 import { useShortcuts } from "../hooks/useShortcuts"
 import { applyThemeToDocument, hasExplicitThemePreference, persistThemeChoice, resolveThemePreference } from "../utils/theme"
@@ -45,7 +49,7 @@ const NOTES_KEY = "pd_dashboard_notes_v1"
 const ONBOARDING_KEY_PREFIX = "pd_dashboard_onboarding_v2"
 
 type DashboardStage = "all" | "draft" | "review" | "approved" | "shipped"
-type WorkspaceView = "ai-studio" | "projects" | "templates" | "exports"
+type WorkspaceView = "ai-studio" | "google-ai-suite" | "projects" | "templates" | "exports"
 type DashboardScope = "private" | "team"
 type TemplateFilter = "all" | "wordpress" | "shopify" | "webflow" | "other"
 type ExportFilter = "all" | "wp-placeholder" | "html-clean" | "ready" | "guarded"
@@ -72,6 +76,7 @@ type AIStudioService = {
   status: string
 }
 type SettingsSnapshot = { disabled_models: string[]; theme?: "dark" | "light"; theme_explicit?: boolean }
+type ApiKeySnapshot = { provider: string; detected_models: Array<{ value: string; label: string }> }
 type StudioAudit = {
   url: string
   scores: { performance: number; accessibility: number; seo: number; bestPractices: number }
@@ -291,6 +296,18 @@ const AI_STUDIO_SERVICES: AIStudioService[] = [
   },
 ]
 
+const GOOGLE_AI_SUITE_SERVICE_IDS: StudioToolId[] = [
+  "company-box",
+  "visual-product",
+  "funnel-generator",
+  "global-expansion",
+  "brand-brain",
+]
+
+const GOOGLE_AI_SUITE_SERVICES = AI_STUDIO_SERVICES.filter(service =>
+  GOOGLE_AI_SUITE_SERVICE_IDS.includes(service.id),
+)
+
 const STUDIO_TOOL_META: Record<StudioTool, StudioToolMeta> = {
   "company-box": {
     eyebrow: "Flagship",
@@ -490,15 +507,16 @@ const DASHBOARD_RUNTIME_STRINGS = Array.from(
       "Show checklist",
       "Hide checklist",
       "AI Studio",
+      "Google AI Suite",
       "Projects",
       "Exports",
       "Templates",
       "New project",
       "AI generator",
-      "SEO optimizer",
-      "SEO optimizer is currently in beta",
-      "Hosting",
-      "Hosting is currently in beta",
+      "SEO cockpit",
+      "SEO cockpit is coming soon",
+      "Cloud publish",
+      "Cloud publish is coming soon",
       "beta",
       "On",
       "Off",
@@ -533,6 +551,10 @@ const DASHBOARD_RUNTIME_STRINGS = Array.from(
       "+ New project",
       "+ Extract template",
       "Spending",
+      "Peak",
+      "Rising",
+      "Cooling",
+      "Stable",
       "Usage",
       "By model",
       "By task",
@@ -541,10 +563,12 @@ const DASHBOARD_RUNTIME_STRINGS = Array.from(
       "No notes yet.",
       "Add a note...",
       "No AI services match this view",
+      "No Google AI Suite workflows match this view",
       "No projects yet",
       "No templates yet",
       "No exports yet",
       "Try another filter or clear the search to reveal the full AI Studio catalog.",
+      "Try another filter or clear the search to reveal Google AI Suite workflows.",
       "Create a new project or use the AI generator to get started.",
       "Extract a site into a reusable template to fill this workspace.",
       "Export a project from the editor and it will show up here.",
@@ -2081,6 +2105,7 @@ export default function ProjectDashboard({
   const [notes, setNotes] = useState<NoteItem[]>(loadNotes)
   const [showOnboarding, setShowOnboarding] = useState(false)
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsSnapshot>({ disabled_models: [] })
+  const [availableModelsSnapshot, setAvailableModelsSnapshot] = useState<Model[]>(() => buildAvailableModels())
   const [newNote, setNewNote] = useState("")
   const [assignableMembers, setAssignableMembers] = useState<AssignableMember[]>([])
   const [loadingAssignableMembers, setLoadingAssignableMembers] = useState(false)
@@ -2229,7 +2254,7 @@ export default function ProjectDashboard({
   }, [])
 
   useEffect(() => {
-    if (activeWorkspace !== "ai-studio") return
+    if (activeWorkspace !== "ai-studio" && activeWorkspace !== "google-ai-suite") return
     void apiFetch<{ ok: boolean; runs: StudioRun[] }>("/api/studio/runs")
       .then((response) => {
         if (response?.ok) setStudioRuns(response.runs || [])
@@ -2284,6 +2309,8 @@ export default function ProjectDashboard({
   )
   const hasTeamMembers = acceptedTeamMembers.length > 0
   const teamScopeRequiresJoin = dashboardScope === "team" && !hasTeamMembers
+  const isStudioWorkspace = activeWorkspace === "ai-studio" || activeWorkspace === "google-ai-suite"
+  const studioWorkspaceServices = activeWorkspace === "google-ai-suite" ? GOOGLE_AI_SUITE_SERVICES : AI_STUDIO_SERVICES
   const scopedProjects = teamScopeRequiresJoin
     ? []
     : normalizedProjects.filter(project => {
@@ -2297,8 +2324,8 @@ export default function ProjectDashboard({
         }
         return hasOtherAssignee || !ownerIsCurrentUser
       })
-  const unlockedStudioServices = AI_STUDIO_SERVICES.filter(service => hasStudioAccess(plan, service.id))
-  const featuredStudioService = unlockedStudioServices[0] || AI_STUDIO_SERVICES[0]
+  const unlockedStudioServices = studioWorkspaceServices.filter(service => hasStudioAccess(plan, service.id))
+  const featuredStudioService = unlockedStudioServices[0] || studioWorkspaceServices[0]
   const effectiveProjects = scopedProjects
   const selectedStudioProject =
     typeof studioProjectId === "number" ? effectiveProjects.find(project => project.id === studioProjectId) : undefined
@@ -2391,6 +2418,16 @@ export default function ProjectDashboard({
       service.description.toLowerCase().includes(query)
     return matchesQuery && matchesAIStudioFilter(aiStudioFilter, service)
   })
+  const filteredGoogleAISuiteServices = GOOGLE_AI_SUITE_SERVICES.filter(service => {
+    const query = projectSearch.trim().toLowerCase()
+    const matchesQuery =
+      !query ||
+      service.name.toLowerCase().includes(query) ||
+      service.tagline.toLowerCase().includes(query) ||
+      service.description.toLowerCase().includes(query)
+    return matchesQuery && matchesAIStudioFilter(aiStudioFilter, service)
+  })
+  const filteredStudioServices = activeWorkspace === "google-ai-suite" ? filteredGoogleAISuiteServices : filteredAIStudioServices
 
   const counts = {
     all: effectiveProjects.length,
@@ -2423,9 +2460,18 @@ export default function ProjectDashboard({
     growth: AI_STUDIO_SERVICES.filter(service => service.category === "growth").length,
     autonomy: AI_STUDIO_SERVICES.filter(service => service.category === "autonomy").length,
   }
+  const googleAiSuiteCounts = {
+    all: GOOGLE_AI_SUITE_SERVICES.length,
+    creation: GOOGLE_AI_SUITE_SERVICES.filter(service => service.category === "creation").length,
+    optimization: GOOGLE_AI_SUITE_SERVICES.filter(service => service.category === "optimization").length,
+    growth: GOOGLE_AI_SUITE_SERVICES.filter(service => service.category === "growth").length,
+    autonomy: GOOGLE_AI_SUITE_SERVICES.filter(service => service.category === "autonomy").length,
+  }
   const activeItemsCount =
     activeWorkspace === "ai-studio"
       ? filteredAIStudioServices.length
+      : activeWorkspace === "google-ai-suite"
+      ? filteredGoogleAISuiteServices.length
       : activeWorkspace === "projects"
       ? filteredProjects.length
       : activeWorkspace === "templates"
@@ -2434,6 +2480,8 @@ export default function ProjectDashboard({
   const workspaceTitle =
     activeWorkspace === "ai-studio"
       ? rt("AI Studio")
+      : activeWorkspace === "google-ai-suite"
+      ? rt("Google AI Suite")
       : activeWorkspace === "projects"
       ? rt("Projects")
       : activeWorkspace === "templates"
@@ -2442,6 +2490,8 @@ export default function ProjectDashboard({
   const workspaceSummaryValue =
     activeWorkspace === "ai-studio"
       ? AI_STUDIO_SERVICES.length
+      : activeWorkspace === "google-ai-suite"
+      ? GOOGLE_AI_SUITE_SERVICES.length
       : activeWorkspace === "projects"
       ? effectiveProjects.length
       : activeWorkspace === "templates"
@@ -2450,6 +2500,8 @@ export default function ProjectDashboard({
   const workspaceSummaryChips =
     activeWorkspace === "ai-studio"
       ? aiStudioDistribution(AI_STUDIO_SERVICES)
+      : activeWorkspace === "google-ai-suite"
+      ? aiStudioDistribution(GOOGLE_AI_SUITE_SERVICES)
       : activeWorkspace === "projects"
       ? platformDistribution(effectiveProjects)
       : activeWorkspace === "templates"
@@ -2464,6 +2516,10 @@ export default function ProjectDashboard({
   const avgSpendPerDay = spendDays > 0 ? totalSpend / spendDays : 0
   const spendBuckets = buildSpendBuckets(spendTransactions, spendRange)
   const usageBreakdown = buildSpendBreakdown(spendTransactions, usageMode).slice(0, 4)
+  const spendPeak = spendBuckets.length ? Math.max(...spendBuckets) : 0
+  const spendTrendDelta =
+    spendBuckets.length >= 2 ? spendBuckets[spendBuckets.length - 1] - spendBuckets[spendBuckets.length - 2] : 0
+  const spendTrendLabel = spendTrendDelta > 0 ? rt("Rising") : spendTrendDelta < 0 ? rt("Cooling") : rt("Stable")
   const topUsageLabel = usageBreakdown[0]?.label || "-"
   const topUsagePercent = usageBreakdown[0]?.percent || 0
   const planFeatureItems = [
@@ -2473,13 +2529,13 @@ export default function ProjectDashboard({
   ]
   const showPlanPopover = planPopoverPinned || planPopoverHover
   const workspacePipeline =
-    activeWorkspace === "ai-studio"
+    activeWorkspace === "ai-studio" || activeWorkspace === "google-ai-suite"
       ? ([
-          ["all", rt("All"), aiStudioCounts.all, "var(--pd-text-3)", () => setAIStudioFilter("all")],
-          ["creation", rt("Creation"), aiStudioCounts.creation, "var(--pd-blue)", () => setAIStudioFilter("creation")],
-          ["optimization", rt("Optimization"), aiStudioCounts.optimization, "var(--pd-amber)", () => setAIStudioFilter("optimization")],
-          ["growth", rt("Growth"), aiStudioCounts.growth, "var(--pd-green)", () => setAIStudioFilter("growth")],
-          ["autonomy", rt("Autonomy"), aiStudioCounts.autonomy, "#c084fc", () => setAIStudioFilter("autonomy")],
+          ["all", rt("All"), activeWorkspace === "google-ai-suite" ? googleAiSuiteCounts.all : aiStudioCounts.all, "var(--pd-text-3)", () => setAIStudioFilter("all")],
+          ["creation", rt("Creation"), activeWorkspace === "google-ai-suite" ? googleAiSuiteCounts.creation : aiStudioCounts.creation, "var(--pd-blue)", () => setAIStudioFilter("creation")],
+          ["optimization", rt("Optimization"), activeWorkspace === "google-ai-suite" ? googleAiSuiteCounts.optimization : aiStudioCounts.optimization, "var(--pd-amber)", () => setAIStudioFilter("optimization")],
+          ["growth", rt("Growth"), activeWorkspace === "google-ai-suite" ? googleAiSuiteCounts.growth : aiStudioCounts.growth, "var(--pd-green)", () => setAIStudioFilter("growth")],
+          ["autonomy", rt("Autonomy"), activeWorkspace === "google-ai-suite" ? googleAiSuiteCounts.autonomy : aiStudioCounts.autonomy, "#c084fc", () => setAIStudioFilter("autonomy")],
         ] as const)
       : activeWorkspace === "projects"
       ? ([
@@ -2506,7 +2562,7 @@ export default function ProjectDashboard({
         ] as const)
 
   const isPipelineFilterActive = (value: string) => {
-    if (activeWorkspace === "ai-studio") return aiStudioFilter === value
+    if (activeWorkspace === "ai-studio" || activeWorkspace === "google-ai-suite") return aiStudioFilter === value
     if (activeWorkspace === "projects") return stageFilter === value
     if (activeWorkspace === "templates") return templateFilter === value
     return exportFilter === value
@@ -2607,6 +2663,11 @@ export default function ProjectDashboard({
       handler: () => setActiveWorkspace("ai-studio"),
     },
     {
+      key: "5",
+      modifiers: ["meta"],
+      handler: () => setActiveWorkspace("google-ai-suite"),
+    },
+    {
       key: "1",
       modifiers: ["ctrl"],
       handler: () => setActiveWorkspace("projects"),
@@ -2625,6 +2686,11 @@ export default function ProjectDashboard({
       key: "4",
       modifiers: ["ctrl"],
       handler: () => setActiveWorkspace("ai-studio"),
+    },
+    {
+      key: "5",
+      modifiers: ["ctrl"],
+      handler: () => setActiveWorkspace("google-ai-suite"),
     },
     {
       key: ",",
@@ -3095,12 +3161,13 @@ export default function ProjectDashboard({
   const loadDashboard = async () => {
     setLoading(true)
     try {
-      const [projectData, currentBalance, currentPlan, creditTransactions, settingsData] = await Promise.all([
+      const [projectData, currentBalance, currentPlan, creditTransactions, settingsData, keysData] = await Promise.all([
         apiGetProjects(),
         apiGetBalance().catch(() => null),
         apiGetPlan().catch(() => null),
         apiGetCreditsTransactions().catch(() => ({ ok: false, transactions: [] as CreditTransaction[] })),
         apiFetch<{ ok?: boolean; settings?: SettingsSnapshot }>("/api/settings").catch(() => null),
+        apiFetch<{ ok?: boolean; keys?: ApiKeySnapshot[] }>("/api/keys").catch(() => null),
       ])
       setProjects(
         projectData.map(project => ({
@@ -3132,6 +3199,19 @@ export default function ProjectDashboard({
           setTheme(resolveThemePreference())
         }
       }
+      setAvailableModelsSnapshot(
+        buildAvailableModels(
+          (keysData?.keys || []).flatMap((key) =>
+            Array.isArray(key.detected_models)
+              ? key.detected_models.map((model) => ({
+                  value: String(model.value || "").trim(),
+                  label: String(model.label || "").trim(),
+                  provider: key.provider,
+                }))
+              : [],
+          ),
+        ),
+      )
       await loadTemplates()
     } catch (error) {
       toast.error(errMsg(error))
@@ -3564,7 +3644,7 @@ export default function ProjectDashboard({
     onLogout()
   }
 
-  const dashboardModelGroups = getTopActiveModelsByCategory(settingsSnapshot.disabled_models, 3)
+  const dashboardModelGroups = getActiveModelsByCategory(availableModelsSnapshot, settingsSnapshot.disabled_models)
     .filter(group => group.models.length > 0)
   const activeSearchResult = searchResults[searchActiveIndex] || null
   const searchDropdownId = "pd-global-search-results"
@@ -3578,6 +3658,7 @@ export default function ProjectDashboard({
         { keys: "⌘2", desc: "Go to Templates" },
         { keys: "⌘3", desc: "Go to Exports" },
         { keys: "⌘4", desc: "Go to AI Studio" },
+        { keys: "⌘5", desc: "Go to Google AI Suite" },
       ],
     },
     {
@@ -3727,6 +3808,16 @@ export default function ProjectDashboard({
               <span className="pd-sidebar-pill">{AI_STUDIO_SERVICES.length}</span>
             </button>
             <button
+              className={`pd-sidebar-item ${activeWorkspace === "google-ai-suite" ? "is-active" : ""}`}
+              type="button"
+              onClick={() => setActiveWorkspace("google-ai-suite")}
+              aria-pressed={activeWorkspace === "google-ai-suite"}
+            >
+              <span className="pd-sidebar-icon">G</span>
+              {rt("Google AI Suite")}
+              <span className="pd-sidebar-pill">{GOOGLE_AI_SUITE_SERVICES.length}</span>
+            </button>
+            <button
               className={`pd-sidebar-item ${activeWorkspace === "projects" ? "is-active" : ""}`}
               type="button"
               onClick={() => setActiveWorkspace("projects")}
@@ -3770,14 +3861,14 @@ export default function ProjectDashboard({
               <span className="pd-sidebar-icon">*</span>
               {rt("AI generator")}
             </button>
-            <button className="pd-sidebar-item" type="button" onClick={() => toast.warning(rt("SEO optimizer is currently in beta"))}>
-              <span className="pd-sidebar-icon">SEO</span>
-              {rt("SEO optimizer")}
+            <button className="pd-sidebar-item" type="button" onClick={() => toast.warning(rt("SEO cockpit is coming soon"))}>
+              <span className="pd-sidebar-icon">SR</span>
+              {rt("SEO cockpit")}
               <span className="pd-sidebar-pill">{rt("beta")}</span>
             </button>
-            <button className="pd-sidebar-item" type="button" onClick={() => toast.warning(rt("Hosting is currently in beta"))}>
-              <span className="pd-sidebar-icon">C</span>
-              {rt("Hosting")}
+            <button className="pd-sidebar-item" type="button" onClick={() => toast.warning(rt("Cloud publish is coming soon"))}>
+              <span className="pd-sidebar-icon">CLD</span>
+              {rt("Cloud publish")}
               <span className="pd-sidebar-pill">{rt("beta")}</span>
             </button>
           </div>
@@ -3986,7 +4077,7 @@ export default function ProjectDashboard({
                 </select>
               </>
             ) : null}
-            {activeWorkspace === "ai-studio" ? (
+            {isStudioWorkspace ? (
               <button
                 className="pd-btn pd-btn-primary"
                 type="button"
@@ -4030,6 +4121,12 @@ export default function ProjectDashboard({
               <span className="pd-stat-label">{rt("Spending")}</span>
               <span className="pd-stat-value">EUR{totalSpend.toFixed(2)}</span>
               <div className="pd-stat-sub">Avg/day EUR{avgSpendPerDay.toFixed(2)} · {spendTransactionsCount} tx</div>
+              <div className="pd-spend-metrics">
+                <span className="pd-spend-metric-chip">{rt("Peak")} {spendPeak.toFixed(0)}%</span>
+                <span className={`pd-spend-metric-chip ${spendTrendDelta > 0 ? "is-up" : spendTrendDelta < 0 ? "is-down" : ""}`}>
+                  {spendTrendLabel}
+                </span>
+              </div>
               <div className="pd-spend-tabs">
                 {(["1h", "24h", "7d", "30d"] as SpendRange[]).map(range => (
                   <button
@@ -4055,6 +4152,7 @@ export default function ProjectDashboard({
 
             <section className="pd-stat">
               <span className="pd-stat-label">{rt("Usage")}</span>
+              <span className="pd-stat-value pd-stat-value-usage">{topUsagePercent}%</span>
               <div className="pd-stat-sub">Top: {topUsageLabel} ({topUsagePercent}%)</div>
               <div className="pd-usage-toggle-row">
                 <button
@@ -4150,7 +4248,7 @@ export default function ProjectDashboard({
                   <div key={index} className="pd-card pd-card-skeleton" />
                 ))}
               </div>
-            ) : activeWorkspace === "ai-studio" && filteredAIStudioServices.length > 0 ? (
+            ) : isStudioWorkspace && filteredStudioServices.length > 0 ? (
               <div className="pd-ai-studio-layout">
                 <div className="pd-studio-tools">
                   <div className="pd-studio-quickrun">
@@ -4232,7 +4330,7 @@ export default function ProjectDashboard({
                   <div className="pd-studio-catalog">
                     <h2 className="pd-studio-section-title">{rt("AI Studio Catalog")}</h2>
                     <div className="pd-projects-grid">
-                      {filteredAIStudioServices.map(service => (
+                      {filteredStudioServices.map(service => (
                         <AIStudioCard
                           key={service.id}
                           service={service}
@@ -4344,6 +4442,8 @@ export default function ProjectDashboard({
                 <div className="pd-empty-title">
                   {activeWorkspace === "ai-studio"
                     ? rt("No AI services match this view")
+                    : activeWorkspace === "google-ai-suite"
+                    ? rt("No Google AI Suite workflows match this view")
                     : activeWorkspace === "projects"
                     ? rt("No projects yet")
                     : activeWorkspace === "templates"
@@ -4353,6 +4453,8 @@ export default function ProjectDashboard({
                 <div className="pd-empty-copy">
                   {activeWorkspace === "ai-studio"
                     ? rt("Try another filter or clear the search to reveal the full AI Studio catalog.")
+                    : activeWorkspace === "google-ai-suite"
+                    ? rt("Try another filter or clear the search to reveal Google AI Suite workflows.")
                     : activeWorkspace === "projects"
                     ? rt("Create a new project or use the AI generator to get started.")
                     : activeWorkspace === "templates"
@@ -4360,7 +4462,7 @@ export default function ProjectDashboard({
                     : rt("Export a project from the editor and it will show up here.")}
                 </div>
                 <div className="pd-empty-actions">
-                  {activeWorkspace === "ai-studio" ? (
+                  {isStudioWorkspace ? (
                     <>
                       <button
                         className="pd-btn pd-btn-primary"

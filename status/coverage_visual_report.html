@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reframe Coverage Report</title>
+    <style>
+      :root {
+        --bg: #f3efe6;
+        --paper: #fffdf8;
+        --ink: #1a1a18;
+        --muted: #5a5a54;
+        --line: #d9d2c6;
+        --full: #1f8a5f;
+        --partial: #d8841f;
+        --todo: #c03b2b;
+        --accent: #1b6ea8;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Avenir Next", "Gill Sans", "Trebuchet MS", sans-serif;
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 85% 10%, rgba(27, 110, 168, 0.12), transparent 40%),
+          radial-gradient(circle at 10% 90%, rgba(31, 138, 95, 0.12), transparent 38%),
+          var(--bg);
+      }
+
+      .wrap {
+        max-width: 1160px;
+        margin: 0 auto;
+        padding: 28px 18px 56px;
+      }
+
+      .hero {
+        background: linear-gradient(132deg, #163040, #2a4f61 55%, #7a4f2f);
+        color: #f8f6f1;
+        border-radius: 22px;
+        padding: 28px;
+        box-shadow: 0 18px 46px rgba(14, 28, 36, 0.22);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .hero::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: repeating-linear-gradient(
+          -40deg,
+          rgba(255, 255, 255, 0.08),
+          rgba(255, 255, 255, 0.08) 2px,
+          transparent 2px,
+          transparent 14px
+        );
+        mix-blend-mode: soft-light;
+        opacity: 0.25;
+        pointer-events: none;
+      }
+
+      .kicker {
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        font-size: 12px;
+        opacity: 0.9;
+      }
+
+      h1 {
+        margin: 10px 0 8px;
+        font-size: clamp(1.8rem, 4vw, 2.9rem);
+        line-height: 1.07;
+      }
+
+      .sub {
+        max-width: 72ch;
+        color: rgba(250, 247, 240, 0.9);
+      }
+
+      .grid {
+        margin-top: 20px;
+        display: grid;
+        gap: 14px;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .card {
+        background: var(--paper);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 14px;
+        box-shadow: 0 8px 20px rgba(46, 44, 39, 0.07);
+      }
+
+      .card .label {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+
+      .card .value {
+        margin-top: 8px;
+        font-size: clamp(1.35rem, 3vw, 2rem);
+        font-weight: 700;
+      }
+
+      .row {
+        display: grid;
+        gap: 14px;
+        grid-template-columns: minmax(280px, 370px) minmax(0, 1fr);
+        margin-top: 18px;
+      }
+
+      .donut-wrap {
+        display: grid;
+        place-items: center;
+        min-height: 280px;
+      }
+
+      .donut {
+        width: 220px;
+        aspect-ratio: 1;
+        border-radius: 50%;
+        background: conic-gradient(
+          var(--full) 0% 68%,
+          var(--partial) 68% 95%,
+          var(--todo) 95% 100%
+        );
+        position: relative;
+        box-shadow: 0 12px 30px rgba(22, 34, 29, 0.2);
+      }
+
+      .donut::after {
+        content: "";
+        position: absolute;
+        inset: 24px;
+        border-radius: 50%;
+        background: var(--paper);
+        border: 1px solid var(--line);
+      }
+
+      .donut-center {
+        position: absolute;
+        text-align: center;
+        z-index: 2;
+      }
+
+      .donut-center strong {
+        display: block;
+        font-size: 2rem;
+      }
+
+      .legend {
+        margin-top: 14px;
+        width: 100%;
+      }
+
+      .legend-item {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 8px 0;
+        border-bottom: 1px dashed var(--line);
+        font-size: 0.95rem;
+      }
+
+      .dot {
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        display: inline-block;
+        margin-right: 8px;
+      }
+
+      .dot.full {
+        background: var(--full);
+      }
+
+      .dot.partial {
+        background: var(--partial);
+      }
+
+      .dot.todo {
+        background: var(--todo);
+      }
+
+      .bars {
+        display: grid;
+        gap: 12px;
+      }
+
+      .bar-row {
+        display: grid;
+        gap: 8px;
+      }
+
+      .bar-label {
+        display: flex;
+        justify-content: space-between;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      .bar-track {
+        height: 12px;
+        border-radius: 999px;
+        background: #ece6db;
+        overflow: hidden;
+      }
+
+      .bar-fill {
+        height: 100%;
+      }
+
+      .bar-fill.full {
+        width: 68%;
+        background: linear-gradient(90deg, #17724f, #31a071);
+      }
+
+      .bar-fill.partial {
+        width: 27%;
+        background: linear-gradient(90deg, #b86f18, #df993f);
+      }
+
+      .bar-fill.todo {
+        width: 5%;
+        background: linear-gradient(90deg, #a92c20, #cb4b3f);
+      }
+
+      .section {
+        margin-top: 18px;
+      }
+
+      .section h2 {
+        margin: 0 0 8px;
+      }
+
+      .todo-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .pill {
+        padding: 11px 12px;
+        border-radius: 12px;
+        border: 1px solid #efc8c3;
+        background: #fff4f2;
+        font-size: 0.93rem;
+      }
+
+      .pill b {
+        color: #7b1f15;
+      }
+
+      .note {
+        margin-top: 12px;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .meta {
+        margin-top: 14px;
+        padding-top: 12px;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 0.88rem;
+      }
+
+      @media (max-width: 980px) {
+        .grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .row {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+
+      @media (max-width: 620px) {
+        .grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .todo-grid {
+          grid-template-columns: minmax(0, 1fr);
+        }
+
+        .hero {
+          padding: 20px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <section class="hero">
+        <div class="kicker">Coverage Snapshot</div>
+        <h1>Reframe Feature Matrix<br />200 Punkte visualisiert</h1>
+        <p class="sub">
+          Diese Ansicht basiert auf der aktuellen Audit-Matrix. Damit siehst du sofort, was bereits klar nachgewiesen ist,
+          was nur teilweise abgedeckt ist und welche Punkte noch offen sind.
+        </p>
+      </section>
+
+      <section class="grid" aria-label="KPI-Karten">
+        <article class="card">
+          <div class="label">Gesamt</div>
+          <div class="value">200</div>
+        </article>
+        <article class="card">
+          <div class="label">Full</div>
+          <div class="value" style="color: var(--full)">136</div>
+        </article>
+        <article class="card">
+          <div class="label">Partial</div>
+          <div class="value" style="color: var(--partial)">54</div>
+        </article>
+        <article class="card">
+          <div class="label">Todo</div>
+          <div class="value" style="color: var(--todo)">10</div>
+        </article>
+      </section>
+
+      <section class="row" aria-label="Verteilung und offene Punkte">
+        <article class="card donut-wrap">
+          <div class="donut" role="img" aria-label="Verteilung Full, Partial, Todo">
+            <div class="donut-center">
+              <strong>95%</strong>
+              geprüft
+            </div>
+          </div>
+          <div class="legend">
+            <div class="legend-item">
+              <span><i class="dot full"></i>Full</span>
+              <b>136 (68%)</b>
+            </div>
+            <div class="legend-item">
+              <span><i class="dot partial"></i>Partial</span>
+              <b>54 (27%)</b>
+            </div>
+            <div class="legend-item">
+              <span><i class="dot todo"></i>Todo</span>
+              <b>10 (5%)</b>
+            </div>
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>Status-Balken</h2>
+          <div class="bars">
+            <div class="bar-row">
+              <div class="bar-label"><span>Full</span><span>136/200</span></div>
+              <div class="bar-track"><div class="bar-fill full"></div></div>
+            </div>
+            <div class="bar-row">
+              <div class="bar-label"><span>Partial</span><span>54/200</span></div>
+              <div class="bar-track"><div class="bar-fill partial"></div></div>
+            </div>
+            <div class="bar-row">
+              <div class="bar-label"><span>Todo</span><span>10/200</span></div>
+              <div class="bar-track"><div class="bar-fill todo"></div></div>
+            </div>
+          </div>
+
+          <section class="section">
+            <h2>Offene 10 Todo-Features</h2>
+            <div class="todo-grid">
+              <div class="pill"><b>#73</b> Agent chaining</div>
+              <div class="pill"><b>#85</b> Headline generator</div>
+              <div class="pill"><b>#90</b> Ad copy suggestions</div>
+              <div class="pill"><b>#102</b> Meta title generation</div>
+              <div class="pill"><b>#103</b> Meta description generation</div>
+              <div class="pill"><b>#104</b> Keyword suggestions</div>
+              <div class="pill"><b>#105</b> Content gap analysis</div>
+              <div class="pill"><b>#110</b> Search snippet preview</div>
+              <div class="pill"><b>#116</b> Translation memory</div>
+              <div class="pill"><b>#126</b> Brand keyword alignment</div>
+            </div>
+          </section>
+
+          <p class="note">
+            Hinweis: Partial bedeutet „teilweise vorhanden“, aber noch nicht vollständig als End-to-End Feature abgesichert.
+          </p>
+
+          <div class="meta">
+            Datenquelle: status/master_coverage_matrix.md<br />
+            Audit-Stand: 14.03.2026
+          </div>
+        </article>
+      </section>
+    </main>
+  </body>
+</html>

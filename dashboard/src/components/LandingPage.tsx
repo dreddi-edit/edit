@@ -59,7 +59,7 @@ function Terminal() {
     <div className="lp-terminal">
       <div className="lp-terminal__bar">
         <span /><span /><span />
-        <div className="lp-terminal__title">reframe · agency workflow</div>
+        <div className="lp-terminal__title">reframe · autonomous web operations</div>
       </div>
       <div className="lp-terminal__body">
         {TERMINAL_LINES.map((line, i) =>
@@ -100,9 +100,9 @@ const FEATURES = [
   {
     icon: "🌍",
     tag: "Translation",
-    title: "50+ languages, layout intact",
-    body: "Translate any page without touching the DOM structure. Language variants stored separately. Switch between English, German, French and more with no re-translating needed.",
-    items: ["DOM-preserving translation", "50+ languages", "Manual segment overrides", "Language-variant share links"],
+    title: "All languages, layout intact",
+    body: "Translate any page without touching the DOM structure. Language variants stay isolated so teams can switch markets instantly without rework.",
+    items: ["DOM-preserving translation", "All languages", "Manual segment overrides", "Language-variant share links"],
   },
   {
     icon: "⚡",
@@ -178,7 +178,7 @@ const PLANS = [
     per: "/mo",
     sub: "5 projects · €16.50 credits",
     featured: false,
-    items: ["All 11 export formats", "Translation · 50+ languages", "Version history", "Claude Haiku AI"],
+    items: ["All 11 export formats", "Translation · all languages", "Version history", "Claude Haiku AI"],
     missing: ["AI Studio tools", "Teams"],
   },
   {
@@ -396,16 +396,16 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
               Early access · Agency-first
             </div>
             <h1 className="lp-hero__h1">
-              The site
+              The website
               <br />
-              migration
+              operations
               <br />
-              <em>engine.</em>
+              <em>system.</em>
             </h1>
             <p className="lp-hero__sub">
               Import any existing website. Edit it visually with AI.
               <br />
-              Export in whatever format your client needs.
+              Launch in whatever format and market your client needs.
             </p>
             <div className="lp-hero__btns">
               <button className="lp-btn lp-btn--primary lp-btn--lg" onClick={onEnter}>
@@ -418,7 +418,7 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
             <div className="lp-hero__stats">
               <AnimStat n={11} label="export formats" />
               <div className="lp-hero__stat-div" />
-              <AnimStat n={50} label="languages" suffix="+" />
+              <AnimStat n={120} label="all languages" />
               <div className="lp-hero__stat-div" />
               <AnimStat n={17} label="hours saved/project" suffix="h" />
             </div>

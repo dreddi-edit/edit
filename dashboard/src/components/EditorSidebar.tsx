@@ -487,7 +487,10 @@ export const EditorSidebar: React.FC<SidebarProps> = (props) => {
         title={props.isEditRailCollapsed ? "Expand tools" : "Collapse tools"}
         aria-label={props.isEditRailCollapsed ? "Expand editor tools" : "Collapse editor tools"}
       >
-        {props.isEditRailCollapsed ? ">" : "<"}
+        <span className="editor-panel__collapse-icon" aria-hidden="true">
+          {props.isEditRailCollapsed ? ">>" : "<<"}
+        </span>
+        <span className="editor-panel__collapse-label">{props.isEditRailCollapsed ? "Open" : "Hide"}</span>
       </button>
 
       {props.isEditRailCollapsed ? (
