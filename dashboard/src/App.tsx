@@ -2730,6 +2730,8 @@ useEffect(() => {
       <LandingPage
         onEnter={() => setView("auth")}
         onLearn={() => setView("learn")}
+        theme={theme}
+        onToggleTheme={() => setTheme((prev) => (prev === "dark" ? "light" : "dark"))}
       />
       <ToastContainer />
     </>

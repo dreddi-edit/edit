@@ -795,7 +795,7 @@ export default function SettingsPanel({
                   </button>
                 </div>
                 <p className="draft-settings-description" style={{ marginTop: 10, marginBottom: 0 }}>
-                  {t("Built-in for EN/DE/ES, Google-powered language packs for the rest of the top 50 languages.")}
+                  {t("Built-in for EN/DE/ES with Google-powered language packs for all supported languages.")}
                 </p>
               </Section>
 
@@ -934,7 +934,7 @@ export default function SettingsPanel({
           ) : null}
 
           {tab === "profile" ? (
-            <div className="draft-settings-pane" role="tabpanel" id="tabpanel-profile" aria-labelledby="tab-profile">
+            <div className="draft-settings-pane draft-settings-pane--profile" role="tabpanel" id="tabpanel-profile" aria-labelledby="tab-profile">
               <Section label={t("Profile Details")}>
                 <div className="draft-settings-list-card draft-settings-list-card--highlight" style={{ marginBottom: 14 }}>
                   <div className="draft-settings-list-main">

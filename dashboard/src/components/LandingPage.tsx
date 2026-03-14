@@ -1,12 +1,16 @@
 import React from 'react';
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
+import { useRuntimeTranslations, useTranslation } from "../i18n/useTranslation"
+import { applyThemeToDocument, persistThemeChoice } from "../utils/theme"
 import "./landing.css"
 
 interface LandingPageProps {
   onEnter: () => void
   onDemoRequest?: () => void
   onLearn?: () => void
+  theme?: "dark" | "light"
+  onToggleTheme?: () => void
 }
 
 function useVisible(threshold = 0.12) {
@@ -307,7 +311,7 @@ function InquiryForm() {
   )
 }
 
-function AnimStat({ n, label, prefix = "", suffix = "" }: { n: number; label: string; prefix?: string; suffix?: string }) {
+function AnimStat({ n, label, prefix = "", suffix = "", display }: { n: number; label: string; prefix?: string; suffix?: string; display?: string }) {
   const { ref, visible } = useVisible()
   const [count, setCount] = useState(0)
 
@@ -325,7 +329,7 @@ function AnimStat({ n, label, prefix = "", suffix = "" }: { n: number; label: st
 
   return (
     <div ref={ref} className="lp-stat">
-      <div className="lp-stat__num">{prefix}{count.toLocaleString()}{suffix}</div>
+      <div className="lp-stat__num">{display ?? `${prefix}${count.toLocaleString()}${suffix}`}</div>
       <div className="lp-stat__label">{label}</div>
     </div>
   )
@@ -349,8 +353,80 @@ function FAQItem({ q, a }: { q: string; a: string }) {
   )
 }
 
-export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
+const LANDING_RUNTIME_STRINGS = Array.from(new Set([
+  ...FEATURES.flatMap((feature) => [feature.tag, feature.title, feature.body, ...feature.items]),
+  ...COMPARE_ROWS.map((row) => row.label),
+  ...PLANS.flatMap((plan) => [plan.name, plan.sub, ...(plan.per ? [plan.per] : []), ...plan.items, ...plan.missing]),
+  ...FAQS.flatMap((faq) => [faq.q, faq.a]),
+  "Features",
+  "Compare",
+  "Pricing",
+  "FAQ",
+  "Early access",
+  "Sign in",
+  "Learn",
+  "Start free",
+  "Early access · Agency-first",
+  "The website",
+  "operations",
+  "system.",
+  "Import any existing website. Edit it visually with AI.",
+  "Launch in whatever format and market your client needs.",
+  "Start free - no card",
+  "export formats",
+  "all languages",
+  "hours saved/project",
+  "All",
+  "How it works",
+  "Four steps. One system.",
+  "Import",
+  "Understand",
+  "Edit + AI",
+  "Export + Deploy",
+  "Everything agencies need.",
+  "Nothing they don't.",
+  "How Reframe fits in.",
+  "Honest comparison for agencies that start with existing sites, not agencies building from scratch.",
+  "Capability",
+  "Reframe",
+  "Webflow",
+  "AI generators",
+  "Manual",
+  "ROI Calculator",
+  "Calculate your margin recovery.",
+  "Drag the sliders to match your workload.",
+  "Pay for AI. Not for projects.",
+  "Credits deduct only when you run AI, not for editing, exporting, or storing.",
+  "Most popular",
+  "Start free",
+  "Get started",
+  "Common questions.",
+  "Get in early.",
+  "We're onboarding the first wave of agencies manually, each with a live demo call and a direct line to the team.",
+  "Leave your email and we'll reach out within 48 hours.",
+  "Already have an account?",
+  "Contact",
+  "Request early access ->",
+]))
+
+export default function LandingPage({ onEnter, onLearn, theme = "dark", onToggleTheme }: LandingPageProps) {
   const [menuOpen, setMenuOpen] = useState(false)
+  const { t, lang } = useTranslation()
+  const rt = useRuntimeTranslations(lang, LANDING_RUNTIME_STRINGS, t)
+
+  const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark"
+    persistThemeChoice(next)
+    applyThemeToDocument(next)
+    onToggleTheme?.()
+  }
+
+  const workflowSteps = useMemo(() => [
+    { letter: "A", title: rt("Import"), desc: rt("Any URL, ZIP, HTML file, PDF brief, or screenshot. Semantic parsing turns it into a structured project in minutes.") },
+    { letter: "B", title: rt("Understand"), desc: rt("Pages, blocks, SEO, forms, navigation: all parsed before AI touches anything. Real context, not clipboard paste.") },
+    { letter: "C", title: rt("Edit + AI"), desc: rt("Visual block editor. AI rewrites with full project context. Translation. Approval queues. Version history.") },
+    { letter: "D", title: rt("Export + Deploy"), desc: rt("11 formats. One-click deploy to Firebase, Netlify, Vercel, WordPress, or Shopify.") },
+  ], [rt])
 
   const scrollTo = (id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth" })
@@ -358,7 +434,7 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
   }
 
   return (
-    <div className="lp">
+    <div className={`lp lp--${theme}`}>
       <nav className="lp-nav">
         <div className="lp-nav__inner">
           <div className="lp-nav__logo">
@@ -366,16 +442,17 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
             <span>Reframe</span>
           </div>
           <div className={`lp-nav__links ${menuOpen ? "lp-nav__links--open" : ""}`}>
-            <button onClick={() => scrollTo("features")}>Features</button>
-            <button onClick={() => scrollTo("compare")}>Compare</button>
-            <button onClick={() => scrollTo("pricing")}>Pricing</button>
-            <button onClick={() => scrollTo("faq")}>FAQ</button>
-            <button onClick={() => scrollTo("early-access")} className="lp-nav__cta-link">Early access</button>
+            <button onClick={() => scrollTo("features")}>{rt("Features")}</button>
+            <button onClick={() => scrollTo("compare")}>{rt("Compare")}</button>
+            <button onClick={() => scrollTo("pricing")}>{rt("Pricing")}</button>
+            <button onClick={() => scrollTo("faq")}>{rt("FAQ")}</button>
+            <button onClick={() => scrollTo("early-access")} className="lp-nav__cta-link">{rt("Early access")}</button>
           </div>
           <div className="lp-nav__actions">
-            <button className="lp-btn lp-btn--ghost" onClick={onEnter}>Sign in</button>
-            <button className="lp-btn lp-btn--ghost" onClick={() => onLearn?.()}>Learn</button>
-            <button className="lp-btn lp-btn--primary" onClick={onEnter}>Start free</button>
+            <button className="lp-btn lp-btn--ghost" onClick={toggleTheme}>{theme === "dark" ? "Light" : "Dark"}</button>
+            <button className="lp-btn lp-btn--ghost" onClick={onEnter}>{rt("Sign in")}</button>
+            <button className="lp-btn lp-btn--ghost" onClick={() => onLearn?.()}>{rt("Learn")}</button>
+            <button className="lp-btn lp-btn--primary" onClick={onEnter}>{rt("Start free")}</button>
             <button className="lp-nav__burger" onClick={() => setMenuOpen((o) => !o)} aria-label="Menu">
               <span /><span /><span />
             </button>
@@ -393,34 +470,34 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
           <div className="lp-hero__copy">
             <div className="lp-badge">
               <span className="lp-badge__dot" />
-              Early access · Agency-first
+              {rt("Early access · Agency-first")}
             </div>
             <h1 className="lp-hero__h1">
-              The website
+              {rt("The website")}
               <br />
-              operations
+              {rt("operations")}
               <br />
-              <em>system.</em>
+              <em>{rt("system.")}</em>
             </h1>
             <p className="lp-hero__sub">
-              Import any existing website. Edit it visually with AI.
+              {rt("Import any existing website. Edit it visually with AI.")}
               <br />
-              Launch in whatever format and market your client needs.
+              {rt("Launch in whatever format and market your client needs.")}
             </p>
             <div className="lp-hero__btns">
               <button className="lp-btn lp-btn--primary lp-btn--lg" onClick={onEnter}>
-                Start free - no card
+                {rt("Start free - no card")}
               </button>
               <button className="lp-btn lp-btn--ghost lp-btn--lg" onClick={() => onLearn?.()}>
-                Learn
+                {rt("Learn")}
               </button>
             </div>
             <div className="lp-hero__stats">
-              <AnimStat n={11} label="export formats" />
+              <AnimStat n={11} label={rt("export formats")} />
               <div className="lp-hero__stat-div" />
-              <AnimStat n={120} label="all languages" />
+              <AnimStat n={0} label={rt("all languages")} display={rt("All")} />
               <div className="lp-hero__stat-div" />
-              <AnimStat n={17} label="hours saved/project" suffix="h" />
+              <AnimStat n={17} label={rt("hours saved/project")} suffix="h" />
             </div>
           </div>
           <div className="lp-hero__demo">
@@ -446,15 +523,10 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
 
       <section className="lp-workflow">
         <div className="lp-section__inner">
-          <div className="lp-eyebrow">How it works</div>
-          <h2 className="lp-h2">Four steps. One system.</h2>
+          <div className="lp-eyebrow">{rt("How it works")}</div>
+          <h2 className="lp-h2">{rt("Four steps. One system.")}</h2>
           <div className="lp-workflow__steps">
-            {[
-              { letter: "A", title: "Import", desc: "Any URL, ZIP, HTML file, PDF brief, or screenshot. Semantic parsing turns it into a structured project in minutes." },
-              { letter: "B", title: "Understand", desc: "Pages, blocks, SEO, forms, navigation: all parsed before AI touches anything. Real context, not clipboard paste." },
-              { letter: "C", title: "Edit + AI", desc: "Visual block editor. AI rewrites with full project context. Translation. Approval queues. Version history." },
-              { letter: "D", title: "Export + Deploy", desc: "11 formats. One-click deploy to Firebase, Netlify, Vercel, WordPress, or Shopify." },
-            ].map((step, i) => (
+            {workflowSteps.map((step, i) => (
               <div key={i} className="lp-workflow__step">
                 <div className="lp-workflow__letter">{step.letter}</div>
                 <div className="lp-workflow__title">{step.title}</div>
@@ -467,15 +539,25 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
 
       <section id="features" className="lp-features">
         <div className="lp-section__inner">
-          <div className="lp-eyebrow">Features</div>
+          <div className="lp-eyebrow">{rt("Features")}</div>
           <h2 className="lp-h2">
-            Everything agencies need.
+            {rt("Everything agencies need.")}
             <br />
-            Nothing they don't.
+            {rt("Nothing they don't.")}
           </h2>
           <div className="lp-features__grid">
             {FEATURES.map((feature, index) => (
-              <FeatureCard key={index} feature={feature} index={index} />
+              <FeatureCard
+                key={index}
+                feature={{
+                  ...feature,
+                  tag: rt(feature.tag),
+                  title: rt(feature.title),
+                  body: rt(feature.body),
+                  items: feature.items.map((item) => rt(item)),
+                }}
+                index={index}
+              />
             ))}
           </div>
         </div>
@@ -573,8 +655,8 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
           </p>
           <InquiryForm />
           <div className="lp-early__or">
-            Already have an account?{" "}
-            <button className="lp-early__link" onClick={onEnter}>Sign in {"->"}</button>
+            {rt("Already have an account?")} {" "}
+            <button className="lp-early__link" onClick={onEnter}>{rt("Sign in")} {"->"}</button>
           </div>
         </div>
       </section>
@@ -587,10 +669,10 @@ export default function LandingPage({ onEnter, onLearn }: LandingPageProps) {
           </div>
           <div className="lp-footer__tagline">"Import. Edit. Export."</div>
           <div className="lp-footer__links">
-            <button onClick={onEnter}>Sign in</button>
-            <button onClick={() => scrollTo("pricing")}>Pricing</button>
-            <button onClick={() => scrollTo("faq")}>FAQ</button>
-            <button onClick={() => scrollTo("early-access")}>Contact</button>
+            <button onClick={onEnter}>{rt("Sign in")}</button>
+            <button onClick={() => scrollTo("pricing")}>{rt("Pricing")}</button>
+            <button onClick={() => scrollTo("faq")}>{rt("FAQ")}</button>
+            <button onClick={() => scrollTo("early-access")}>{rt("Contact")}</button>
           </div>
           <div className="lp-footer__copy">© 2025 Reframe · Early access</div>
         </div>

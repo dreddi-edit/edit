@@ -1027,6 +1027,35 @@ body[data-theme="light"] .pd-studio-result {
   font-size: 10.5px;
 }
 
+.pd-usage-spotlight {
+  margin-top: 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--pd-blue-border);
+  border-radius: var(--pd-radius-sm);
+  background: linear-gradient(135deg, rgba(96, 165, 250, 0.14), rgba(96, 165, 250, 0.04));
+  display: grid;
+  gap: 2px;
+}
+
+.pd-usage-spotlight-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--pd-text-3);
+}
+
+.pd-usage-spotlight-title {
+  font-size: 11px;
+  color: var(--pd-text);
+  line-height: 1.2;
+}
+
+.pd-usage-spotlight-sub {
+  font-size: 9.5px;
+  color: var(--pd-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
 .pd-stat-notes {
   gap: 8px;
 }
@@ -1142,6 +1171,16 @@ body[data-theme="light"] .pd-studio-result {
   gap: 2px;
   height: 20px;
   margin-top: 4px;
+}
+
+.pd-spend-caption {
+  margin-top: 7px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 9px;
+  color: var(--pd-text-3);
+  font-variant-numeric: tabular-nums;
 }
 
 .pd-spark-bar {
@@ -1371,6 +1410,8 @@ body[data-theme="light"] .pd-studio-result {
   gap: 4px;
   flex-wrap: wrap;
   margin-bottom: 9px;
+}
+
 .pd-spend-metrics {
   display: flex;
   gap: 6px;
@@ -1399,7 +1440,6 @@ body[data-theme="light"] .pd-studio-result {
   color: var(--pd-amber);
   border-color: var(--pd-amber-border);
   background: rgba(240, 165, 53, 0.1);
-}
 }
 
 .pd-tag {
@@ -3525,6 +3565,16 @@ textarea:focus-visible,
     gap: 10px;
     top: 0;
   }
+
+  .pd-toolbar-spacer {
+    display: none;
+  }
+
+  .pd-toolbar-search {
+    min-width: 0;
+  }
+}
+
 @media (max-width: 1320px) {
   .pd-header {
     height: auto;
@@ -3545,15 +3595,6 @@ textarea:focus-visible,
   }
 }
 
-  .pd-toolbar-spacer {
-    display: none;
-  }
-
-  .pd-toolbar-search {
-    min-width: 0;
-  }
-}
-
 @media (max-width: 640px) {
   .pd-card-actions {
     flex-direction: column;
@@ -3563,6 +3604,14 @@ textarea:focus-visible,
 @media (max-width: 980px) {
   .pd-body {
     flex-direction: column;
+  }
+
+  .pd-stats {
+    gap: 10px;
+  }
+
+  .pd-stat {
+    min-height: 182px;
   }
 
   .pd-sidebar {
@@ -3640,6 +3689,22 @@ textarea:focus-visible,
     align-items: flex-start;
     flex-direction: column;
     gap: 4px;
+  }
+
+  .pd-spend-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .pd-spend-caption {
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .pd-usage-label {
+    white-space: normal;
+    line-height: 1.3;
   }
 }
 

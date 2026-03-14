@@ -304,9 +304,68 @@ const GOOGLE_AI_SUITE_SERVICE_IDS: StudioToolId[] = [
   "brand-brain",
 ]
 
-const GOOGLE_AI_SUITE_SERVICES = AI_STUDIO_SERVICES.filter(service =>
-  GOOGLE_AI_SUITE_SERVICE_IDS.includes(service.id),
-)
+const GOOGLE_AI_SUITE_SERVICES: AIStudioService[] = [
+  {
+    id: "company-box",
+    badge: "API",
+    name: "Gemini Planning API",
+    tagline: "Structured planning from one brief",
+    description: "Use the Google-powered planning endpoint to generate project plans, offers, and structured deliverable maps.",
+    category: "creation",
+    accent: "#60a5fa",
+    surface: "linear-gradient(135deg, rgba(96, 165, 250, 0.18), rgba(30, 64, 175, 0.05))",
+    actionLabel: "Generate plan",
+    status: "Vite API",
+  },
+  {
+    id: "visual-product",
+    badge: "IMG",
+    name: "Image + Screenshot Analysis",
+    tagline: "Vision prompts with project context",
+    description: "Route screenshots and visual references through Google vision-enabled APIs and convert them into actionable product guidance.",
+    category: "creation",
+    accent: "#93c5fd",
+    surface: "linear-gradient(135deg, rgba(147, 197, 253, 0.18), rgba(30, 64, 175, 0.05))",
+    actionLabel: "Analyze visual",
+    status: "Vision",
+  },
+  {
+    id: "funnel-generator",
+    badge: "CMP",
+    name: "Campaign Generation API",
+    tagline: "Ads, pages, and nurture drafts",
+    description: "Generate campaign copy sets and funnel variants via Google-backed endpoints exposed through the dashboard API layer.",
+    category: "growth",
+    accent: "#f9a8d4",
+    surface: "linear-gradient(135deg, rgba(249, 168, 212, 0.18), rgba(157, 23, 77, 0.05))",
+    actionLabel: "Draft campaign",
+    status: "Marketing",
+  },
+  {
+    id: "global-expansion",
+    badge: "L10N",
+    name: "Translation + Locale Rollout",
+    tagline: "All supported languages via runtime translation",
+    description: "Drive translation and market-localization using Google translation services through the same runtime API used across the app.",
+    category: "growth",
+    accent: "#fcd34d",
+    surface: "linear-gradient(135deg, rgba(252, 211, 77, 0.18), rgba(146, 64, 14, 0.05))",
+    actionLabel: "Roll out locale",
+    status: "Localization",
+  },
+  {
+    id: "brand-brain",
+    badge: "MEM",
+    name: "Prompt Memory + Retrieval",
+    tagline: "Reusable context for all Google calls",
+    description: "Store and reuse tone, product facts, and output constraints so requests remain consistent across Vite API workflows.",
+    category: "autonomy",
+    accent: "#a5b4fc",
+    surface: "linear-gradient(135deg, rgba(165, 180, 252, 0.18), rgba(67, 56, 202, 0.05))",
+    actionLabel: "Open memory",
+    status: "Consistency",
+  },
+].filter(service => GOOGLE_AI_SUITE_SERVICE_IDS.includes(service.id))
 
 const STUDIO_TOOL_META: Record<StudioTool, StudioToolMeta> = {
   "company-box": {
@@ -475,6 +534,12 @@ const DASHBOARD_RUNTIME_STRINGS = Array.from(
         service.actionLabel,
         service.status,
         titleCaseFallback(service.category),
+      ]),
+      ...GOOGLE_AI_SUITE_SERVICES.flatMap(service => [
+        service.tagline,
+        service.description,
+        service.actionLabel,
+        service.status,
       ]),
       ...Object.values(STUDIO_TOOL_META).flatMap(meta => [
         meta.eyebrow,
@@ -2519,6 +2584,7 @@ export default function ProjectDashboard({
   const spendPeak = spendBuckets.length ? Math.max(...spendBuckets) : 0
   const spendTrendDelta =
     spendBuckets.length >= 2 ? spendBuckets[spendBuckets.length - 1] - spendBuckets[spendBuckets.length - 2] : 0
+  const currentSpendIntensity = spendBuckets.length ? spendBuckets[spendBuckets.length - 1] : 0
   const spendTrendLabel = spendTrendDelta > 0 ? rt("Rising") : spendTrendDelta < 0 ? rt("Cooling") : rt("Stable")
   const topUsageLabel = usageBreakdown[0]?.label || "-"
   const topUsagePercent = usageBreakdown[0]?.percent || 0
@@ -4148,6 +4214,10 @@ export default function ProjectDashboard({
                   />
                 ))}
               </div>
+              <div className="pd-spend-caption">
+                <span>{rt("Current intensity")}: {currentSpendIntensity.toFixed(0)}%</span>
+                <span>{rt("Peak")}: {spendPeak.toFixed(0)}%</span>
+              </div>
             </section>
 
             <section className="pd-stat">
@@ -4188,6 +4258,13 @@ export default function ProjectDashboard({
                   <div className="pd-usage-empty">{rt("No AI spend yet in this range.")}</div>
                 )}
               </div>
+              {usageBreakdown.length > 0 ? (
+                <div className="pd-usage-spotlight">
+                  <span className="pd-usage-spotlight-label">{rt("Highest share")}</span>
+                  <strong className="pd-usage-spotlight-title">{topUsageLabel}</strong>
+                  <span className="pd-usage-spotlight-sub">{topUsagePercent}% · EUR{usageBreakdown[0]?.amount.toFixed(2)}</span>
+                </div>
+              ) : null}
             </section>
 
             <section className="pd-stat pd-stat-notes">
